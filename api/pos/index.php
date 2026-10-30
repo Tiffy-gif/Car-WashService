@@ -181,6 +181,154 @@ if (!empty($_POST)) {
 
 $action = $_GET['action'] ?? $inputData['action'] ?? '';
 
+// Plain health-check action
+if ($action === 'ping' || $action === 'health') {
+    echo json_encode([
+        'success' => true,
+        'status' => 'healthy',
+        'device' => $device['device_name'] ?? 'Unknown'
+    ]);
+    exit;
+}
+
+// ========================================================
+// CENTRAL AUTHENTICATION & SESSION VALIDATION
+// ========================================================
+$DEVICE_ONLY_ACTIONS = [
+    'staff_login',
+    'sync_catalog',
+    'get_day_lock_status',
+    'ping',
+    'health'
+];
+
+$sessionUser = null;
+$verifiedUserId = 0;
+
+if (!in_array($action, $DEVICE_ONLY_ACTIONS, true)) {
+    // Read X-Staff-Token header
+    $staffToken = $_SERVER['HTTP_X_STAFF_TOKEN'] ?? '';
+    if (!$staffToken && function_exists('getallheaders')) {
+        $headers = getallheaders();
+        foreach ($headers as $k => $v) {
+            if (strcasecmp($k, 'X-Staff-Token') === 0) {
+                $staffToken = trim((string)$v);
+                break;
+            }
+        }
+    }
+    $staffToken = trim((string)$staffToken);
+
+    if ($staffToken === '') {
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'error' => 'SESSION_INVALID',
+            'message' => 'Staff session token required. Pass header X-Staff-Token.'
+        ]);
+        exit;
+    }
+
+    $tokenHash = hash('sha256', $staffToken);
+    $sessStmt = $pdo->prepare("
+        SELECT s.id AS session_id, s.token_hash, s.user_id, s.device_id, s.created_at, s.last_seen_at, s.expires_at,
+               u.username, u.full_name, u.role, u.status AS user_status
+        FROM pos_sessions s
+        JOIN users u ON u.id = s.user_id
+        WHERE s.token_hash = ?
+    ");
+    $sessStmt->execute([$tokenHash]);
+    $session = $sessStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$session) {
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'error' => 'SESSION_INVALID',
+            'message' => 'Invalid staff session token.'
+        ]);
+        exit;
+    }
+
+    if ($session['user_status'] !== 'active') {
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'error' => 'SESSION_INVALID',
+            'message' => 'Staff account is deactivated or inactive.'
+        ]);
+        exit;
+    }
+
+    if ((int)$session['device_id'] !== $authDeviceId) {
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'error' => 'SESSION_INVALID',
+            'message' => 'Session does not belong to this POS device.'
+        ]);
+        exit;
+    }
+
+    $nowTime = time();
+    $expiresTime = strtotime((string)$session['expires_at']);
+    if ($expiresTime <= $nowTime) {
+        $pdo->prepare("DELETE FROM pos_sessions WHERE id = ?")->execute([$session['session_id']]);
+        if ($action === 'staff_logout') {
+            echo json_encode(['success' => true, 'message' => 'Logged out successfully.']);
+            exit;
+        }
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'error' => 'SESSION_INVALID',
+            'message' => 'Staff session has expired (max 12 hours reached).'
+        ]);
+        exit;
+    }
+
+    $lastSeenTime = strtotime((string)($session['last_seen_at'] ?? $session['created_at']));
+    if (($nowTime - $lastSeenTime) > 3600) {
+        $pdo->prepare("DELETE FROM pos_sessions WHERE id = ?")->execute([$session['session_id']]);
+        if ($action === 'staff_logout') {
+            echo json_encode(['success' => true, 'message' => 'Logged out successfully.']);
+            exit;
+        }
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'error' => 'SESSION_INVALID',
+            'message' => 'Staff session has timed out due to 60 minutes of inactivity.'
+        ]);
+        exit;
+    }
+
+    // Slide last_seen_at
+    $pdo->prepare("UPDATE pos_sessions SET last_seen_at = CURRENT_TIMESTAMP, ip = ? WHERE id = ?")
+        ->execute([$clientIp, $session['session_id']]);
+
+    // Overwrite staff_id, user_id, cashier_id with verified user id and unset client staff_role
+    $verifiedUserId = (int)$session['user_id'];
+    $sessionUser = $session;
+    $GLOBALS['sessionUser'] = $session;
+    $GLOBALS['authUserId'] = $verifiedUserId;
+
+    $inputData['staff_id'] = $verifiedUserId;
+    $inputData['user_id'] = $verifiedUserId;
+    $inputData['cashier_id'] = $verifiedUserId;
+    unset($inputData['staff_role'], $inputData['role']);
+
+    $_POST['staff_id'] = $verifiedUserId;
+    $_POST['user_id'] = $verifiedUserId;
+    $_POST['cashier_id'] = $verifiedUserId;
+    unset($_POST['staff_role'], $_POST['role']);
+
+    $_GET['staff_id'] = $verifiedUserId;
+    $_GET['user_id'] = $verifiedUserId;
+    $_GET['cashier_id'] = $verifiedUserId;
+    unset($_GET['staff_role'], $_GET['role']);
+}
+
 // ========================================================
 // 1. ACTION: staff_login
 // Log in using the same staff accounts as this system
