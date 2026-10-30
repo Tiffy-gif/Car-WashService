@@ -50,12 +50,69 @@ $noActiveSamples = empty($activeSamples);
 $sampleDetail = $noActiveSamples ? '0 active sample accounts' : count($activeSamples) . ' active: ' . implode(', ', array_column($activeSamples, 'username'));
 printResult("No sample accounts active", $noActiveSamples, $sampleDetail);
 
-// 3. no pos_devices with test-like names
-$devStmt = $pdo->query("SELECT id, device_name, status FROM pos_devices WHERE (LOWER(device_name) LIKE '%test%' OR LOWER(device_name) LIKE '%demo%' OR LOWER(device_name) LIKE '%sample%') AND status = 'active'");
-$testDevices = $devStmt ? $devStmt->fetchAll(PDO::FETCH_ASSOC) : [];
-$noTestDevices = empty($testDevices);
-$deviceDetail = $noTestDevices ? '0 test-named devices' : count($testDevices) . ' found: ' . implode(', ', array_column($testDevices, 'device_name'));
-printResult("No test-like pos_devices", $noTestDevices, $deviceDetail);
+// 3. no pos_devices with key or name containing 'test'
+$knownTestKeyHashes = [
+    hash('sha256', 'pos_sec_test_key_8899aabb'),
+];
+$devStmt = $pdo->query("SELECT id, device_name, device_uid, api_key, api_key_hash, status FROM pos_devices");
+$allDevices = $devStmt ? $devStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+$badDevices = [];
+foreach ($allDevices as $dr) {
+    $hasTestName = (stripos($dr['device_name'], 'test') !== false || stripos($dr['device_uid'], 'test') !== false);
+    $hasTestKey = (!empty($dr['api_key']) && stripos($dr['api_key'], 'test') !== false);
+    $hasKnownTestHash = (!empty($dr['api_key_hash']) && in_array($dr['api_key_hash'], $knownTestKeyHashes, true));
+    if ($hasTestName || $hasTestKey || $hasKnownTestHash) {
+        $badDevices[] = "#{$dr['id']} '{$dr['device_name']}'";
+    }
+}
+$noBadDevices = empty($badDevices);
+$deviceDetail = $noBadDevices ? '0 test devices' : count($badDevices) . ' found: ' . implode(', ', $badDevices);
+printResult("No pos_devices with test key or name", $noBadDevices, $deviceDetail);
+
+// 3b. tv_display_code does not equal default 'tv-office-88'
+$tvStmt = $pdo->prepare("SELECT setting_value FROM settings WHERE setting_key = 'tv_display_code' LIMIT 1");
+$tvStmt->execute();
+$tvCode = (string)$tvStmt->fetchColumn();
+$tvCodeSafe = ($tvCode !== '' && $tvCode !== 'tv-office-88');
+printResult("tv_display_code is not 'tv-office-88'", $tvCodeSafe, $tvCodeSafe ? "Current: {$tvCode}" : "Equals default 'tv-office-88'");
+
+// 3c. Users owner/admin/cashier/washer1/washer2/mechanic1 do not verify against seed passwords
+$seedAccounts = [
+    'owner'     => ['admin123', '123456'],
+    'admin'     => ['111111', 'admin123'],
+    'cashier'   => ['cashier123', '123456'],
+    'washer1'   => ['washer123', '123456'],
+    'washer2'   => ['washer123', '123456'],
+    'mechanic1' => ['mechanic123', '123456'],
+];
+$unsecuredAccounts = [];
+$uStmt = $pdo->prepare("SELECT username, password_hash FROM users WHERE username = ?");
+foreach ($seedAccounts as $uname => $passwords) {
+    $uStmt->execute([$uname]);
+    $uRow = $uStmt->fetch(PDO::FETCH_ASSOC);
+    if ($uRow && !empty($uRow['password_hash'])) {
+        foreach ($passwords as $pwd) {
+            if (password_verify($pwd, $uRow['password_hash'])) {
+                $unsecuredAccounts[] = $uname;
+                break;
+            }
+        }
+    }
+}
+$noSeedPasswords = empty($unsecuredAccounts);
+printResult("No staff using known seed passwords", $noSeedPasswords, $noSeedPasswords ? "All seed passwords changed" : "Known seed password verified for: " . implode(', ', $unsecuredAccounts));
+
+// 3d. Folders Pos-Carwash/ or scratch/ do not exist in web root
+$rootPath = dirname(__DIR__);
+$forbiddenFolders = ['Pos-Carwash', 'scratch'];
+$existingForbidden = [];
+foreach ($forbiddenFolders as $folder) {
+    if (is_dir($rootPath . '/' . $folder)) {
+        $existingForbidden[] = $folder . '/';
+    }
+}
+$noForbiddenFolders = empty($existingForbidden);
+printResult("No Pos-Carwash/ or scratch/ in web root", $noForbiddenFolders, $noForbiddenFolders ? "Clean web root" : "Found: " . implode(', ', $existingForbidden));
 
 // 4. API_BASE_URL uses https
 $apiUrl = defined('API_BASE_URL') ? API_BASE_URL : '';
