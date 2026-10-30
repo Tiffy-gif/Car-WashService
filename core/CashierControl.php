@@ -6,18 +6,102 @@ require_once __DIR__ . '/AuditLogger.php';
 require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/Helpers.php';
 
+class ManagerPinThrottledException extends Exception {}
+
 class CashierControl {
+
+    /**
+     * Ensure pos_device_pin_attempts table exists for device-level rate limiting.
+     */
+    public static function ensurePinAttemptsTable(?PDO $pdo = null): void {
+        $pdo = $pdo ?? Database::getInstance();
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS pos_device_pin_attempts (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                device_id INT NOT NULL,
+                attempted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_dev_time (device_id, attempted_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+    }
+
+    /**
+     * Check if a POS device is throttled due to exceeding failed manager-PIN attempts.
+     * Max 10 failed manager-PIN attempts per device per 10 minutes.
+     */
+    public static function isDeviceThrottled(int $deviceId): bool {
+        if ($deviceId <= 0) {
+            return false;
+        }
+        $pdo = Database::getInstance();
+        self::ensurePinAttemptsTable($pdo);
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) 
+            FROM pos_device_pin_attempts 
+            WHERE device_id = ? AND attempted_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)
+        ");
+        $stmt->execute([$deviceId]);
+        return ((int)$stmt->fetchColumn()) >= 10;
+    }
+
+    /**
+     * Record a failed manager-PIN attempt for a device.
+     */
+    public static function recordFailedPinAttempt(int $deviceId): void {
+        if ($deviceId <= 0) {
+            return;
+        }
+        try {
+            $pdo = Database::getInstance();
+            self::ensurePinAttemptsTable($pdo);
+            $stmt = $pdo->prepare("INSERT INTO pos_device_pin_attempts (device_id, attempted_at) VALUES (?, NOW())");
+            $stmt->execute([$deviceId]);
+
+            // Periodic cleanup (5% chance): delete records older than 24 hours
+            if (mt_rand(1, 20) === 1) {
+                $pdo->exec("DELETE FROM pos_device_pin_attempts WHERE attempted_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)");
+            }
+        } catch (Exception $e) {
+            // Silently continue if attempt recording fails
+        }
+    }
+
+    /**
+     * Clear failed manager-PIN attempts for a device upon successful authentication.
+     */
+    public static function clearFailedPinAttempts(int $deviceId): void {
+        if ($deviceId <= 0) {
+            return;
+        }
+        try {
+            $pdo = Database::getInstance();
+            self::ensurePinAttemptsTable($pdo);
+            $stmt = $pdo->prepare("DELETE FROM pos_device_pin_attempts WHERE device_id = ?");
+            $stmt->execute([$deviceId]);
+        } catch (Exception $e) {
+            // Ignore
+        }
+    }
 
     /**
      * Verify Manager or Owner 6-digit PIN for sensitive action authorization.
      * Returns manager data on success, throws Exception on failure.
+     * Throws ManagerPinThrottledException if device failed 10+ attempts in 10 minutes.
      */
-    public static function verifyManagerPin(string $managerUsername, string $managerPin): array {
+    public static function verifyManagerPin(string $managerUsername, string $managerPin, ?int $deviceId = null): array {
         $managerUsername = trim($managerUsername);
         $managerPin = trim($managerPin);
 
+        $devId = $deviceId ?? ($GLOBALS['authDeviceId'] ?? null);
+        if ($devId !== null && (int)$devId > 0 && self::isDeviceThrottled((int)$devId)) {
+            throw new ManagerPinThrottledException("Too many failed manager PIN attempts from this device. Please wait 10 minutes.");
+        }
+
         if ($managerUsername === '' || $managerPin === '') {
-            throw new Exception("Manager username and 6-digit PIN are required.");
+            if ($devId !== null && (int)$devId > 0) {
+                self::recordFailedPinAttempt((int)$devId);
+            }
+            throw new Exception("Invalid manager credentials");
         }
 
         $pdo = Database::getInstance();
@@ -32,16 +116,25 @@ class CashierControl {
 
         if (!$mgr) {
             AuditLogger::log('MANAGER_PIN_FAILED', "Manager PIN verification failed for unknown username '{$managerUsername}'", 'auth');
-            throw new Exception("Manager username '{$managerUsername}' not found.");
+            if ($devId !== null && (int)$devId > 0) {
+                self::recordFailedPinAttempt((int)$devId);
+            }
+            throw new Exception("Invalid manager credentials");
         }
 
         if (!in_array($mgr['role'], ['owner', 'manager', 'system_admin'], true)) {
             AuditLogger::log('MANAGER_PIN_FAILED', "User '{$managerUsername}' has role '{$mgr['role']}' and cannot authorize manager actions.", 'auth');
-            throw new Exception("User '{$managerUsername}' does not have Manager or Owner privileges.");
+            if ($devId !== null && (int)$devId > 0) {
+                self::recordFailedPinAttempt((int)$devId);
+            }
+            throw new Exception("Invalid manager credentials");
         }
 
         if ($mgr['status'] !== 'active') {
-            throw new Exception("Manager account '{$managerUsername}' is inactive.");
+            if ($devId !== null && (int)$devId > 0) {
+                self::recordFailedPinAttempt((int)$devId);
+            }
+            throw new Exception("Invalid manager credentials");
         }
 
         // Lock check
@@ -52,6 +145,9 @@ class CashierControl {
 
         if (!password_verify($managerPin, $mgr['password_hash'])) {
             $attempts = (int)$mgr['failed_login_attempts'] + 1;
+            if ($devId !== null && (int)$devId > 0) {
+                self::recordFailedPinAttempt((int)$devId);
+            }
             if ($attempts >= 5) {
                 $lockUntil = date('Y-m-d H:i:s', time() + 600);
                 $pdo->prepare("UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?")->execute([$attempts, $lockUntil, $mgr['id']]);
@@ -60,12 +156,15 @@ class CashierControl {
             } else {
                 $pdo->prepare("UPDATE users SET failed_login_attempts = ? WHERE id = ?")->execute([$attempts, $mgr['id']]);
                 AuditLogger::log('MANAGER_PIN_FAILED', "Manager PIN authorization failed ({$attempts}/5) for '{$managerUsername}'", 'auth', (string)$mgr['id']);
-                throw new Exception("Invalid Manager PIN. (" . (5 - $attempts) . " attempts remaining before lockout)");
+                throw new Exception("Invalid manager credentials");
             }
         }
 
         // Reset failed attempts on success
         $pdo->prepare("UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?")->execute([$mgr['id']]);
+        if ($devId !== null && (int)$devId > 0) {
+            self::clearFailedPinAttempts((int)$devId);
+        }
 
         return [
             'manager_id'       => (int)$mgr['id'],

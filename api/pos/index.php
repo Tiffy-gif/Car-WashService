@@ -122,6 +122,7 @@ $pdo->prepare("UPDATE pos_devices SET last_seen_at = CURRENT_TIMESTAMP, last_ip 
     ->execute([$clientIp, $device['id']]);
 
 $authDeviceId = (int)($device['id'] ?? 0);
+$GLOBALS['authDeviceId'] = $authDeviceId;
 
 // System Revision Fingerprint Generator (Detects price, user and permission changes)
 function compute_system_revision(PDO $pdo, int $userId = 0): array {
@@ -2697,6 +2698,7 @@ if ($action === 'get_daily_report') {
     }
     
     $authDeviceId = (int)($device['id'] ?? 0);
+$GLOBALS['authDeviceId'] = $authDeviceId;
     $staffUserId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
     
     // Check if shop-wide total is requested
@@ -3407,6 +3409,9 @@ if ($action === 'open_drawer_no_sale') {
     try {
         $res = CashierControl::openDrawerNoSale($reason, $mgrUser, $mgrPin, $cashierId, $authDeviceId);
         echo json_encode($res);
+    } catch (ManagerPinThrottledException $e) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
     } catch (Exception $e) {
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
@@ -3433,6 +3438,9 @@ if ($action === 'spot_audit') {
     try {
         $res = CashierControl::conductSpotAudit($cashierId, $countedUsd, $countedKhr, $mgrUser, $mgrPin, $notes);
         echo json_encode($res);
+    } catch (ManagerPinThrottledException $e) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
     } catch (Exception $e) {
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
@@ -3470,6 +3478,9 @@ if ($action === 'process_refund') {
     try {
         $res = CashierControl::processRefund($orderId, $refundAmountUsd, $refundReason, $mgrUser, $mgrPin, $cashierId, true);
         echo json_encode($res);
+    } catch (ManagerPinThrottledException $e) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
     } catch (Exception $e) {
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
@@ -3490,6 +3501,9 @@ if ($action === 'close_day_zreport') {
     try {
         $res = CashierControl::closeDayZReport($mgrUser, $mgrPin, $countedUsd, $countedKhr, $notes);
         echo json_encode($res);
+    } catch (ManagerPinThrottledException $e) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
     } catch (Exception $e) {
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
@@ -3509,6 +3523,9 @@ if ($action === 'reopen_day') {
     try {
         $res = CashierControl::reopenClosedDay($targetDate, $reason, $mgrUser, $mgrPin);
         echo json_encode($res);
+    } catch (ManagerPinThrottledException $e) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
     } catch (Exception $e) {
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
@@ -3538,7 +3555,7 @@ if ($action === 'verify_manager_pin') {
     $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
 
     try {
-        $manager = CashierControl::verifyManagerPin($mgrUser, $mgrPin);
+        $manager = CashierControl::verifyManagerPin($mgrUser, $mgrPin, $authDeviceId);
         echo json_encode([
             'success' => true,
             'manager' => [
@@ -3548,6 +3565,9 @@ if ($action === 'verify_manager_pin') {
                 'role' => $manager['manager_role']
             ]
         ]);
+    } catch (ManagerPinThrottledException $e) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
     } catch (Exception $e) {
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
@@ -3622,6 +3642,9 @@ if ($action === 'approve_bank_transfer') {
     try {
         $res = BankTransferControl::approveTransfer($orderId, $mgrUser, $mgrPin, $notes);
         echo json_encode($res);
+    } catch (ManagerPinThrottledException $e) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
     } catch (Exception $e) {
         http_response_code(403);
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
