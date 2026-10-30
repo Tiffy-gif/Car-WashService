@@ -691,14 +691,16 @@ function initDatabase(bool $force = false): void {
         }
     }
 
-    // Ensure sample/default POS device exists
-    $devCount = (int)$pdo->query("SELECT COUNT(*) FROM pos_devices WHERE device_uid = 'POS-TERMINAL-01'")->fetchColumn();
-    if ($devCount === 0) {
-        $insDev = $pdo->prepare("
-            INSERT INTO pos_devices (device_name, device_uid, api_key, location, status)
-            VALUES ('Counter Terminal 1 (Tablet)', 'POS-TERMINAL-01', 'pos_sec_test_key_8899aabb', 'Lane 1 / Counter', 'active')
-        ");
-        $insDev->execute();
+    // Ensure sample/default POS device exists (ONLY in development)
+    if (defined('APP_ENV') && APP_ENV === 'development') {
+        $devCount = (int)$pdo->query("SELECT COUNT(*) FROM pos_devices WHERE device_uid = 'POS-TERMINAL-01'")->fetchColumn();
+        if ($devCount === 0) {
+            $insDev = $pdo->prepare("
+                INSERT INTO pos_devices (device_name, device_uid, api_key, location, status)
+                VALUES ('Counter Terminal 1 (Tablet)', 'POS-TERMINAL-01', 'pos_sec_test_key_8899aabb', 'Lane 1 / Counter', 'active')
+            ");
+            $insDev->execute();
+        }
     }
 
     // Check if we need to seed initial demo data
@@ -716,23 +718,25 @@ function initDatabase(bool $force = false): void {
 }
 
 function seedSampleData(PDO $pdo): void {
-    // 1. Seed Users (Owner, Cashier, Washers, Mechanic)
-    $ownerRoleId = (int)$pdo->query("SELECT id FROM roles WHERE code = 'owner'")->fetchColumn() ?: null;
-    $cashierRoleId = (int)$pdo->query("SELECT id FROM roles WHERE code = 'cashier'")->fetchColumn() ?: null;
-    $washerRoleId = (int)$pdo->query("SELECT id FROM roles WHERE code = 'washer'")->fetchColumn() ?: null;
-    $mechanicRoleId = (int)$pdo->query("SELECT id FROM roles WHERE code = 'mechanic'")->fetchColumn() ?: null;
+    // 1. Seed Users (Owner, Cashier, Washers, Mechanic) - ONLY in development
+    if (defined('APP_ENV') && APP_ENV === 'development') {
+        $ownerRoleId = (int)$pdo->query("SELECT id FROM roles WHERE code = 'owner'")->fetchColumn() ?: null;
+        $cashierRoleId = (int)$pdo->query("SELECT id FROM roles WHERE code = 'cashier'")->fetchColumn() ?: null;
+        $washerRoleId = (int)$pdo->query("SELECT id FROM roles WHERE code = 'washer'")->fetchColumn() ?: null;
+        $mechanicRoleId = (int)$pdo->query("SELECT id FROM roles WHERE code = 'mechanic'")->fetchColumn() ?: null;
 
-    $users = [
-        ['owner', password_hash('admin123', PASSWORD_DEFAULT), 'Bona Sok (Owner)', '012 334 556', 'owner', $ownerRoleId, 'percentage', 0.00],
-        ['cashier', password_hash('cashier123', PASSWORD_DEFAULT), 'Dara Chan (Cashier)', '098 776 543', 'cashier', $cashierRoleId, 'fixed', 0.00],
-        ['washer1', password_hash('washer123', PASSWORD_DEFAULT), 'Rathana Heng (Washer)', '087 112 233', 'washer', $washerRoleId, 'percentage', 25.00],
-        ['washer2', password_hash('washer123', PASSWORD_DEFAULT), 'Vannak Ouk (Washer)', '085 445 566', 'washer', $washerRoleId, 'fixed', 1.50],
-        ['mechanic1', password_hash('mechanic123', PASSWORD_DEFAULT), 'Sophea Pich (Mechanic)', '011 223 344', 'mechanic', $mechanicRoleId, 'percentage', 30.00],
-    ];
+        $users = [
+            ['owner', password_hash('admin123', PASSWORD_DEFAULT), 'Bona Sok (Owner)', '012 334 556', 'owner', $ownerRoleId, 'percentage', 0.00],
+            ['cashier', password_hash('cashier123', PASSWORD_DEFAULT), 'Dara Chan (Cashier)', '098 776 543', 'cashier', $cashierRoleId, 'fixed', 0.00],
+            ['washer1', password_hash('washer123', PASSWORD_DEFAULT), 'Rathana Heng (Washer)', '087 112 233', 'washer', $washerRoleId, 'percentage', 25.00],
+            ['washer2', password_hash('washer123', PASSWORD_DEFAULT), 'Vannak Ouk (Washer)', '085 445 566', 'washer', $washerRoleId, 'fixed', 1.50],
+            ['mechanic1', password_hash('mechanic123', PASSWORD_DEFAULT), 'Sophea Pich (Mechanic)', '011 223 344', 'mechanic', $mechanicRoleId, 'percentage', 30.00],
+        ];
 
-    $stmt = $pdo->prepare("INSERT INTO users (username, password_hash, full_name, phone, role, role_id, commission_type, commission_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    foreach ($users as $u) {
-        $stmt->execute($u);
+        $stmt = $pdo->prepare("INSERT INTO users (username, password_hash, full_name, phone, role, role_id, commission_type, commission_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        foreach ($users as $u) {
+            $stmt->execute($u);
+        }
     }
 
     // 2. Seed Services & Tiered Prices

@@ -509,60 +509,60 @@ function migrateFoundation(bool $force = false): bool {
 
     migrateLog("Role permissions linked.");
 
-    // 8. Seed / Update Built-in Sample Accounts with 6-digit PINs
-    // All built-in sample accounts use secure 6-digit PINs.
-    // admin -> 111111, others -> 123456
-    $sampleStaff = [
-        ['username' => 'admin',           'pin' => '111111', 'name' => 'System Admin',           'role' => 'system_admin',   'role_id' => $sysAdminId],
-        ['username' => 'owner',           'pin' => '123456', 'name' => 'Bona Sok (Owner)',        'role' => 'owner',          'role_id' => $ownerId],
-        ['username' => 'manager',         'pin' => '123456', 'name' => 'Vireak Chea (Manager)',   'role' => 'manager',        'role_id' => $managerId],
-        ['username' => 'crm',             'pin' => '123456', 'name' => 'Sophea Nuon (CRM)',       'role' => 'crm',            'role_id' => $crmId],
-        ['username' => 'cashier',         'pin' => '123456', 'name' => 'Dara Chan (Cashier)',     'role' => 'cashier',        'role_id' => $cashierId],
-        ['username' => 'stock_control',   'pin' => '123456', 'name' => 'Serey Vong (Warehouse)',  'role' => 'stock_control',  'role_id' => $stockId],
-        ['username' => 'technical',       'pin' => '123456', 'name' => 'Kosal Pich (Technical)',  'role' => 'technical',      'role_id' => $techId],
-        ['username' => 'washer',          'pin' => '123456', 'name' => 'Rathana Heng (Washer)',   'role' => 'washer',         'role_id' => $washerId],
-        ['username' => 'wash_supervisor', 'pin' => '123456', 'name' => 'Piseth Bun (Supervisor)', 'role' => 'wash_supervisor','role_id' => $supId],
-        ['username' => 'customer',        'pin' => '123456', 'name' => 'Customer Display TV',     'role' => 'customer',       'role_id' => $custId],
-    ];
+    // 8. Seed / Update Built-in Sample Accounts with 6-digit PINs (ONLY in development)
+    if (defined('APP_ENV') && APP_ENV === 'development') {
+        $sampleStaff = [
+            ['username' => 'admin',           'pin' => '111111', 'name' => 'System Admin',           'role' => 'system_admin',   'role_id' => $sysAdminId],
+            ['username' => 'owner',           'pin' => '123456', 'name' => 'Bona Sok (Owner)',        'role' => 'owner',          'role_id' => $ownerId],
+            ['username' => 'manager',         'pin' => '123456', 'name' => 'Vireak Chea (Manager)',   'role' => 'manager',        'role_id' => $managerId],
+            ['username' => 'crm',             'pin' => '123456', 'name' => 'Sophea Nuon (CRM)',       'role' => 'crm',            'role_id' => $crmId],
+            ['username' => 'cashier',         'pin' => '123456', 'name' => 'Dara Chan (Cashier)',     'role' => 'cashier',        'role_id' => $cashierId],
+            ['username' => 'stock_control',   'pin' => '123456', 'name' => 'Serey Vong (Warehouse)',  'role' => 'stock_control',  'role_id' => $stockId],
+            ['username' => 'technical',       'pin' => '123456', 'name' => 'Kosal Pich (Technical)',  'role' => 'technical',      'role_id' => $techId],
+            ['username' => 'washer',          'pin' => '123456', 'name' => 'Rathana Heng (Washer)',   'role' => 'washer',         'role_id' => $washerId],
+            ['username' => 'wash_supervisor', 'pin' => '123456', 'name' => 'Piseth Bun (Supervisor)', 'role' => 'wash_supervisor','role_id' => $supId],
+            ['username' => 'customer',        'pin' => '123456', 'name' => 'Customer Display TV',     'role' => 'customer',       'role_id' => $custId],
+        ];
 
-    $selUser = $pdo->prepare("SELECT id FROM users WHERE username = ?");
-    $insUser = $pdo->prepare("
-        INSERT INTO users (username, password_hash, full_name, phone, role, role_id, commission_type, commission_rate, status, is_sample_account)
-        VALUES (?, ?, ?, '012 345 678', ?, ?, 'percentage', 20.00, 'active', 1)
-    ");
-    $updUser = $pdo->prepare("
-        UPDATE users SET
-            password_hash = ?, full_name = ?, role = ?, role_id = ?, status = 'active',
-            is_sample_account = 1, failed_login_attempts = 0, locked_until = NULL, must_change_pin = 0
-        WHERE username = ?
-    ");
+        $selUser = $pdo->prepare("SELECT id FROM users WHERE username = ?");
+        $insUser = $pdo->prepare("
+            INSERT INTO users (username, password_hash, full_name, phone, role, role_id, commission_type, commission_rate, status, is_sample_account)
+            VALUES (?, ?, ?, '012 345 678', ?, ?, 'percentage', 20.00, 'active', 1)
+        ");
+        $updUser = $pdo->prepare("
+            UPDATE users SET
+                password_hash = ?, full_name = ?, role = ?, role_id = ?, status = 'active',
+                is_sample_account = 1, failed_login_attempts = 0, locked_until = NULL, must_change_pin = 0
+            WHERE username = ?
+        ");
 
-    foreach ($sampleStaff as $stf) {
-        $selUser->execute([$stf['username']]);
-        $existing = $selUser->fetch();
-        $pinHash = password_hash($stf['pin'], PASSWORD_DEFAULT);
-        if ($existing) {
-            $updUser->execute([$pinHash, $stf['name'], $stf['role'], $stf['role_id'], $stf['username']]);
-        } else {
-            $insUser->execute([$stf['username'], $pinHash, $stf['name'], $stf['role'], $stf['role_id']]);
+        foreach ($sampleStaff as $stf) {
+            $selUser->execute([$stf['username']]);
+            $existing = $selUser->fetch();
+            $pinHash = password_hash($stf['pin'], PASSWORD_DEFAULT);
+            if ($existing) {
+                $updUser->execute([$pinHash, $stf['name'], $stf['role'], $stf['role_id'], $stf['username']]);
+            } else {
+                $insUser->execute([$stf['username'], $pinHash, $stf['name'], $stf['role'], $stf['role_id']]);
+            }
         }
-    }
 
-    // Also ensure existing washer1 and mechanic1 work with PIN 123456
-    $legacySample = [
-        ['username' => 'washer1',   'pin' => '123456', 'role' => 'washer',    'role_id' => $washerId],
-        ['username' => 'washer2',   'pin' => '123456', 'role' => 'washer',    'role_id' => $washerId],
-        ['username' => 'mechanic1', 'pin' => '123456', 'role' => 'technical', 'role_id' => $techId],
-    ];
-    foreach ($legacySample as $ls) {
-        $selUser->execute([$ls['username']]);
-        if ($selUser->fetch()) {
-            $pdo->prepare("
-                UPDATE users SET
-                    password_hash = ?, role = ?, role_id = ?, status = 'active',
-                    is_sample_account = 1, failed_login_attempts = 0, locked_until = NULL
-                WHERE username = ?
-            ")->execute([password_hash($ls['pin'], PASSWORD_DEFAULT), $ls['role'], $ls['role_id'], $ls['username']]);
+        // Also ensure existing washer1 and mechanic1 work with PIN 123456
+        $legacySample = [
+            ['username' => 'washer1',   'pin' => '123456', 'role' => 'washer',    'role_id' => $washerId],
+            ['username' => 'washer2',   'pin' => '123456', 'role' => 'washer',    'role_id' => $washerId],
+            ['username' => 'mechanic1', 'pin' => '123456', 'role' => 'technical', 'role_id' => $techId],
+        ];
+        foreach ($legacySample as $ls) {
+            $selUser->execute([$ls['username']]);
+            if ($selUser->fetch()) {
+                $pdo->prepare("
+                    UPDATE users SET
+                        password_hash = ?, role = ?, role_id = ?, status = 'active',
+                        is_sample_account = 1, failed_login_attempts = 0, locked_until = NULL
+                    WHERE username = ?
+                ")->execute([password_hash($ls['pin'], PASSWORD_DEFAULT), $ls['role'], $ls['role_id'], $ls['username']]);
+            }
         }
     }
 

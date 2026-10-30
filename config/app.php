@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+// Application environment: 'production' or 'development'
+if (!defined('APP_ENV')) {
+    define('APP_ENV', 'production');
+}
+
 // Application settings
 if (!defined('APP_NAME')) {
     define('APP_NAME', 'Car Wash Service Pro');

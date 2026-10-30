@@ -54,17 +54,19 @@ function migrate_pos_devices(): void {
         try { $pdo->exec("ALTER TABLE orders ADD COLUMN idempotency_key VARCHAR(100) DEFAULT NULL"); } catch (Exception $e) {}
     }
 
-    // 3. Seed Default / Sample Approved POS Device
-    $devStmt = $pdo->prepare("SELECT COUNT(*) FROM pos_devices WHERE device_uid = 'POS-TERMINAL-01'");
-    $devStmt->execute();
-    if ((int)$devStmt->fetchColumn() === 0) {
-        $sampleKey = 'pos_sec_test_key_8899aabb';
-        $insDev = $pdo->prepare("
-            INSERT INTO pos_devices (device_name, device_uid, api_key, location, status)
-            VALUES ('Counter Terminal 1 (Tablet)', 'POS-TERMINAL-01', ?, 'Lane 1 / Counter', 'active')
-        ");
-        $insDev->execute([$sampleKey]);
-        migrateLog("Seeded default POS device: POS-TERMINAL-01 with API Key: {$sampleKey}");
+    // 3. Seed Default / Sample Approved POS Device (ONLY in development)
+    if (defined('APP_ENV') && APP_ENV === 'development') {
+        $devStmt = $pdo->prepare("SELECT COUNT(*) FROM pos_devices WHERE device_uid = 'POS-TERMINAL-01'");
+        $devStmt->execute();
+        if ((int)$devStmt->fetchColumn() === 0) {
+            $sampleKey = 'pos_sec_test_key_8899aabb';
+            $insDev = $pdo->prepare("
+                INSERT INTO pos_devices (device_name, device_uid, api_key, location, status)
+                VALUES ('Counter Terminal 1 (Tablet)', 'POS-TERMINAL-01', ?, 'Lane 1 / Counter', 'active')
+            ");
+            $insDev->execute([$sampleKey]);
+            migrateLog("Seeded default POS device: POS-TERMINAL-01 with API Key: {$sampleKey}");
+        }
     }
 
     migrateLog("POS API migration completed successfully!");
