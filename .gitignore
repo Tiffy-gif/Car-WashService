@@ -1,10 +1,15 @@
-# Sensitive demo credentials
-config/demo_accounts.php
-
-# Environment and logs
-.env
-storage/logs/*.log
-*.log
+# Storage and cache
+storage/
 
 # Dependencies
 node_modules/
+
+# Database dumps & SQL
+*.sql
+
+# Logs
+*.log
+
+# Sensitive credentials & config
+config/demo_accounts.php
+.env
