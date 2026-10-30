@@ -15,6 +15,21 @@ require_once dirname(__DIR__) . '/core/Backup.php';
 
 try {
     $pdo = Database::getInstance();
+
+    // Clean up expired POS sessions
+    try {
+        $isSqlite = (Database::getDriver() === 'sqlite');
+        $expiryClause = $isSqlite
+            ? "expires_at < datetime('now') OR last_seen_at < datetime('now', '-60 minutes')"
+            : "expires_at < NOW() OR last_seen_at < DATE_SUB(NOW(), INTERVAL 60 MINUTE)";
+        $deletedSessions = $pdo->exec("DELETE FROM pos_sessions WHERE {$expiryClause}");
+        if ($deletedSessions > 0) {
+            echo "Pruned {$deletedSessions} expired POS sessions.\n";
+        }
+    } catch (Throwable $t) {
+        // Continue if session pruning fails
+    }
+
     $res = Backup::runDailyBackup($pdo, null, 14);
 
     echo "SUCCESS: Backup saved to {$res['filename']} ({$res['size_kb']} KB)\n";

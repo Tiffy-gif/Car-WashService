@@ -127,6 +127,19 @@ $pdo->prepare("UPDATE pos_devices SET last_seen_at = CURRENT_TIMESTAMP, last_ip 
 $authDeviceId = (int)($device['id'] ?? 0);
 $GLOBALS['authDeviceId'] = $authDeviceId;
 
+// Opportunistic cleanup of expired POS sessions (~1 in 50 requests)
+if (mt_rand(1, 50) === 1) {
+    try {
+        $isSqlite = (Database::getDriver() === 'sqlite');
+        $expiryClause = $isSqlite
+            ? "expires_at < datetime('now') OR last_seen_at < datetime('now', '-60 minutes')"
+            : "expires_at < NOW() OR last_seen_at < DATE_SUB(NOW(), INTERVAL 60 MINUTE)";
+        $pdo->exec("DELETE FROM pos_sessions WHERE {$expiryClause}");
+    } catch (Throwable $t) {
+        // Silently continue
+    }
+}
+
 // System Revision Fingerprint Generator (Detects price, user and permission changes)
 function compute_system_revision(PDO $pdo, int $userId = 0): array {
     try {
