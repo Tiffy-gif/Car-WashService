@@ -14,6 +14,7 @@ require_once dirname(__DIR__, 2) . '/core/CashierControl.php';
 require_once dirname(__DIR__, 2) . '/core/BankTransferControl.php';
 require_once dirname(__DIR__, 2) . '/core/SmartQueueEngine.php';
 require_once dirname(__DIR__, 2) . '/core/MembershipManager.php';
+require_once dirname(__DIR__, 2) . '/core/AuditLogger.php';
 
 function getSlipFileFromInput(?string $base64Data, ?array $uploadedFile = null): ?array {
     if (!empty($uploadedFile) && !empty($uploadedFile['tmp_name'])) {
@@ -327,6 +328,165 @@ if (!in_array($action, $DEVICE_ONLY_ACTIONS, true)) {
     $_GET['user_id'] = $verifiedUserId;
     $_GET['cashier_id'] = $verifiedUserId;
     unset($_GET['staff_role'], $_GET['role']);
+}
+
+// ========================================================
+// CENTRAL PERMISSION MAP & AUTHORIZATION ENFORCEMENT
+// ========================================================
+$ACTION_PERMISSIONS = [
+    // Staff Session
+    'staff_logout' => ['*'],
+
+    // Catalog & Customers
+    'sync_customers' => ['customers.list'],
+    'add_customer_vehicle' => ['customers.add', 'customers.edit'],
+    'get_customer_membership' => ['memberships.view', 'customers.list', 'pos.access'],
+    'check_customer_membership' => ['memberships.view', 'customers.list', 'pos.access'],
+
+    // Upsell & CRM
+    'get_matching_upsells' => ['pos.create_order', 'pos.access'],
+    'get_upsell_offers' => ['pos.create_order', 'pos.access'],
+    'log_upsell_action' => ['pos.create_order', 'pos.access'],
+    'record_upsell_action' => ['pos.create_order', 'pos.access'],
+    'evaluate_cart_upsell' => ['pos.create_order', 'pos.access'],
+    'process_crm_reminders' => ['crm.reminders'],
+    'generate_reminders' => ['crm.reminders'],
+    'get_oil_reminders' => ['crm.reminders'],
+    'oil_followups' => ['crm.reminders'],
+    'get_oil_followups' => ['crm.reminders'],
+    'update_oil_contact' => ['crm.reminders'],
+    'record_oil_followup' => ['crm.reminders'],
+    'save_oil_followup' => ['crm.reminders'],
+
+    // Orders & Sales
+    'create_order' => ['pos.create_order'],
+    'sync_order_status' => ['pos.pay_order', 'orders.change_status'],
+    'pay_order' => ['pos.pay_order', 'orders.change_status'],
+    'get_today_orders' => ['orders.list', 'pos.access'],
+    'get_order' => ['orders.list', 'pos.access'],
+    'cancel_order' => ['pos.cancel_order', 'orders.cancel'],
+    'assign_crew' => ['orders.change_crew'],
+    'process_refund' => ['pos.cancel_order', 'orders.cancel'],
+    'submit_bank_transfer' => ['pos.pay_order'],
+    'approve_bank_transfer' => ['pos.pay_order'],
+
+    // Wash Bays & Queue
+    'get_queue' => ['bays.view'],
+    'get_bays_and_queue' => ['bays.view'],
+    'get_bays' => ['bays.view'],
+    'customer_arrived' => ['bays.arrive'],
+    'mark_arrived' => ['bays.arrive'],
+    'assign_bay' => ['bays.assign'],
+    'assign_car_to_bay' => ['bays.assign'],
+    'finish_car' => ['bays.finish'],
+    'finish_job' => ['bays.finish'],
+    'finish_bay' => ['bays.finish'],
+    'move_queue_car' => ['bays.move_queue'],
+    'queue_move_up' => ['bays.move_queue'],
+    'get_wait_times' => ['bays.view', 'pos.access'],
+
+    // Daily Reports & Cashier Shifts
+    'get_daily_report' => ['reports.view'],
+    'save_pos_closing' => ['daily_close.close'],
+    'close_day' => ['daily_close.close'],
+    'save_daily_close' => ['daily_close.close'],
+    'reopen_daily_close' => ['daily_close.close'],
+    'reopen_day' => ['daily_close.close'],
+    'get_daily_close_status' => ['daily_close.view'],
+    'daily_close_status' => ['daily_close.view'],
+    'get_day_status' => ['daily_close.view'],
+    'close_day_zreport' => ['daily_close.close'],
+    'shift_start' => ['pos.access'],
+    'shift_end' => ['pos.access'],
+    'get_shift_status' => ['pos.access'],
+    'open_drawer_no_sale' => ['pos.access'],
+    'spot_audit' => ['daily_close.view', 'reports.view'],
+    'verify_manager_pin' => ['pos.access'],
+
+    // Workshop & Mechanics
+    'save_repair_note' => ['mechanic_jobs.notes'],
+    'get_washer_jobs' => ['washer_jobs.view'],
+    'get_technical_jobs' => ['mechanic_jobs.view'],
+    'receive_from_wash' => ['mechanic_jobs.update'],
+    'start_tech_task' => ['mechanic_jobs.update'],
+    'finish_tech_task' => ['mechanic_jobs.update'],
+    'update_checklist_item' => ['inspection.manage', 'mechanic_jobs.update'],
+    'request_parts' => ['parts_requests.create'],
+    'finish_tech_job' => ['mechanic_jobs.update'],
+
+    // Notifications & System Sync
+    'get_notifications' => ['pos.access', 'bays.view', 'washer_jobs.view', 'mechanic_jobs.view'],
+    'check_system_updates' => ['pos.access', 'bays.view', 'washer_jobs.view', 'mechanic_jobs.view'],
+    'mark_notification_read' => ['pos.access', 'bays.view', 'washer_jobs.view', 'mechanic_jobs.view'],
+    'mark_all_notifications_read' => ['pos.access', 'bays.view', 'washer_jobs.view', 'mechanic_jobs.view'],
+
+    // Appointments & Recognition
+    'get_appointment_slots' => ['pos.access'],
+    'get_appointments' => ['pos.access'],
+    'create_appointment' => ['pos.access'],
+    'appointment_arrived' => ['bays.arrive', 'pos.access'],
+    'recognize_vehicle' => ['pos.access'],
+];
+
+if (!in_array($action, $DEVICE_ONLY_ACTIONS, true)) {
+    // 1. Default deny: Unmapped actions get 403 and UNMAPPED_ACTION audit log
+    if (!array_key_exists($action, $ACTION_PERMISSIONS)) {
+        if (class_exists('AuditLogger')) {
+            AuditLogger::log(
+                'UNMAPPED_ACTION',
+                "Unmapped POS API action '{$action}' attempted by user #{$verifiedUserId}",
+                'pos_api',
+                $action,
+                $verifiedUserId,
+                $sessionUser['username'] ?? null,
+                $sessionUser['role'] ?? null
+            );
+        }
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'UNMAPPED_ACTION',
+            'message' => "Forbidden: Action '{$action}' is not mapped or allowed."
+        ]);
+        exit;
+    }
+
+    // 2. Enforce action permissions centrally with Auth::userHasPermission
+    $requiredPerms = (array)$ACTION_PERMISSIONS[$action];
+    $isAllowed = false;
+
+    // Owners keep full access shortcut
+    if (($sessionUser['role'] ?? '') === 'owner') {
+        $isAllowed = true;
+    } else {
+        foreach ($requiredPerms as $perm) {
+            if ($perm === '*' || (class_exists('Auth') && Auth::userHasPermission($verifiedUserId, $perm))) {
+                $isAllowed = true;
+                break;
+            }
+        }
+    }
+
+    if (!$isAllowed) {
+        if (class_exists('AuditLogger')) {
+            AuditLogger::log(
+                'PERMISSION_DENIED',
+                "User #{$verifiedUserId} ({$sessionUser['username']}) lacked permission for action '{$action}'. Required: " . implode(', ', $requiredPerms),
+                'pos_api',
+                $action,
+                $verifiedUserId,
+                $sessionUser['username'] ?? null,
+                $sessionUser['role'] ?? null
+            );
+        }
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'PERMISSION_DENIED',
+            'message' => "You do not have permission to perform action '{$action}'."
+        ]);
+        exit;
+    }
 }
 
 // ========================================================
