@@ -74,13 +74,11 @@ if (empty($headers)) {
     }
 }
 $apiKey = $headers['X-Device-Key'] ?? $headers['x-device-key'] ?? $_SERVER['HTTP_X_DEVICE_KEY'] ?? null;
-if (!$apiKey && isset($headers['Authorization'])) {
-    if (preg_match('/Bearer\s+(\S+)/i', $headers['Authorization'], $matches)) {
+if (!$apiKey) {
+    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    if (!empty($authHeader) && preg_match('/Bearer\s+(\S+)/i', $authHeader, $matches)) {
         $apiKey = $matches[1];
     }
-}
-if (!$apiKey) {
-    $apiKey = $_GET['api_key'] ?? $_POST['api_key'] ?? null;
 }
 
 if (!$apiKey) {
