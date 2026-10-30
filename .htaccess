@@ -1,0 +1,48 @@
+# ====================================================================
+#  AquaGleam Car Wash & Detailing - Production Server Hardening
+#  Windows Mini-PC Local Web Server Security Rules
+# ====================================================================
+
+# 1. Disable Directory Browsing / Indexing
+Options -Indexes -MultiViews
+
+# 2. Block Hidden Files & Dotfiles (.git, .env, .htaccess, etc.)
+<FilesMatch "^\.">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# 3. Block Direct Web Access to Sensitive File Formats
+<FilesMatch "\.(sql|log|md|bat|sh|jsonl|ini|yml|yaml|env)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# 4. Block Direct Web Execution of Automated Test Files
+<FilesMatch "^test_.*\.php$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# 5. Block Access to Internal Folders (Only needed folders open to web)
+# Web should only directly access: index.php, tv.php, public/, and api/
+RewriteEngine On
+RewriteRule ^(config|core|database|storage|tests|docs|bin|scripts)/ - [F,L,NC]
+
+# 6. Security Headers (Safe Cookies, Clickjacking, MIME, CSP)
+<IfModule mod_headers.c>
+    # Prevent MIME Sniffing
+    Header always set X-Content-Type-Options "nosniff"
+
+    # Block Clickjacking
+    Header always set X-Frame-Options "SAMEORIGIN"
+
+    # XSS Protection
+    Header always set X-XSS-Protection "1; mode=block"
+
+    # Referrer Policy
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Content Security Policy (Enforce 100% self-contained local assets - no third-party CDNs)
+    Header always set Content-Security-Policy "default-src 'self' 'unsafe-inline' 'unsafe-eval' data:; font-src 'self' data:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval';"
+</IfModule>

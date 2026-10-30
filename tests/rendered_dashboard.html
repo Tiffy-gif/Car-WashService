@@ -1,0 +1,1579 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nav_dashboard - Car Wash &amp; Detailing</title>
+        <link rel="icon" type="image/png" href="/Car-WashService/public/uploads/logo_1792207707_9fdb4a82.png">
+        <!-- Anti-flicker Early Initialization -->
+    <script>
+    (function() {
+        try {
+            var savedTheme = localStorage.getItem('carwash_theme');
+            if (savedTheme) {
+                document.documentElement.setAttribute('data-theme', savedTheme);
+            }
+            if (localStorage.getItem('carwash_sidebar_collapsed') === 'true' && window.innerWidth > 1024) {
+                document.documentElement.classList.add('sidebar-collapsed');
+            }
+        } catch(e) {}
+    })();
+    </script>
+        <script>
+    window.CARWASH_APP = {
+        userId: 1,
+        userRole: "owner",
+        userName: "Bona Sok (Owner)",
+        soundMuted: true,
+        currentLang: "en",
+        baseUrl: "\/Car-WashService",
+        csrfToken: "d037efb7a6903cfd52ead7199cd49c70aaf914548d17efa4ec4aa26a48906c53",
+        activeTimecard: null    };
+    </script>
+        <!-- Font Awesome -->
+    <link rel="stylesheet" href="/Car-WashService/public/css/font-awesome.min.css">
+    <!-- Main Style (dynamic cache-buster ensures fresh CSS is always loaded) -->
+    <link rel="stylesheet" href="/Car-WashService/public/css/style.css?v=1793179378">
+    <style>
+    /* Critical Inline Styles for Side Menu Button & Drawer */
+    .sidebar-toggle-btn {
+        position: absolute;
+        right: -15px;
+        top: 55px;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background-color: var(--bg-surface, #ffffff);
+        border: 1px solid var(--border, #e2e8f0);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+        color: var(--text-muted, #64748b);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        z-index: 50;
+        transition: all 0.2s ease;
+        outline: none;
+        padding: 0;
+    }
+    .sidebar-toggle-btn:hover,
+    .sidebar-toggle-btn:focus-visible {
+        color: var(--primary, #0284c7);
+        border-color: var(--primary, #0284c7);
+        background-color: var(--bg-subtle, #f8fafc);
+        box-shadow: 0 2px 8px rgba(2, 132, 199, 0.25);
+    }
+    .sidebar-toggle-btn:focus-visible {
+        outline: 2px solid var(--primary, #0284c7);
+        outline-offset: 2px;
+    }
+    .brand {
+        height: 70px;
+        min-height: 70px;
+        max-height: 70px;
+        padding: 0 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid var(--border, #e2e8f0);
+        box-sizing: border-box;
+    }
+    .brand-icon {
+        width: 44px;
+        height: 44px;
+        flex-shrink: 0;
+    }
+    .brand-title {
+        font-size: 15px;
+        line-height: 1.2;
+    }
+    .brand-subtitle {
+        font-size: 11px;
+        line-height: 1.2;
+    }
+    .mobile-menu-btn {
+        display: none !important;
+    }
+    .mobile-sidebar-close {
+        display: none !important;
+    }
+    .sidebar.collapsed,
+    html.sidebar-collapsed .sidebar {
+        width: 72px !important;
+    }
+    .sidebar.collapsed .brand,
+    html.sidebar-collapsed .sidebar .brand {
+        height: 70px !important;
+        min-height: 70px !important;
+        max-height: 70px !important;
+        padding: 0 !important;
+        justify-content: center !important;
+        align-items: center !important;
+    }
+    .sidebar.collapsed .brand-text-wrap,
+    html.sidebar-collapsed .sidebar .brand-text-wrap {
+        display: none !important;
+    }
+    .sidebar.collapsed .brand-icon,
+    html.sidebar-collapsed .sidebar .brand-icon {
+        margin: 0 auto !important;
+    }
+    .sidebar.collapsed .nav-links,
+    html.sidebar-collapsed .sidebar .nav-links {
+        padding: 18px 0 !important;
+        align-items: center !important;
+        overflow-y: auto !important;
+        scrollbar-width: none !important;
+        -ms-overflow-style: none !important;
+    }
+    .sidebar.collapsed .nav-links::-webkit-scrollbar,
+    html.sidebar-collapsed .sidebar .nav-links::-webkit-scrollbar {
+        display: none !important;
+        width: 0 !important;
+        height: 0 !important;
+    }
+    .sidebar.collapsed .nav-links li,
+    html.sidebar-collapsed .sidebar .nav-links li {
+        width: 100% !important;
+        display: flex !important;
+        justify-content: center !important;
+    }
+    .sidebar.collapsed .nav-group,
+    html.sidebar-collapsed .sidebar .nav-group {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        width: 100% !important;
+    }
+    .sidebar.collapsed .nav-group-btn,
+    html.sidebar-collapsed .sidebar .nav-group-btn {
+        width: 48px !important;
+        height: 48px !important;
+        padding: 0 !important;
+        justify-content: center !important;
+        border-radius: var(--radius-md);
+        margin: 0 auto !important;
+        background: transparent;
+    }
+    .sidebar.collapsed .nav-group-btn .nav-group-icon,
+    html.sidebar-collapsed .sidebar .nav-group-btn .nav-group-icon {
+        margin: 0 !important;
+        font-size: 18px !important;
+        width: auto !important;
+        text-align: center !important;
+    }
+    .sidebar.collapsed .nav-group-title,
+    html.sidebar-collapsed .sidebar .nav-group-title,
+    .sidebar.collapsed .nav-group-arrow,
+    html.sidebar-collapsed .sidebar .nav-group-arrow,
+    .sidebar.collapsed .nav-sub-wrap,
+    html.sidebar-collapsed .sidebar .nav-sub-wrap {
+        display: none !important;
+    }
+    .sidebar.collapsed .nav-group.has-active .nav-group-btn,
+    html.sidebar-collapsed .sidebar .nav-group.has-active .nav-group-btn {
+        background-color: var(--primary-light) !important;
+        color: var(--primary) !important;
+    }
+    .sidebar.collapsed .nav-link,
+    html.sidebar-collapsed .sidebar .nav-link {
+        width: 48px !important;
+        height: 48px !important;
+        padding: 0 !important;
+        justify-content: center !important;
+        margin: 0 auto !important;
+    }
+    .sidebar.collapsed .nav-link i,
+    html.sidebar-collapsed .sidebar .nav-link i {
+        margin: 0 !important;
+        font-size: 18px !important;
+        width: auto !important;
+        text-align: center !important;
+    }
+    .sidebar.collapsed .nav-link span,
+    html.sidebar-collapsed .sidebar .nav-link span {
+        display: none !important;
+    }
+    .sidebar.collapsed .user-profile-bar,
+    html.sidebar-collapsed .sidebar .user-profile-bar {
+        padding: 16px 0 !important;
+        justify-content: center !important;
+    }
+    .sidebar.collapsed .user-avatar-wrap,
+    html.sidebar-collapsed .sidebar .user-avatar-wrap {
+        justify-content: center !important;
+    }
+    .sidebar.collapsed .user-avatar-wrap > div:last-child,
+    html.sidebar-collapsed .sidebar .user-avatar-wrap > div:last-child {
+        display: none !important;
+    }
+    @media (max-width: 1024px) {
+        .sidebar-toggle-btn {
+            display: none !important;
+        }
+        .mobile-menu-btn {
+            display: inline-flex !important;
+        }
+        .sidebar {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            bottom: 0 !important;
+            width: 270px !important;
+            height: 100vh !important;
+            z-index: 90 !important;
+            transform: translateX(-100%);
+            transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            background-color: var(--bg-surface, #ffffff);
+            border-right: 1px solid var(--border, #e2e8f0);
+        }
+        .sidebar.mobile-open {
+            transform: translateX(0) !important;
+            box-shadow: 0 0 35px rgba(0, 0, 0, 0.45) !important;
+        }
+        .sidebar.mobile-open .brand-text-wrap,
+        .sidebar.mobile-open .nav-link span,
+        .sidebar.mobile-open .nav-group-title,
+        .sidebar.mobile-open .nav-group-arrow,
+        .sidebar.mobile-open .user-avatar-wrap > div:last-child {
+            display: block !important;
+        }
+        .sidebar.mobile-open .nav-group {
+            display: flex !important;
+            width: 100% !important;
+        }
+        .sidebar.mobile-open .nav-group-btn {
+            width: 100% !important;
+            height: auto !important;
+            padding: 11px 16px !important;
+            justify-content: flex-start !important;
+            display: flex !important;
+        }
+        .sidebar.mobile-open .nav-group-arrow {
+            display: inline-block !important;
+            margin-left: auto !important;
+        }
+        .sidebar.mobile-open .nav-sub-wrap {
+            display: grid !important;
+        }
+        .sidebar.mobile-open .nav-link {
+            width: 100% !important;
+            height: auto !important;
+            padding: 12px 16px !important;
+            justify-content: flex-start !important;
+        }
+        .sidebar.mobile-open .nav-links {
+            padding: 16px 12px !important;
+            align-items: stretch !important;
+        }
+        .sidebar.mobile-open .brand {
+            height: 70px !important;
+            min-height: 70px !important;
+            max-height: 70px !important;
+            padding: 0 16px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+        }
+        .sidebar.mobile-open .user-profile-bar {
+            padding: 16px 20px !important;
+            display: flex !important;
+        }
+        .sidebar-backdrop {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.55);
+            backdrop-filter: blur(2px);
+            -webkit-backdrop-filter: blur(2px);
+            z-index: 85;
+            opacity: 0;
+            transition: opacity 0.25s ease;
+        }
+        .sidebar-backdrop.active {
+            display: block !important;
+            opacity: 1 !important;
+        }
+    }
+    </style>
+</head>
+<body>
+<div class="app-layout">
+            <aside class="sidebar" id="appSidebar" data-accordion="false">
+    <!-- Desktop Sidebar Toggle Button (30px round button centered on horizontal divider line) -->
+    <button type="button" id="sidebarToggleBtn" class="sidebar-toggle-btn" aria-label="Collapse side menu" title="Collapse menu" style="position: absolute; right: -15px; top: 55px; width: 30px; height: 30px; border-radius: 50%; background: var(--bg-surface); border: 1px solid var(--border); box-shadow: 0 2px 6px rgba(0,0,0,0.1); color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 50; padding: 0;">
+        <i class="fa-solid fa-chevron-left" id="sidebarToggleIcon" style="font-size: 11px;"></i>
+    </button>
+
+    <div class="brand">
+                    <div class="brand-icon" style="background: #ffffff; border: 1px solid var(--border); overflow: hidden; display: flex; align-items: center; justify-content: center; padding: 2px;">
+                <img src="/Car-WashService/public/uploads/logo_1792207707_9fdb4a82.png" alt="Logo" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+            </div>
+                <div class="brand-text-wrap" style="overflow: hidden; min-width: 0; flex: 1;">
+            <div class="brand-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Car Wash &amp; Detailing">Car Wash &amp; Detailing</div>
+            <div class="brand-subtitle" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">សេវាកម្មលាងរថយន្ត</div>
+        </div>
+    </div>
+
+    <ul class="nav-links" id="sidebarNavLinks">
+                    
+                                            <li class="nav-item-single">
+                    <a href="/Car-WashService/index.php?view=dashboard" 
+                       class="nav-link active"
+                       data-tooltip="Dashboard">
+                        <i class="fa-solid fa-chart-pie"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                                
+                            <li class="nav-group " 
+                    data-group-id="sales_ops" 
+                    id="navGroup_sales_ops">
+                    <button type="button" 
+                            class="nav-group-btn" 
+                            id="btn_sales_ops"
+                            aria-expanded="false" 
+                            aria-controls="subwrap_sales_ops"
+                            data-group-id="sales_ops"
+                            data-tooltip="Sales &amp; Operations">
+                        <i class="fa-solid fa-cash-register nav-group-icon"></i>
+                        <span class="nav-group-title">Sales &amp; Operations</span>
+                        <i class="fa-solid fa-chevron-down nav-group-arrow" aria-hidden="true"></i>
+                    </button>
+                    <div class="nav-sub-wrap" id="subwrap_sales_ops">
+                        <ul class="nav-sub-links" role="region" aria-labelledby="btn_sales_ops">
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=pos" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="New Order / POS">
+                                        <i class="fa-solid fa-cash-register"></i>
+                                        <span>New Order / POS</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=shift" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Shifts &amp; Cash Control">
+                                        <i class="fa-solid fa-hand-holding-dollar"></i>
+                                        <span>Shifts &amp; Cash Control</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=orders" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Orders &amp; Queue">
+                                        <i class="fa-solid fa-list-ol"></i>
+                                        <span>Orders &amp; Queue</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=bays_queue" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Bays &amp; Queue">
+                                        <i class="fa-solid fa-warehouse"></i>
+                                        <span>Bays &amp; Queue</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=washer_jobs" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Washer Jobs">
+                                        <i class="fa-solid fa-soap"></i>
+                                        <span>Washer Jobs</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=mechanic_jobs" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Mechanic Jobs">
+                                        <i class="fa-solid fa-wrench"></i>
+                                        <span>Mechanic Jobs</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=vehicle_history" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Vehicle Repair History">
+                                        <i class="fa-solid fa-clock-rotate-left"></i>
+                                        <span>Vehicle Repair History</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=recovery_bulk_entry" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Disaster &amp; Paper Recovery">
+                                        <i class="fa-solid fa-file-circle-check"></i>
+                                        <span>Disaster &amp; Paper Recovery</span>
+                                    </a>
+                                </li>
+                                                    </ul>
+                    </div>
+
+                    <!-- Hidden template data for Collapsed Sidebar Flyout -->
+                    <div class="nav-group-flyout-template" style="display: none;" aria-hidden="true">
+                        <div class="sidebar-flyout-header">
+                            <i class="fa-solid fa-cash-register"></i>
+                            <span>Sales &amp; Operations</span>
+                        </div>
+                        <ul class="sidebar-flyout-links">
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=pos" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-cash-register"></i>
+                                        <span>New Order / POS</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=shift" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-hand-holding-dollar"></i>
+                                        <span>Shifts &amp; Cash Control</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=orders" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-list-ol"></i>
+                                        <span>Orders &amp; Queue</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=bays_queue" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-warehouse"></i>
+                                        <span>Bays &amp; Queue</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=washer_jobs" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-soap"></i>
+                                        <span>Washer Jobs</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=mechanic_jobs" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-wrench"></i>
+                                        <span>Mechanic Jobs</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=vehicle_history" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-clock-rotate-left"></i>
+                                        <span>Vehicle Repair History</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=recovery_bulk_entry" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-file-circle-check"></i>
+                                        <span>Disaster &amp; Paper Recovery</span>
+                                    </a>
+                                </li>
+                                                    </ul>
+                    </div>
+                </li>
+                                
+                                            <li class="nav-item-single">
+                    <a href="/Car-WashService/index.php?view=customers" 
+                       class="nav-link "
+                       data-tooltip="Customers &amp; Vehicles">
+                        <i class="fa-solid fa-users"></i>
+                        <span>Customers &amp; Vehicles</span>
+                    </a>
+                </li>
+                                
+                            <li class="nav-group " 
+                    data-group-id="catalog_stock" 
+                    id="navGroup_catalog_stock">
+                    <button type="button" 
+                            class="nav-group-btn" 
+                            id="btn_catalog_stock"
+                            aria-expanded="false" 
+                            aria-controls="subwrap_catalog_stock"
+                            data-group-id="catalog_stock"
+                            data-tooltip="Catalog &amp; Stock">
+                        <i class="fa-solid fa-boxes-stacked nav-group-icon"></i>
+                        <span class="nav-group-title">Catalog &amp; Stock</span>
+                        <i class="fa-solid fa-chevron-down nav-group-arrow" aria-hidden="true"></i>
+                    </button>
+                    <div class="nav-sub-wrap" id="subwrap_catalog_stock">
+                        <ul class="nav-sub-links" role="region" aria-labelledby="btn_catalog_stock">
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=services" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Services &amp; Prices">
+                                        <i class="fa-solid fa-list-check"></i>
+                                        <span>Services &amp; Prices</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=oil_care" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Oil &amp; Car Care">
+                                        <i class="fa-solid fa-oil-can"></i>
+                                        <span>Oil &amp; Car Care</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=stock_ledger" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Stock Ledger &amp; History">
+                                        <i class="fa-solid fa-clipboard-list"></i>
+                                        <span>Stock Ledger &amp; History</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=extras" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Extras &amp; Stock">
+                                        <i class="fa-solid fa-puzzle-piece"></i>
+                                        <span>Extras &amp; Stock</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=categories" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Category Control">
+                                        <i class="fa-solid fa-tags"></i>
+                                        <span>Category Control</span>
+                                    </a>
+                                </li>
+                                                    </ul>
+                    </div>
+
+                    <!-- Hidden template data for Collapsed Sidebar Flyout -->
+                    <div class="nav-group-flyout-template" style="display: none;" aria-hidden="true">
+                        <div class="sidebar-flyout-header">
+                            <i class="fa-solid fa-boxes-stacked"></i>
+                            <span>Catalog &amp; Stock</span>
+                        </div>
+                        <ul class="sidebar-flyout-links">
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=services" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-list-check"></i>
+                                        <span>Services &amp; Prices</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=oil_care" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-oil-can"></i>
+                                        <span>Oil &amp; Car Care</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=stock_ledger" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-clipboard-list"></i>
+                                        <span>Stock Ledger &amp; History</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=extras" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-puzzle-piece"></i>
+                                        <span>Extras &amp; Stock</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=categories" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-tags"></i>
+                                        <span>Category Control</span>
+                                    </a>
+                                </li>
+                                                    </ul>
+                    </div>
+                </li>
+                                
+                            <li class="nav-group " 
+                    data-group-id="finance" 
+                    id="navGroup_finance">
+                    <button type="button" 
+                            class="nav-group-btn" 
+                            id="btn_finance"
+                            aria-expanded="false" 
+                            aria-controls="subwrap_finance"
+                            data-group-id="finance"
+                            data-tooltip="Finance">
+                        <i class="fa-solid fa-sack-dollar nav-group-icon"></i>
+                        <span class="nav-group-title">Finance</span>
+                        <i class="fa-solid fa-chevron-down nav-group-arrow" aria-hidden="true"></i>
+                    </button>
+                    <div class="nav-sub-wrap" id="subwrap_finance">
+                        <ul class="nav-sub-links" role="region" aria-labelledby="btn_finance">
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=expenses" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Daily Expenses">
+                                        <i class="fa-solid fa-wallet"></i>
+                                        <span>Daily Expenses</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=commissions" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Crew Commissions">
+                                        <i class="fa-solid fa-hand-holding-dollar"></i>
+                                        <span>Crew Commissions</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=reports" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Reports &amp; Profits">
+                                        <i class="fa-solid fa-chart-line"></i>
+                                        <span>Reports &amp; Profits</span>
+                                    </a>
+                                </li>
+                                                    </ul>
+                    </div>
+
+                    <!-- Hidden template data for Collapsed Sidebar Flyout -->
+                    <div class="nav-group-flyout-template" style="display: none;" aria-hidden="true">
+                        <div class="sidebar-flyout-header">
+                            <i class="fa-solid fa-sack-dollar"></i>
+                            <span>Finance</span>
+                        </div>
+                        <ul class="sidebar-flyout-links">
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=expenses" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-wallet"></i>
+                                        <span>Daily Expenses</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=commissions" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-hand-holding-dollar"></i>
+                                        <span>Crew Commissions</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=reports" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-chart-line"></i>
+                                        <span>Reports &amp; Profits</span>
+                                    </a>
+                                </li>
+                                                    </ul>
+                    </div>
+                </li>
+                                
+                            <li class="nav-group " 
+                    data-group-id="admin" 
+                    id="navGroup_admin">
+                    <button type="button" 
+                            class="nav-group-btn" 
+                            id="btn_admin"
+                            aria-expanded="false" 
+                            aria-controls="subwrap_admin"
+                            data-group-id="admin"
+                            data-tooltip="Administration">
+                        <i class="fa-solid fa-sliders nav-group-icon"></i>
+                        <span class="nav-group-title">Administration</span>
+                        <i class="fa-solid fa-chevron-down nav-group-arrow" aria-hidden="true"></i>
+                    </button>
+                    <div class="nav-sub-wrap" id="subwrap_admin">
+                        <ul class="nav-sub-links" role="region" aria-labelledby="btn_admin">
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=staff" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Manage Staff">
+                                        <i class="fa-solid fa-users-gear"></i>
+                                        <span>Manage Staff</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=roles" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Roles &amp; Permissions">
+                                        <i class="fa-solid fa-user-shield"></i>
+                                        <span>Roles &amp; Permissions</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=pos_devices" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="POS Devices &amp; API">
+                                        <i class="fa-solid fa-tablet-screen-button"></i>
+                                        <span>POS Devices &amp; API</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=settings" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Shop Settings">
+                                        <i class="fa-solid fa-gear"></i>
+                                        <span>Shop Settings</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=sync_monitor" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Sync Monitor">
+                                        <i class="fa-solid fa-arrows-rotate"></i>
+                                        <span>Sync Monitor</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=audit_logs" 
+                                       class="nav-link nav-sub-link "
+                                       data-tooltip="Audit History">
+                                        <i class="fa-solid fa-shield-halved"></i>
+                                        <span>Audit History</span>
+                                    </a>
+                                </li>
+                                                    </ul>
+                    </div>
+
+                    <!-- Hidden template data for Collapsed Sidebar Flyout -->
+                    <div class="nav-group-flyout-template" style="display: none;" aria-hidden="true">
+                        <div class="sidebar-flyout-header">
+                            <i class="fa-solid fa-sliders"></i>
+                            <span>Administration</span>
+                        </div>
+                        <ul class="sidebar-flyout-links">
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=staff" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-users-gear"></i>
+                                        <span>Manage Staff</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=roles" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-user-shield"></i>
+                                        <span>Roles &amp; Permissions</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=pos_devices" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-tablet-screen-button"></i>
+                                        <span>POS Devices &amp; API</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=settings" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-gear"></i>
+                                        <span>Shop Settings</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=sync_monitor" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-arrows-rotate"></i>
+                                        <span>Sync Monitor</span>
+                                    </a>
+                                </li>
+                                                            <li>
+                                    <a href="/Car-WashService/index.php?view=audit_logs" 
+                                       class="sidebar-flyout-link ">
+                                        <i class="fa-solid fa-shield-halved"></i>
+                                        <span>Audit History</span>
+                                    </a>
+                                </li>
+                                                    </ul>
+                    </div>
+                </li>
+                        </ul>
+
+    <div class="user-profile-bar">
+        <div class="user-avatar-wrap">
+            <div class="user-avatar">
+                <i class="fa-solid fa-user"></i>
+            </div>
+            <div>
+                <div style="font-size: 13px; font-weight: 600;">Bona Sok (Owner)</div>
+                                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">
+                    Owner                </div>
+            </div>
+        </div>
+    </div>
+</aside>
+
+<!-- Dark Backdrop Layer for Mobile & Tablet -->
+<div id="sidebarBackdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+
+<!-- Floating Tooltip for Collapsed Sidebar (Single Links & Avatar) -->
+<div id="sidebarTooltip" class="sidebar-tooltip" role="tooltip" aria-hidden="true"></div>
+
+<!-- Floating Flyout Menu for Collapsed Sidebar (Category Groups) -->
+<div id="sidebarFlyout" class="sidebar-flyout" role="menu" aria-hidden="true"></div>
+        
+    <div class="main-wrapper">
+                <header class="topbar">
+            <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                <button type="button" class="btn btn-secondary btn-sm mobile-menu-btn" id="mobileMenuBtn" aria-label="Open navigation menu" title="Open navigation menu">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <div class="topbar-title">
+                    nav_dashboard                </div>
+            </div>
+            <div class="topbar-actions">
+                <!-- Staff Timeclock Button -->
+                <button type="button" class="btn btn-sm btn-secondary" id="timeclockBtn" onclick="toggleTimeclockModal()" title="Click to Clock In / Out" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 600;">
+                    <i class="fa-solid fa-clock" id="timeclockIcon" style="color: var(--text-muted);"></i>
+                    <span id="topbarClockTimer">Clock In</span>
+                </button>
+
+                <!-- Notification Sound Toggle -->
+                <button type="button" class="btn btn-secondary btn-sm" id="soundToggleBtn" onclick="toggleNotificationSound()" title="Unmute notification sounds" aria-label="Toggle notification sounds">
+                    <i class="fa-solid fa-volume-xmark text-danger" id="soundToggleIcon"></i>
+                </button>
+
+                <!-- Notification Bell -->
+                <div class="notification-dropdown-wrap">
+                    <button type="button" class="btn btn-secondary btn-sm notif-bell-btn" id="notifBellBtn" onclick="toggleNotifDropdown(event)" title="Notifications" aria-label="Notifications" aria-expanded="false">
+                        <i class="fa-solid fa-bell"></i>
+                        <span class="notif-badge" id="notifBadge" style="">
+                            9                        </span>
+                    </button>
+                    <div class="notification-panel" id="notifPanel" style="display: none;">
+                        <div class="notif-panel-header">
+                            <div style="font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;">
+                                <i class="fa-solid fa-bell text-primary"></i>
+                                <span>Notifications</span>
+                            </div>
+                            <div>
+                                <button type="button" class="btn btn-link btn-xs" onclick="markAllNotifsRead(event)" style="font-size: 11px; padding: 2px 6px; text-decoration: none; cursor: pointer; color: var(--primary);">
+                                    Mark all read                                </button>
+                            </div>
+                        </div>
+                        <div class="notif-panel-body" id="notifPanelList">
+                                                                                                <div class="notif-item unread" onclick="handleNotifClick(event, 367, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Duration Review Flagged: Exterior Wash</div>
+                                            <div class="notif-item-msg">Job took 35m vs estimated 15m (+133.33%). Flagged for review.</div>
+                                            <div class="notif-item-time">08:49, 29 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item unread" onclick="handleNotifClick(event, 366, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Bank Transfer Pending Approval</div>
+                                            <div class="notif-item-msg">Order #ORD-261027-005 ($51.50) requires bank slip verification.</div>
+                                            <div class="notif-item-time">16:16, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item unread" onclick="handleNotifClick(event, 365, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Bank Transfer Pending Approval</div>
+                                            <div class="notif-item-msg">Order #ORD-261027-004 ($15.50) requires bank slip verification.</div>
+                                            <div class="notif-item-time">16:16, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item unread" onclick="handleNotifClick(event, 364, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Bank Transfer Pending Approval</div>
+                                            <div class="notif-item-msg">Order #ORD-261027-003 ($15.50) requires bank slip verification.</div>
+                                            <div class="notif-item-time">16:16, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item unread" onclick="handleNotifClick(event, 359, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Duration Review Flagged: Exterior Wash</div>
+                                            <div class="notif-item-msg">Job took 35m vs estimated 15m (+133.33%). Flagged for review.</div>
+                                            <div class="notif-item-time">14:24, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item unread" onclick="handleNotifClick(event, 358, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Wait Time Over 45 Minutes</div>
+                                            <div class="notif-item-msg">Vehicle 2A-3097 waiting 45 mins (Priority P3)</div>
+                                            <div class="notif-item-time">14:22, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item unread" onclick="handleNotifClick(event, 357, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Bank Transfer Pending Approval</div>
+                                            <div class="notif-item-msg">Order #ORD-261027-005 ($15.50) requires manager review.</div>
+                                            <div class="notif-item-time">13:58, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item unread" onclick="handleNotifClick(event, 355, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Bank Transfer Pending Approval</div>
+                                            <div class="notif-item-msg">Order #ORD-261027-004 ($15.50) requires manager review.</div>
+                                            <div class="notif-item-time">13:58, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item unread" onclick="handleNotifClick(event, 353, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Bank Transfer Pending Approval</div>
+                                            <div class="notif-item-msg">Order #ORD-261027-003 ($15.50) requires manager review.</div>
+                                            <div class="notif-item-time">13:58, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item " onclick="handleNotifClick(event, 363, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Bank Transfer Pending Approval</div>
+                                            <div class="notif-item-msg">Order #ORD-261027-005 ($51.50) requires bank slip verification.</div>
+                                            <div class="notif-item-time">16:16, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item " onclick="handleNotifClick(event, 362, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Bank Transfer Pending Approval</div>
+                                            <div class="notif-item-msg">Order #ORD-261027-004 ($15.50) requires bank slip verification.</div>
+                                            <div class="notif-item-time">16:16, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item " onclick="handleNotifClick(event, 361, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Bank Transfer Pending Approval</div>
+                                            <div class="notif-item-msg">Order #ORD-261027-003 ($15.50) requires bank slip verification.</div>
+                                            <div class="notif-item-time">16:16, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item " onclick="handleNotifClick(event, 356, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Bank Transfer Pending Approval</div>
+                                            <div class="notif-item-msg">Order #ORD-261027-005 ($15.50) requires bank slip verification.</div>
+                                            <div class="notif-item-time">13:58, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item " onclick="handleNotifClick(event, 354, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Bank Transfer Pending Approval</div>
+                                            <div class="notif-item-msg">Order #ORD-261027-004 ($15.50) requires bank slip verification.</div>
+                                            <div class="notif-item-time">13:58, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                    <div class="notif-item " onclick="handleNotifClick(event, 352, '')">
+                                        <div class="notif-item-icon">
+                                            <i class="fa-solid fa-bell text-primary"></i>                                        </div>
+                                        <div class="notif-item-content">
+                                            <div class="notif-item-title">Bank Transfer Pending Approval</div>
+                                            <div class="notif-item-msg">Order #ORD-261027-003 ($15.50) requires bank slip verification.</div>
+                                            <div class="notif-item-time">13:58, 28 Oct</div>
+                                        </div>
+                                    </div>
+                                                                                    </div>
+                        <div class="notif-panel-footer">
+                            <span style="display: inline-flex; align-items: center; gap: 6px;">
+                                <span style="width: 6px; height: 6px; border-radius: 50%; background-color: var(--success); display: inline-block;"></span>
+                                Real-time live sync                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Language Toggle -->
+                                    <a href="?lang=km&" class="btn btn-secondary btn-sm" title="ប្តូរទៅជាភាសាខ្មែរ">
+                        <i class="fa-solid fa-globe mr-1"></i> ភាសាខ្មែរ
+                    </a>
+                
+                <!-- Dark/Light Theme Button -->
+                <button type="button" class="btn btn-secondary btn-sm" id="themeToggleBtn" title="Toggle Dark/Light">
+                    <i class="fa-solid fa-moon"></i>
+                </button>
+
+                <!-- Logout -->
+                <a href="/Car-WashService/index.php?action=logout" class="btn btn-danger btn-sm" title="Logout">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                </a>
+            </div>
+
+            <!-- Timeclock Modal Dialog -->
+            <div id="timeclockModal" style="display: none; position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px); align-items: center; justify-content: center;">
+                <div style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); width: 100%; max-width: 440px; box-shadow: var(--shadow-lg); overflow: hidden; margin: 16px;">
+                    <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: var(--bg-subtle);">
+                        <div style="font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px;">
+                            <i class="fa-solid fa-clock text-primary"></i>
+                            <span>Staff Shift Timeclock</span>
+                        </div>
+                        <button type="button" onclick="closeTimeclockModal()" style="background: none; border: none; font-size: 18px; cursor: pointer; color: var(--text-muted);">&times;</button>
+                    </div>
+                    <div style="padding: 20px;">
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px; background: var(--bg-subtle); border-radius: var(--radius-md);">
+                            <div style="width: 44px; height: 44px; border-radius: 50%; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px;">
+                                OW                            </div>
+                            <div>
+                                <div style="font-weight: 700; color: var(--text-main); font-size: 15px;">Bona Sok (Owner)</div>
+                                <div class="text-xs text-muted" style="text-transform: capitalize;">owner</div>
+                            </div>
+                        </div>
+
+                        <!-- Status Display -->
+                        <div id="tcStatusActive" style="display: none;">
+                            <div style="text-align: center; padding: 12px 0;">
+                                <div class="badge badge-success" style="font-size: 12px; padding: 4px 12px; margin-bottom: 8px;">
+                                    <i class="fa-solid fa-circle-check mr-1"></i> Currently On Shift                                </div>
+                                <div class="text-xs text-muted">Clocked in at: <strong id="tcClockInTime"></strong></div>
+                                <div id="modalLiveElapsed" style="font-size: 32px; font-weight: 800; font-family: var(--font-mono); color: var(--primary); margin: 12px 0;">
+                                    00:00:00
+                                </div>
+                                <div class="text-xs text-muted">Labor Hours: <span id="modalLiveHours" style="font-weight: 700; color: var(--text-main);">0.00</span> hrs</div>
+                            </div>
+                        </div>
+
+                        <div id="tcStatusInactive" style="">
+                            <div style="text-align: center; padding: 16px 0;">
+                                <div class="badge badge-secondary" style="font-size: 12px; padding: 4px 12px; margin-bottom: 8px;">
+                                    <i class="fa-solid fa-moon mr-1"></i> Not Clocked In                                </div>
+                                <p class="text-xs text-muted" style="margin-top: 6px;">
+                                    Clock in at the start of your shift to track labor hours and productivity.                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Notes -->
+                        <div style="margin-top: 10px;">
+                            <label class="form-label" style="font-size: 12px;">Shift Note / Activity (Optional)</label>
+                            <input type="text" id="tcNotesInput" class="form-control form-control-sm" placeholder="e.g. Morning wash shift, bay assignment...">
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div style="margin-top: 20px; display: flex; gap: 10px;">
+                            <button type="button" class="btn btn-secondary" onclick="closeTimeclockModal()" style="flex: 1;">
+                                Cancel                            </button>
+                            <button type="button" id="tcActionBtn" class="btn btn-success" onclick="submitTimeclockAction()" style="flex: 2; font-weight: 700;">
+                                <i class="fa-solid fa-arrow-right-to-bracket mr-1" id="tcActionIcon"></i>
+                                <span id="tcActionBtnText">Clock In (Start Shift)</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+            (function() {
+                var activeTc = window.CARWASH_APP && window.CARWASH_APP.activeTimecard;
+                var clockInTimestamp = activeTc ? new Date(activeTc.clock_in.replace(' ', 'T')).getTime() : null;
+
+                function formatHMS(seconds) {
+                    var h = Math.floor(seconds / 3600);
+                    var m = Math.floor((seconds % 3600) / 60);
+                    var s = seconds % 60;
+                    return (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m) + ':' + (s < 10 ? '0' + s : s);
+                }
+
+                function updateTimers() {
+                    if (!clockInTimestamp) return;
+                    var now = Date.now();
+                    var elapsedSec = Math.max(0, Math.floor((now - clockInTimestamp) / 1000));
+                    var hms = formatHMS(elapsedSec);
+                    var hrs = (elapsedSec / 3600).toFixed(2);
+
+                    var topEl = document.getElementById('topbarClockTimer');
+                    if (topEl) topEl.textContent = hms;
+
+                    var modEl = document.getElementById('modalLiveElapsed');
+                    if (modEl) modEl.textContent = hms;
+
+                    var hrsEl = document.getElementById('modalLiveHours');
+                    if (hrsEl) hrsEl.textContent = hrs;
+                }
+
+                if (clockInTimestamp) {
+                    updateTimers();
+                    setInterval(updateTimers, 1000);
+                }
+
+                window.toggleTimeclockModal = function() {
+                    var m = document.getElementById('timeclockModal');
+                    if (m) m.style.display = (m.style.display === 'flex' ? 'none' : 'flex');
+                };
+
+                window.closeTimeclockModal = function() {
+                    var m = document.getElementById('timeclockModal');
+                    if (m) m.style.display = 'none';
+                };
+
+                window.submitTimeclockAction = function() {
+                    var btn = document.getElementById('tcActionBtn');
+                    var notes = document.getElementById('tcNotesInput') ? document.getElementById('tcNotesInput').value : '';
+                    var isCurrentlyActive = !!clockInTimestamp;
+                    var subAction = isCurrentlyActive ? 'clock_out' : 'clock_in';
+
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Processing...';
+
+                    var formData = new FormData();
+                    formData.append('timeclock_action', subAction);
+                    formData.append('notes', notes);
+                    formData.append('csrf_token', window.CARWASH_APP.csrfToken);
+
+                    fetch(window.CARWASH_APP.baseUrl + '/index.php?action=staff_timeclock_toggle', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(function(r) { return r.json(); })
+                    .then(function(res) {
+                        btn.disabled = false;
+                        if (res.success) {
+                            window.location.reload();
+                        } else {
+                            alert(res.message || 'Error occurred while updating timecard.');
+                            window.location.reload();
+                        }
+                    })
+                    .catch(function(err) {
+                        btn.disabled = false;
+                        alert('Network communication error: ' + err.message);
+                    });
+                };
+            })();
+            </script>
+        </header>
+                <main class="page-container">
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px; width: 100%;">
+    <div style="min-width: 0;">
+        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">Welcome back, Bona Sok (Owner)</h1>
+        <p style="font-size: 14px; color: var(--text-muted);">Thursday, 29 October 2026 • Overview of Car Wash operations and shop performance.</p>
+    </div>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; max-width: 100%;">
+        <a href="/Car-WashService/index.php?view=pos" class="btn btn-primary" style="flex-shrink: 0;">
+            <i class="fa-solid fa-cash-register mr-1"></i> New Order / POS        </a>
+        <a href="/Car-WashService/index.php?action=download_backup" class="btn btn-secondary" title="Download complete database backup SQL" style="flex-shrink: 0;">
+            <i class="fa-solid fa-database mr-1" style="color: var(--primary);"></i> Backup Data
+        </a>
+        <a href="/Car-WashService/index.php?view=reports" class="btn btn-secondary" style="flex-shrink: 0;">
+            <i class="fa-solid fa-chart-line mr-1"></i> Reports
+        </a>
+        <a href="/Car-WashService/index.php?view=staff" class="btn btn-secondary" style="flex-shrink: 0;">
+            <i class="fa-solid fa-users-gear mr-1"></i> Staff
+        </a>
+    </div>
+</div>
+
+
+
+<!-- Stat Cards -->
+<div class="grid grid-cols-4" style="margin-bottom: 28px;">
+    <div class="stat-card">
+        <div class="stat-icon green">
+            <i class="fa-solid fa-sack-dollar"></i>
+        </div>
+        <div>
+            <div class="stat-value">$0.00</div>
+            <div class="stat-label">Today&#039;s Income <span class="text-xs text-muted">(0 ៛)</span></div>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-icon blue">
+            <i class="fa-solid fa-car-on"></i>
+        </div>
+        <div>
+            <div class="stat-value">0</div>
+            <div class="stat-label">Today&#039;s Orders</div>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-icon amber">
+            <i class="fa-solid fa-users"></i>
+        </div>
+        <div>
+            <div class="stat-value">72</div>
+            <div class="stat-label">Total Customers (58 cars/bikes)</div>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-icon purple">
+            <i class="fa-solid fa-spray-can-sparkles"></i>
+        </div>
+        <div>
+            <div class="stat-value">11</div>
+            <div class="stat-label">Active Services</div>
+        </div>
+    </div>
+</div>
+
+<!-- Live Performance & Productivity KPIs (Restricted to Manager and Owner) -->
+<div class="card" style="margin-bottom: 28px;">
+    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div>
+            <h2 class="card-title" style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                <i class="fa-solid fa-gauge-high" style="color: var(--primary);"></i>
+                Live Shop Productivity &amp; Bay KPIs
+            </h2>
+            <div class="text-xs text-muted" style="margin-top: 2px;">
+                Real-time operational efficiency metrics for today (29 Oct 2026) • Restricted to Management
+            </div>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <span class="badge badge-success" style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px;">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: #ffffff;"></span>
+                Live Sync
+            </span>
+            <a href="/Car-WashService/index.php?view=reports&period=today" class="btn btn-secondary btn-sm">
+                <i class="fa-solid fa-chart-line mr-1"></i> Performance Reports &rarr;
+            </a>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-4" style="gap: 16px; margin-top: 14px;">
+        <!-- KPI 1: Cars per Labor Hour -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                    <div style="font-size: 13px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Cars / Labor Hr</div>
+                    <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(16, 185, 129, 0.12); color: #10b981; display: flex; align-items: center; justify-content: center; font-size: 14px;">
+                        <i class="fa-solid fa-users-viewfinder"></i>
+                    </div>
+                </div>
+                <div style="font-size: 26px; font-weight: 800; color: var(--text-main); font-family: var(--font-mono);">
+                                            <span style="font-size: 20px; font-weight: 700; color: var(--text-muted); font-family: var(--font-sans);">No data yet</span>
+                                    </div>
+            </div>
+            <div style="margin-top: 14px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 12px;">
+                                    <div class="text-xs text-muted">
+                        Requires staff clock-in hours &amp; completed jobs today
+                    </div>
+                            </div>
+        </div>
+
+        <!-- KPI 2: Bay Utilization % -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                    <div style="font-size: 13px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Bay Utilization</div>
+                    <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(2, 132, 199, 0.12); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 14px;">
+                        <i class="fa-solid fa-warehouse"></i>
+                    </div>
+                </div>
+                <div style="font-size: 26px; font-weight: 800; color: var(--primary); font-family: var(--font-mono);">
+                                            <span style="font-size: 20px; font-weight: 700; color: var(--text-muted); font-family: var(--font-sans);">No data yet</span>
+                                    </div>
+            </div>
+            <div style="margin-top: 14px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 12px;">
+                                    <div class="text-xs text-muted">
+                        2400m capacity • No bay jobs recorded yet
+                    </div>
+                            </div>
+        </div>
+        </div>
+
+        <!-- KPI 3: Average Wait Time by Service Type -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                    <div style="font-size: 13px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Avg Wait Time</div>
+                    <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(245, 158, 11, 0.12); color: #f59e0b; display: flex; align-items: center; justify-content: center; font-size: 14px;">
+                        <i class="fa-solid fa-stopwatch"></i>
+                    </div>
+                </div>
+                <div style="font-size: 26px; font-weight: 800; color: var(--text-main); font-family: var(--font-mono);">
+                    0                    <span style="font-size: 13px; font-weight: 500; color: var(--text-muted);">mins</span>
+                </div>
+            </div>
+            <div style="margin-top: 14px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 11px;">
+                                    <span class="text-muted">Arrival to bay queue wait</span>
+                            </div>
+        </div>
+
+        <!-- KPI 4: Technician Efficiency (Rolling 7 Days) -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                    <div style="font-size: 13px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Tech Efficiency</div>
+                    <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(147, 51, 234, 0.12); color: #9333ea; display: flex; align-items: center; justify-content: center; font-size: 14px;">
+                        <i class="fa-solid fa-bolt"></i>
+                    </div>
+                </div>
+                <div style="font-size: 26px; font-weight: 800; color: #9333ea; font-family: var(--font-mono);">
+                                            <span style="font-size: 20px; font-weight: 700; color: var(--text-muted); font-family: var(--font-sans);">No data yet</span>
+                                    </div>
+            </div>
+            <div style="margin-top: 14px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 12px;">
+                                    <div class="text-xs text-muted">
+                        Requires measured finished jobs in rolling 7 days
+                    </div>
+                            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Optional Staff Leaderboard Widget (if enabled and role is permitted) -->
+<div class="card" style="margin-bottom: 28px;">
+    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <h2 class="card-title" style="margin: 0; display: flex; align-items: center; gap: 8px;">
+            <i class="fa-solid fa-trophy" style="color: #f59e0b;"></i>
+            Staff Performance Leaderboard
+        </h2>
+        <a href="/Car-WashService/index.php?view=settings&tab=performance" class="btn btn-secondary btn-sm" title="Configure visible metrics and visibility">
+            <i class="fa-solid fa-gear mr-1"></i> Leaderboard Settings
+        </a>
+    </div>
+
+            <div class="table-responsive">
+            <table class="table table-clean" style="width: 100%;">
+                <thead>
+                    <tr>
+                        <th style="width: 70px;">Rank</th>
+                        <th>Staff Member</th>
+                        <th>Role</th>
+                                                    <th class="table-num" style="min-width: 140px;">Completed Jobs</th>
+                                                                            <th class="table-num" style="min-width: 130px;">Labor Hours</th>
+                            <th class="table-num" style="min-width: 150px;">Cars / Labor Hr</th>
+                                                                            <th class="table-num" style="min-width: 120px;">Efficiency %</th>
+                                            </tr>
+                </thead>
+                <tbody>
+                                            <tr>
+                            <td>
+                                                                    <span style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #fef3c7; color: #d97706; font-weight: 800; font-size: 14px;">🥇</span>
+                                                            </td>
+                            <td>
+                                <strong style="color: var(--text-main); font-size: 14px;">Rathana Heng (Washer) (washer1)</strong>
+                            </td>
+                            <td>
+                                <span class="badge badge-slate" style="font-size: 11px; text-transform: capitalize;">washer</span>
+                            </td>
+                                                            <td class="table-num" style="font-weight: 700;">10</td>
+                                                                                        <td class="table-num text-muted">-</td>
+                                <td class="table-num" style="font-weight: 800; color: #10b981; font-family: var(--font-mono); font-size: 15px;">
+                                                                            <span class="text-muted" style="font-size: 12px; font-weight: normal; font-family: var(--font-sans);">No data yet</span>
+                                                                    </td>
+                                                                                        <td class="table-num" style="font-weight: 700; color: #9333ea;">
+                                                                            <span class="text-muted" style="font-size: 12px; font-weight: normal; font-family: var(--font-sans);">No data yet</span>
+                                                                    </td>
+                                                    </tr>
+                                            <tr>
+                            <td>
+                                                                    <span style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #f1f5f9; color: #64748b; font-weight: 800; font-size: 14px;">🥈</span>
+                                                            </td>
+                            <td>
+                                <strong style="color: var(--text-main); font-size: 14px;">Vannak Ouk (Washer)</strong>
+                            </td>
+                            <td>
+                                <span class="badge badge-slate" style="font-size: 11px; text-transform: capitalize;">washer</span>
+                            </td>
+                                                            <td class="table-num" style="font-weight: 700;">10</td>
+                                                                                        <td class="table-num text-muted">-</td>
+                                <td class="table-num" style="font-weight: 800; color: #10b981; font-family: var(--font-mono); font-size: 15px;">
+                                                                            <span class="text-muted" style="font-size: 12px; font-weight: normal; font-family: var(--font-sans);">No data yet</span>
+                                                                    </td>
+                                                                                        <td class="table-num" style="font-weight: 700; color: #9333ea;">
+                                                                            <span class="text-muted" style="font-size: 12px; font-weight: normal; font-family: var(--font-sans);">No data yet</span>
+                                                                    </td>
+                                                    </tr>
+                                            <tr>
+                            <td>
+                                                                    <span style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #ffedd5; color: #c2410c; font-weight: 800; font-size: 14px;">🥉</span>
+                                                            </td>
+                            <td>
+                                <strong style="color: var(--text-main); font-size: 14px;">Kosal Sem (Mechanic)</strong>
+                            </td>
+                            <td>
+                                <span class="badge badge-slate" style="font-size: 11px; text-transform: capitalize;">technical</span>
+                            </td>
+                                                            <td class="table-num" style="font-weight: 700;">3</td>
+                                                                                        <td class="table-num text-muted">-</td>
+                                <td class="table-num" style="font-weight: 800; color: #10b981; font-family: var(--font-mono); font-size: 15px;">
+                                                                            <span class="text-muted" style="font-size: 12px; font-weight: normal; font-family: var(--font-sans);">No data yet</span>
+                                                                    </td>
+                                                                                        <td class="table-num" style="font-weight: 700; color: #9333ea;">
+                                                                            <span class="text-muted" style="font-size: 12px; font-weight: normal; font-family: var(--font-sans);">No data yet</span>
+                                                                    </td>
+                                                    </tr>
+                                            <tr>
+                            <td>
+                                                                    <span style="font-weight: 700; color: var(--text-muted); font-size: 13px; margin-left: 8px;">#4</span>
+                                                            </td>
+                            <td>
+                                <strong style="color: var(--text-main); font-size: 14px;">Kosal Pich (Technical)</strong>
+                            </td>
+                            <td>
+                                <span class="badge badge-slate" style="font-size: 11px; text-transform: capitalize;">technical</span>
+                            </td>
+                                                            <td class="table-num" style="font-weight: 700;">0</td>
+                                                                                        <td class="table-num text-muted">-</td>
+                                <td class="table-num" style="font-weight: 800; color: #10b981; font-family: var(--font-mono); font-size: 15px;">
+                                                                            <span class="text-muted" style="font-size: 12px; font-weight: normal; font-family: var(--font-sans);">No data yet</span>
+                                                                    </td>
+                                                                                        <td class="table-num" style="font-weight: 700; color: #9333ea;">
+                                                                            <span class="text-muted" style="font-size: 12px; font-weight: normal; font-family: var(--font-sans);">No data yet</span>
+                                                                    </td>
+                                                    </tr>
+                                            <tr>
+                            <td>
+                                                                    <span style="font-weight: 700; color: var(--text-muted); font-size: 13px; margin-left: 8px;">#5</span>
+                                                            </td>
+                            <td>
+                                <strong style="color: var(--text-main); font-size: 14px;">Rathana Heng (Washer) (washer)</strong>
+                            </td>
+                            <td>
+                                <span class="badge badge-slate" style="font-size: 11px; text-transform: capitalize;">washer</span>
+                            </td>
+                                                            <td class="table-num" style="font-weight: 700;">0</td>
+                                                                                        <td class="table-num text-muted">-</td>
+                                <td class="table-num" style="font-weight: 800; color: #10b981; font-family: var(--font-mono); font-size: 15px;">
+                                                                            <span class="text-muted" style="font-size: 12px; font-weight: normal; font-family: var(--font-sans);">No data yet</span>
+                                                                    </td>
+                                                                                        <td class="table-num" style="font-weight: 700; color: #9333ea;">
+                                                                            <span class="text-muted" style="font-size: 12px; font-weight: normal; font-family: var(--font-sans);">No data yet</span>
+                                                                    </td>
+                                                    </tr>
+                                    </tbody>
+            </table>
+        </div>
+    </div>
+
+<!-- Live Wash Queue Status -->
+<div class="card" style="margin-bottom: 28px;">
+    <div class="card-header">
+        <h2 class="card-title"><i class="fa-solid fa-arrows-spin mr-1" style="color: var(--primary);"></i> Current Wash Bay Status</h2>
+        <a href="/Car-WashService/index.php?view=orders" class="btn btn-secondary btn-sm">View Full Queue</a>
+    </div>
+
+    <div class="grid grid-cols-4" style="gap: 16px;">
+        <div style="background: var(--warning-bg); border: 1px solid var(--border); padding: 20px; border-radius: var(--radius-md); text-align: center;">
+            <div style="font-size: 28px; font-weight: 800; color: var(--warning);">0</div>
+            <div style="font-size: 14px; font-weight: 600; color: var(--text-main); margin-top: 4px;">Waiting</div>
+            <div class="text-xs text-muted">Awaiting Bay Assignment</div>
+        </div>
+
+        <div style="background: var(--info-bg); border: 1px solid var(--border); padding: 20px; border-radius: var(--radius-md); text-align: center;">
+            <div style="font-size: 28px; font-weight: 800; color: var(--info);">0</div>
+            <div style="font-size: 14px; font-weight: 600; color: var(--text-main); margin-top: 4px;">Washing</div>
+            <div class="text-xs text-muted">Currently In Progress</div>
+        </div>
+
+        <div style="background: var(--success-bg); border: 1px solid var(--border); padding: 20px; border-radius: var(--radius-md); text-align: center;">
+            <div style="font-size: 28px; font-weight: 800; color: var(--success);">0</div>
+            <div style="font-size: 14px; font-weight: 600; color: var(--text-main); margin-top: 4px;">Ready to pay</div>
+            <div class="text-xs text-muted">Ready for Customer Pickup</div>
+        </div>
+
+        <div style="background: var(--bg-subtle); border: 1px solid var(--border); padding: 20px; border-radius: var(--radius-md); text-align: center;">
+            <div style="font-size: 28px; font-weight: 800; color: var(--primary);">0</div>
+            <div style="font-size: 14px; font-weight: 600; color: var(--text-main); margin-top: 4px;">Paid</div>
+            <div class="text-xs text-muted">Completed & Settled</div>
+        </div>
+    </div>
+</div>
+
+<!-- Today by POS Device -->
+<div class="card" style="margin-bottom: 28px;">
+    <div class="card-header" style="display: flex; align-items: center; justify-content: space-between;">
+        <h2 class="card-title" style="margin: 0;">
+            <i class="fa-solid fa-cash-register mr-1" style="color: var(--primary);"></i> 
+            Today by POS Device        </h2>
+        <a href="/Car-WashService/index.php?view=reports&period=today" class="btn btn-secondary btn-sm">
+            <i class="fa-solid fa-chart-pie mr-1"></i> Sales by POS Device &rarr;
+        </a>
+    </div>
+
+            <div style="text-align: center; color: var(--text-muted); padding: 24px;">
+            <i class="fa-solid fa-inbox fa-2x" style="opacity: 0.5; margin-bottom: 8px; display: block;"></i>
+            no_data        </div>
+    </div>
+
+<!-- Recent Orders Table -->
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title"><i class="fa-solid fa-clock-rotate-left mr-1" style="color: var(--primary);"></i> Recent Washing Orders</h2>
+        <a href="/Car-WashService/index.php?view=orders" class="text-sm" style="color: var(--primary); font-weight: 600;">View All Orders &rarr;</a>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Order #</th>
+                    <th>Customer</th>
+                    <th>Vehicle Plate</th>
+                    <th>Vehicle Type</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                                                        <tr>
+                        <td><strong>ORD-261028-033</strong></td>
+                        <td>Walk-in Guest</td>
+                        <td><span style="font-family: var(--font-mono); font-weight: 700;">W-7197</span></td>
+                        <td><span class="badge badge-purple"><i class="fa-solid fa-motorcycle mr-1"></i> Motorbike</span></td>
+                        <td><strong>$1.00</strong></td>
+                        <td><span class="badge badge-primary"><i class="fa-solid fa-receipt mr-1"></i> Paid</span></td>
+                    </tr>
+                                        <tr>
+                        <td><strong>ORD-261028-032</strong></td>
+                        <td>Sokha Meng</td>
+                        <td><span style="font-family: var(--font-mono); font-weight: 700;">2BQ-8899</span></td>
+                        <td><span class="badge badge-blue"><i class="fa-solid fa-car-side mr-1"></i> Small Car</span></td>
+                        <td><strong>$0.00</strong></td>
+                        <td><span class="badge badge-primary"><i class="fa-solid fa-receipt mr-1"></i> Paid</span></td>
+                    </tr>
+                                        <tr>
+                        <td><strong>ORD-261028-845</strong></td>
+                        <td>Chanthy Mao</td>
+                        <td><span style="font-family: var(--font-mono); font-weight: 700;">2A-3097</span></td>
+                        <td><span class="badge badge-blue"><i class="fa-solid fa-car-side mr-1"></i> Small Car</span></td>
+                        <td><strong>$3.50</strong></td>
+                        <td><span class="badge badge-warning"><i class="fa-solid fa-clock mr-1"></i> Waiting</span></td>
+                    </tr>
+                                        <tr>
+                        <td><strong>ORD-261028-927</strong></td>
+                        <td>Chanthy Mao</td>
+                        <td><span style="font-family: var(--font-mono); font-weight: 700;">2A-3301</span></td>
+                        <td><span class="badge badge-blue"><i class="fa-solid fa-car-side mr-1"></i> Small Car</span></td>
+                        <td><strong>$3.50</strong></td>
+                        <td><span class="badge badge-success"><i class="fa-solid fa-circle-check mr-1"></i> Ready to pay</span></td>
+                    </tr>
+                                        <tr>
+                        <td><strong>ORD-261028-974</strong></td>
+                        <td>Appointment Test VIP</td>
+                        <td><span style="font-family: var(--font-mono); font-weight: 700;">TEST-APPT-01</span></td>
+                        <td><span class="badge badge-blue"><i class="fa-solid fa-car-side mr-1"></i> Small Car</span></td>
+                        <td><strong>$3.50</strong></td>
+                        <td><span class="badge badge-success"><i class="fa-solid fa-circle-check mr-1"></i> Ready to pay</span></td>
+                    </tr>
+                                                </tbody>
+        </table>
+    </div>
+</div>
+
+        </main>
+    </div>
+</div>
+
+<!-- Core Script (dynamic cache-buster ensures fresh JS is always loaded) -->
+<script src="/Car-WashService/public/js/app.js?v=1793170680"></script>
+</body>
+</html>

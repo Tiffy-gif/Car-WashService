@@ -1,0 +1,51 @@
+<?php
+declare(strict_types=1);
+
+// Application settings
+if (!defined('APP_NAME')) {
+    define('APP_NAME', 'Car Wash Service Pro');
+}
+if (!defined('APP_NAME_KM')) {
+    define('APP_NAME_KM', 'សេវាកម្មលាងរថយន្ត & ម៉ូតូ');
+}
+if (!defined('APP_VERSION')) {
+    define('APP_VERSION', '1.0.0');
+}
+if (!defined('APP_URL')) {
+    define('APP_URL', '/Car-WashService');
+}
+
+// Base URL for web and external POS API connections
+// Change this in ONE place when moving to cloud (e.g. 'https://api.mycarwash.com' or 'http://192.168.1.100/Car-WashService')
+if (!defined('API_BASE_URL')) {
+    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https" : "http";
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    define('API_BASE_URL', $protocol . '://' . $host . APP_URL);
+}
+
+// Currency & Exchange Rate: 1 USD = 4,100 KHR
+if (!defined('DEFAULT_EXCHANGE_RATE')) {
+    define('DEFAULT_EXCHANGE_RATE', 4100);
+}
+
+// Storage & Upload Configuration (cloud-ready: change base directory / URL here in ONE place)
+if (!defined('STORAGE_UPLOAD_DIR')) {
+    define('STORAGE_UPLOAD_DIR', dirname(__DIR__) . '/public/uploads');
+}
+if (!defined('STORAGE_UPLOAD_URL')) {
+    define('STORAGE_UPLOAD_URL', API_BASE_URL . '/public/uploads');
+}
+if (!defined('MAX_IMAGE_UPLOAD_BYTES')) {
+    define('MAX_IMAGE_UPLOAD_BYTES', 5 * 1024 * 1024); // 5 MB max per image
+}
+
+// Global Exception & Error Handler (never show technical errors to users)
+require_once dirname(__DIR__) . '/core/ErrorHandler.php';
+ErrorHandler::init();
+
+// Session cookie security defaults
+if (session_status() === PHP_SESSION_NONE && !headers_sent()) {
+    ini_set('session.cookie_httponly', '1');
+    ini_set('session.cookie_samesite', 'Lax');
+}
+
