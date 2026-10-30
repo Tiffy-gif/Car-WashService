@@ -700,6 +700,90 @@ class PosApp {
                 document.getElementById('modalSettings')?.classList.add('open');
             }, 350);
         }
+
+        // 8. Register Service Worker (PWA)
+        this.registerServiceWorker();
+    }
+
+    static registerServiceWorker() {
+        const isLocalhost = window.location.hostname === 'localhost' ||
+                            window.location.hostname === '127.0.0.1' ||
+                            window.location.hostname === '::1';
+        const isHttps = window.location.protocol === 'https:';
+
+        if (!('serviceWorker' in navigator)) {
+            return;
+        }
+
+        // SW must register only over HTTPS or localhost/127.0.0.1; skip silently on plain LAN http
+        if (!isHttps && !isLocalhost) {
+            return;
+        }
+
+        navigator.serviceWorker.register('./sw.js', { scope: './' })
+            .then((reg) => {
+                // If a new worker is already waiting (e.g. refreshed page while waiting)
+                if (reg.waiting) {
+                    PosApp.showUpdateToast(reg.waiting);
+                }
+
+                reg.addEventListener('updatefound', () => {
+                    const newWorker = reg.installing;
+                    if (!newWorker) return;
+
+                    newWorker.addEventListener('statechange', () => {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            PosApp.showUpdateToast(newWorker);
+                        }
+                    });
+                });
+            })
+            .catch((err) => {
+                console.warn('SW registration failed:', err);
+            });
+
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (!refreshing) {
+                refreshing = true;
+                window.location.reload();
+            }
+        });
+    }
+
+    static showUpdateToast(worker) {
+        let toast = document.getElementById('posUpdateToast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'posUpdateToast';
+            toast.style.cssText = 'position: fixed; bottom: 24px; right: 24px; z-index: 99999; background: #0284c7; color: #ffffff; padding: 12px 20px; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); font-weight: 600; font-size: 15px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: transform 0.2s ease, opacity 0.2s ease;';
+            toast.innerHTML = '<i class="fa-solid fa-arrows-rotate fa-spin-pulse"></i> <span>New version available - tap to reload</span>';
+            document.body.appendChild(toast);
+        }
+        toast.style.display = 'flex';
+        toast.onclick = () => {
+            if (worker) {
+                worker.postMessage({ action: 'skipWaiting' });
+            } else {
+                window.location.reload();
+            }
+        };
+
+        const alertContent = document.getElementById('posNoticeAlertContent');
+        const alertBox = document.getElementById('posNoticeAlert');
+        if (alertBox && alertContent) {
+            alertContent.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> <span>New version available - tap to reload</span>';
+            alertBox.className = 'alert alert-info';
+            alertBox.style.display = 'flex';
+            alertBox.style.cursor = 'pointer';
+            alertBox.onclick = () => {
+                if (worker) {
+                    worker.postMessage({ action: 'skipWaiting' });
+                } else {
+                    window.location.reload();
+                }
+            };
+        }
     }
 
     static startLiveClock() {
