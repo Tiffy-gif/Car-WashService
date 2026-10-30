@@ -1381,6 +1381,107 @@ if ($action === 'create_order') {
             }
         }
 
+        // ========================================================
+        // 5B. Overrides in create_order (Zero-stock, Discount, Price Overrides)
+        // Require manager_username + manager_pin, verify on server, reject bare flags, log both IDs
+        // ========================================================
+        $requiresOverride = false;
+        $overrideReasons = [];
+
+        $overrideFlags = [
+            'override', 'has_override', 'is_override',
+            'manager_override', 'has_manager_override',
+            'zero_stock_override', 'has_zero_stock_override',
+            'price_override', 'has_price_override',
+            'discount_override', 'has_discount_override'
+        ];
+        foreach ($overrideFlags as $flg) {
+            if (!empty($inputData[$flg]) || !empty($_POST[$flg])) {
+                $requiresOverride = true;
+                $overrideReasons[] = "Order override flag '{$flg}'";
+            }
+        }
+
+        foreach ($items as $chkIt) {
+            foreach ($overrideFlags as $flg) {
+                if (!empty($chkIt[$flg])) {
+                    $requiresOverride = true;
+                    $overrideReasons[] = "Item override flag '{$flg}'";
+                    break 2;
+                }
+            }
+        }
+
+        // Check stock availability in advance for zero-stock override requirement
+        $preliminaryProductQtys = [];
+        foreach ($items as $chkIt) {
+            $chkType = $chkIt['type'] ?? 'service';
+            $chkPId = !empty($chkIt['product_id']) ? (int)$chkIt['product_id'] : (!empty($chkIt['id']) && in_array($chkType, ['product', 'spare_part'], true) ? (int)$chkIt['id'] : null);
+            $chkQty = max(1, (int)($chkIt['qty'] ?? 1));
+            if ($chkPId && in_array($chkType, ['product', 'spare_part'], true)) {
+                $preliminaryProductQtys[$chkPId] = ($preliminaryProductQtys[$chkPId] ?? 0) + $chkQty;
+            }
+        }
+
+        if (!empty($preliminaryProductQtys)) {
+            $chkStockStmt = $pdo->prepare("SELECT id, name_en, stock_qty FROM products WHERE id = ?");
+            foreach ($preliminaryProductQtys as $pId => $reqQty) {
+                $chkStockStmt->execute([$pId]);
+                $pRow = $chkStockStmt->fetch(PDO::FETCH_ASSOC);
+                if ($pRow && (int)$pRow['stock_qty'] < $reqQty) {
+                    $requiresOverride = true;
+                    $overrideReasons[] = "Zero-stock for '{$pRow['name_en']}' (Available: {$pRow['stock_qty']}, Requested: {$reqQty})";
+                }
+            }
+        }
+
+        $verifiedOverrideManager = null;
+        if ($requiresOverride) {
+            $mgrUser = trim((string)($inputData['manager_username'] ?? $_POST['manager_username'] ?? ''));
+            $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
+
+            if ($mgrUser === '' || $mgrPin === '') {
+                foreach ($items as $chkIt) {
+                    if (!empty($chkIt['manager_username']) && !empty($chkIt['manager_pin'])) {
+                        $mgrUser = trim((string)$chkIt['manager_username']);
+                        $mgrPin = (string)$chkIt['manager_pin'];
+                        break;
+                    }
+                }
+            }
+
+            if ($mgrUser === '' || $mgrPin === '') {
+                http_response_code(403);
+                echo json_encode([
+                    'success' => false,
+                    'error' => 'MANAGER_PIN_REQUIRED',
+                    'message' => 'Manager username and PIN are required for authorization overrides.'
+                ]);
+                exit;
+            }
+
+            try {
+                $verifiedOverrideManager = CashierControl::verifyManagerPin($mgrUser, $mgrPin, $authDeviceId);
+            } catch (ManagerPinThrottledException $e) {
+                http_response_code(429);
+                echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
+                exit;
+            } catch (Exception $e) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'error' => 'Invalid manager credentials', 'message' => $e->getMessage()]);
+                exit;
+            }
+
+            if (!in_array($verifiedOverrideManager['manager_role'], ['manager', 'owner', 'system_admin'], true)) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'error' => 'Invalid manager credentials', 'message' => 'Approver must have manager or owner role.']);
+                exit;
+            }
+
+            $overrideDetails = "Manager {$verifiedOverrideManager['manager_name']} (#{$verifiedOverrideManager['manager_id']}) authorized order override for Cashier #{$staffUserId} on Device #{$authDeviceId}. Reasons: " . implode('; ', array_unique($overrideReasons));
+            AuditLogger::log('ORDER_OVERRIDE', $overrideDetails, 'order', null, $staffUserId, $stf['username'] ?? '', $stf['role'] ?? '');
+        }
+
         // Validate payment permission if paid upfront
         if ($isPaid) {
             if ($stf['role'] !== 'owner' && !Auth::userHasPermission($staffUserId, 'pos.pay_order')) {
@@ -1466,25 +1567,10 @@ if ($action === 'create_order') {
             }
 
             if ((int)$prodRow['stock_qty'] < $reqQty) {
-                $hasOverride = false;
-                $mgrUser = trim($inputData['manager_username'] ?? $_POST['manager_username'] ?? '');
-                $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
-                if ($mgrUser !== '' && $mgrPin !== '') {
-                    try {
-                        $mgr = CashierControl::verifyManagerPin($mgrUser, $mgrPin);
-                        if ($mgr) {
-                            $hasOverride = true;
-                            if (class_exists('AuditLogger')) {
-                                AuditLogger::log('STOCK_OVERRIDE', "Manager {$mgr['manager_name']} authorized zero-stock sale for product ID {$prodId} ({$prodRow['name_en']})", 'order', null, $mgr['manager_id'], $mgr['manager_name'], $mgr['manager_role']);
-                            }
-                        }
-                    } catch (Exception $e) {
-                        $hasOverride = false;
-                    }
-                }
-                if (!$hasOverride) {
+                if (!$verifiedOverrideManager) {
                     throw new Exception("ITEM_OUT_OF_STOCK: Insufficient stock for '{$prodRow['name_en']}'. Available: {$prodRow['stock_qty']}, Requested: {$reqQty}. Manager override required.");
                 }
+                AuditLogger::log('STOCK_OVERRIDE', "Manager {$verifiedOverrideManager['manager_name']} (#{$verifiedOverrideManager['manager_id']}) authorized zero-stock sale for product ID {$prodId} ({$prodRow['name_en']}) for Cashier #{$staffUserId}", 'order', null, $staffUserId, $stf['username'] ?? '', $stf['role'] ?? '');
             }
         }
 
