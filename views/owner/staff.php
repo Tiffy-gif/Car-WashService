@@ -305,7 +305,7 @@ $setStmt = $pdo->query("SELECT setting_key, setting_value FROM settings");
 while ($r = $setStmt->fetch()) {
     $settings[$r['setting_key']] = $r['setting_value'];
 }
-$demoMode = $settings['demo_mode'] ?? '1';
+$demoMode = $settings['demo_mode'] ?? '0';
 $pwReminderDismissed = ($settings['default_pw_dismissed'] ?? '0') === '1';
 
 // Detect if any sample password is still active

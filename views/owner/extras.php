@@ -192,7 +192,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                                 <span class="text-xs text-muted"><?= htmlspecialchars($app['notes'] ?? '-') ?></span>
                             </td>
                             <td style="text-align: right;">
-                                <a href="<?= APP_URL ?>/index.php?view=pos" class="btn btn-secondary btn-sm" title="Intake into Bay Queue">
+                                <a href="<?= get_pos_url() ?>" class="btn btn-secondary btn-sm" title="Intake into Bay Queue">
                                     <i class="fa-solid fa-arrow-right mr-1"></i> Intake
                                 </a>
                             </td>

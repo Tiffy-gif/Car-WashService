@@ -1764,12 +1764,12 @@ $baysList = BayManager::getAllBays($pdo);
                 <label class="form-label">Test Mode &amp; 1-Click Demo Login Switch</label>
                 <div style="position: relative; display: flex; align-items: center; max-width: 320px;">
                     <span style="position: absolute; left: 12px; pointer-events: none; color: var(--primary); font-size: 14px; z-index: 2;">
-                        <i id="demo_mode_icon" class="fa-solid <?= (($settings['demo_mode'] ?? '1') === '1') ? 'fa-circle-check' : 'fa-lock' ?>"></i>
+                        <i id="demo_mode_icon" class="fa-solid <?= (($settings['demo_mode'] ?? '0') === '1') ? 'fa-circle-check' : 'fa-lock' ?>"></i>
                     </span>
                     <?php $isOwnerUser = (Auth::getRole() === 'owner'); ?>
                     <select name="demo_mode" id="demo_mode_select" class="form-select" style="padding-left: 36px; width: 100%;" <?= $isOwnerUser ? '' : 'disabled title="Only Shop Owner can toggle Test Mode"' ?> onchange="document.getElementById('demo_mode_icon').className = 'fa-solid ' + (this.value === '1' ? 'fa-circle-check' : 'fa-lock')">
-                        <option value="1" <?= (($settings['demo_mode'] ?? '1') === '1') ? 'selected' : '' ?>>Enabled (Show 1-click test buttons on login screen)</option>
-                        <option value="0" <?= (($settings['demo_mode'] ?? '1') === '0') ? 'selected' : '' ?>>Disabled (Require actual staff username &amp; PIN)</option>
+                        <option value="1" <?= (($settings['demo_mode'] ?? '0') === '1') ? 'selected' : '' ?>>Enabled (Show 1-click test buttons on login screen)</option>
+                        <option value="0" <?= (($settings['demo_mode'] ?? '0') === '0') ? 'selected' : '' ?>>Disabled (Require actual staff username &amp; PIN)</option>
                     </select>
                 </div>
                 <div class="text-xs text-muted" style="margin-top: 4px;">

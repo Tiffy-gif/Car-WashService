@@ -1,0 +1,15 @@
+{
+  "name": "pos-e2e-tests",
+  "version": "1.0.0",
+  "description": "Automated end-to-end tests for POS terminal interface",
+  "private": true,
+  "scripts": {
+    "test:shop-floor": "node test_e2e_shop_floor.js",
+    "test:member-upsell": "node test_member_upsell_rewards.js",
+    "test:system-updates": "node test_system_updates_and_offline.js",
+    "test:wait-appointments": "node test_wait_and_appointments.js"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^22.0.0"
+  }
+}

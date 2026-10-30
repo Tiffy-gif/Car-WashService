@@ -66,7 +66,7 @@ include dirname(__DIR__) . '/layouts/header.php';
         <p style="font-size: 14px; color: var(--text-muted);"><?= date('l, d F Y') ?> • Overview of Car Wash operations and shop performance.</p>
     </div>
     <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; max-width: 100%;">
-        <a href="<?= APP_URL ?>/index.php?view=pos" class="btn btn-primary" style="flex-shrink: 0;">
+        <a href="<?= get_pos_url() ?>" class="btn btn-primary" style="flex-shrink: 0;">
             <i class="fa-solid fa-cash-register mr-1"></i> <?= htmlspecialchars(__('nav_pos')) ?>
         </a>
         <a href="<?= APP_URL ?>/index.php?action=download_backup" class="btn btn-secondary" title="Download complete database backup SQL" style="flex-shrink: 0;">

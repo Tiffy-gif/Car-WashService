@@ -112,7 +112,7 @@ class Auth {
 
         // 5. Test mode check: Sample demo accounts only work when Test Mode switch in Settings is ON
         if (!empty($user['is_sample_account'])) {
-            $demoMode = get_setting('demo_mode', '1');
+            $demoMode = get_setting('demo_mode', '0');
             if ($demoMode !== '1') {
                 self::$lastError = 'demo_disabled';
                 AuditLogger::log('LOGIN_BLOCKED', "Sample account login blocked because Test Mode is OFF", 'auth', (string)$user['id'], (int)$user['id'], $user['username'], $user['role']);
@@ -460,6 +460,14 @@ class Auth {
         };
     }
 
+    public static function getDefaultUrlForUser(): string {
+        $view = self::getDefaultViewForUser();
+        if ($view === 'pos' && defined('POS_UI') && POS_UI === 'new') {
+            return APP_URL . '/pos/index.html#pos';
+        }
+        return APP_URL . '/index.php?view=' . $view;
+    }
+
     private static function resolveFallbackViewByPermissions(): string {
         if (self::can('dashboard.view')) return 'dashboard';
         if (self::can('pos.access')) return 'pos';
@@ -502,6 +510,10 @@ class Auth {
         }
 
         $fallbackView = self::getDefaultViewForUser();
+        if ($fallbackView === 'pos' && defined('POS_UI') && POS_UI === 'new') {
+            header('Location: ' . APP_URL . '/pos/index.html#pos', true, 302);
+            exit;
+        }
         header('Location: ' . APP_URL . '/index.php?view=' . $fallbackView . '&msg=unauthorized');
         exit;
     }
@@ -522,6 +534,10 @@ class Auth {
 
         if (!in_array($currentRole, $roles, true)) {
             $safeView = self::getDefaultViewForUser();
+            if ($safeView === 'pos' && defined('POS_UI') && POS_UI === 'new') {
+                header('Location: ' . APP_URL . '/pos/index.html#pos', true, 302);
+                exit;
+            }
             header('Location: ' . APP_URL . '/index.php?view=' . $safeView . '&msg=unauthorized');
             exit;
         }

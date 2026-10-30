@@ -37,7 +37,10 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
         $defaultView = Auth::getDefaultViewForUser();
-        header('Location: ' . APP_URL . '/index.php?view=' . $defaultView);
+        $targetUrl = ($defaultView === 'pos' && defined('POS_UI') && POS_UI === 'new')
+            ? APP_URL . '/pos/index.html#pos'
+            : APP_URL . '/index.php?view=' . $defaultView;
+        header('Location: ' . $targetUrl, true, 302);
         exit;
     } else {
         $err = Auth::getLastError() ?? '1';
@@ -54,29 +57,24 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// 3. Handle Demo 1-Click Login (Works only when Test Mode in Settings is ON)
+// 3. Handle Demo 1-Click Login (Works only when Test Mode in Settings is ON and from allowed local IPs)
 if ($action === 'demo_login') {
-    $demoMode = get_setting('demo_mode', '1');
+    $demoMode = get_setting('demo_mode', '0');
     if ($demoMode !== '1') {
         header('Location: ' . APP_URL . '/index.php?view=login&error=demo_disabled');
         exit;
     }
 
+    $clientIp = $_SERVER['REMOTE_ADDR'] ?? '';
+    $allowedIps = array_merge(['127.0.0.1', '::1'], defined('DEMO_ALLOWED_IPS') && is_array(DEMO_ALLOWED_IPS) ? DEMO_ALLOWED_IPS : []);
+    if (!in_array($clientIp, $allowedIps, true)) {
+        header('Location: ' . APP_URL . '/index.php?view=login&error=demo_disabled');
+        exit;
+    }
+
     $roleKey = $_GET['role'] ?? 'owner';
-    $credentials = [
-        'system_admin'    => ['username' => 'admin',           'pin' => '111111'],
-        'admin'           => ['username' => 'admin',           'pin' => '111111'],
-        'owner'           => ['username' => 'owner',           'pin' => '123456'],
-        'manager'         => ['username' => 'manager',         'pin' => '123456'],
-        'crm'             => ['username' => 'crm',             'pin' => '123456'],
-        'cashier'         => ['username' => 'cashier',         'pin' => '123456'],
-        'stock_control'   => ['username' => 'stock_control',   'pin' => '123456'],
-        'technical'       => ['username' => 'technical',       'pin' => '123456'],
-        'mechanic1'       => ['username' => 'mechanic1',       'pin' => '123456'],
-        'washer'          => ['username' => 'washer',          'pin' => '123456'],
-        'washer1'         => ['username' => 'washer1',         'pin' => '123456'],
-        'wash_supervisor' => ['username' => 'wash_supervisor', 'pin' => '123456'],
-    ];
+    $demoAccountsFile = __DIR__ . '/config/demo_accounts.php';
+    $credentials = file_exists($demoAccountsFile) ? require $demoAccountsFile : [];
 
     if (isset($credentials[$roleKey])) {
         if (Auth::login($credentials[$roleKey]['username'], $credentials[$roleKey]['pin'])) {
@@ -85,7 +83,10 @@ if ($action === 'demo_login') {
                 exit;
             }
             $defaultView = Auth::getDefaultViewForUser();
-            header('Location: ' . APP_URL . '/index.php?view=' . $defaultView);
+            $targetUrl = ($defaultView === 'pos' && defined('POS_UI') && POS_UI === 'new')
+                ? APP_URL . '/pos/index.html#pos'
+                : APP_URL . '/index.php?view=' . $defaultView;
+            header('Location: ' . $targetUrl, true, 302);
             exit;
         } else {
             $err = Auth::getLastError() ?? '1';
@@ -129,7 +130,10 @@ if ($action === 'update_pin' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     audit_log('PIN_CHANGED', "User changed their PIN following an administrative reset", 'user', (string)Auth::getUserId());
 
     $defaultView = Auth::getDefaultViewForUser();
-    header('Location: ' . APP_URL . '/index.php?view=' . $defaultView . '&msg=pin_changed_success');
+    $targetUrl = ($defaultView === 'pos' && defined('POS_UI') && POS_UI === 'new')
+        ? APP_URL . '/pos/index.html#pos'
+        : APP_URL . '/index.php?view=' . $defaultView . '&msg=pin_changed_success';
+    header('Location: ' . $targetUrl, true, 302);
     exit;
 }
 
@@ -575,6 +579,12 @@ $role = Auth::getRole();
 // Default view per role/permissions if none specified
 if (!$view) {
     $view = Auth::getDefaultViewForUser();
+}
+
+// When POS_UI is 'new', redirect (302) view=pos to APP_URL . '/pos/index.html#pos'. When 'legacy', map to /views/cashier/pos.php.
+if ($view === 'pos' && defined('POS_UI') && POS_UI === 'new') {
+    header('Location: ' . APP_URL . '/pos/index.html#pos', true, 302);
+    exit;
 }
 
 $viewMap = [

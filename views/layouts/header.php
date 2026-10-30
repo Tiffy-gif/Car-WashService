@@ -345,6 +345,11 @@ $pageHeaderTitle = isset($pageTitle) && trim((string)$pageTitle) !== '' ? ($page
     </style>
 </head>
 <body>
+<?php if (get_setting('demo_mode', '0') === '1'): ?>
+<div style="background: #dc2626; color: #ffffff; padding: 10px 16px; text-align: center; font-weight: 700; font-size: 13px; letter-spacing: 0.5px; z-index: 99999; box-shadow: 0 2px 4px rgba(0,0,0,0.2); width: 100%;">
+    <i class="fa-solid fa-triangle-exclamation" style="margin-right: 8px;"></i> DEMO MODE ON - turn off before going live
+</div>
+<?php endif; ?>
 <div class="app-layout">
     <?php if ($currentUser): ?>
         <?php include __DIR__ . '/nav.php'; ?>

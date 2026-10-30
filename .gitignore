@@ -1,0 +1,10 @@
+# Sensitive demo credentials
+config/demo_accounts.php
+
+# Environment and logs
+.env
+storage/logs/*.log
+*.log
+
+# Dependencies
+node_modules/

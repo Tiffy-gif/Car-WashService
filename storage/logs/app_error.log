@@ -2225,3 +2225,19 @@ Stack trace:
 #0 C:\xampp\htdocs\Car-WashService\views\owner\sync_monitor.php(22): PDO->query('SELECT created_...')
 #1 C:\xampp\htdocs\Car-WashService\index.php(619): require_once('C:\\xampp\\htdocs...')
 #2 {main}
+[2026-10-30 09:56:41] [CRITICAL] [::1] [user_id:1(owner)] [GET /Car-WashService/index.php?view=shift] Uncaught Exception PDOException: "SQLSTATE[42S22]: Column not found: 1054 Unknown column 'role_code' in 'where clause'" in C:\xampp\htdocs\Car-WashService\views\cashier\shift.php:159
+Stack trace:
+#0 C:\xampp\htdocs\Car-WashService\views\cashier\shift.php(159): PDO->query('SELECT id, user...')
+#1 C:\xampp\htdocs\Car-WashService\index.php(614): require_once('C:\\xampp\\htdocs...')
+#2 {main}
+[2026-10-30 10:08:35] [CRITICAL] [::1] [user_id:1(owner)] [GET /Car-WashService/index.php?view=shift] Uncaught Exception PDOException: "SQLSTATE[42S22]: Column not found: 1054 Unknown column 'role_code' in 'where clause'" in C:\xampp\htdocs\Car-WashService\views\cashier\shift.php:159
+Stack trace:
+#0 C:\xampp\htdocs\Car-WashService\views\cashier\shift.php(159): PDO->query('SELECT id, user...')
+#1 C:\xampp\htdocs\Car-WashService\index.php(614): require_once('C:\\xampp\\htdocs...')
+#2 {main}
+[2026-10-30 10:10:03] [CRITICAL] [::1] [user_id:1(owner)] [GET /Car-WashService/index.php?view=sync_monitor] Uncaught Exception PDOException: "SQLSTATE[42S22]: Column not found: 1054 Unknown column 'message' in 'field list'" in C:\xampp\htdocs\Car-WashService\views\owner\sync_monitor.php:22
+Stack trace:
+#0 C:\xampp\htdocs\Car-WashService\views\owner\sync_monitor.php(22): PDO->query('SELECT created_...')
+#1 C:\xampp\htdocs\Car-WashService\index.php(614): require_once('C:\\xampp\\htdocs...')
+#2 {main}
+[2026-10-30 10:18:29] [WARNING] [127.0.0.1] [guest] [CLI CLI] session_start(): Session cannot be started after headers have already been sent in C:\xampp\htdocs\Car-WashService\scratch\test_pos_ui.php:10

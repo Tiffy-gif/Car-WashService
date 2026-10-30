@@ -309,4 +309,14 @@ function record_stock_movement(
     return $uid;
 }
 
+/**
+ * Returns the active Cashier POS URL based on the POS_UI setting ('new' vs 'legacy')
+ */
+function get_pos_url(): string {
+    if (defined('POS_UI') && POS_UI === 'new') {
+        return APP_URL . '/pos/index.html#pos';
+    }
+    return APP_URL . '/index.php?view=pos';
+}
+
 

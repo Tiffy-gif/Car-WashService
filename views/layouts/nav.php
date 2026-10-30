@@ -251,9 +251,12 @@ foreach ($rawMenuGroups as $grp) {
             ?>
 
             <?php if ($itemCount === 1): ?>
-                <?php $single = $grp['items'][0]; ?>
+                <?php
+                $single = $grp['items'][0];
+                $singleUrl = ($single['view'] === 'pos') ? get_pos_url() : APP_URL . '/index.php?view=' . $single['view'];
+                ?>
                 <li class="nav-item-single">
-                    <a href="<?= APP_URL ?>/index.php?view=<?= $single['view'] ?>" 
+                    <a href="<?= $singleUrl ?>" 
                        class="nav-link <?= ($currentView === $single['view']) ? 'active' : '' ?>"
                        data-tooltip="<?= htmlspecialchars($single['label']) ?>">
                         <i class="fa-solid <?= $single['icon'] ?>"></i>
@@ -278,8 +281,9 @@ foreach ($rawMenuGroups as $grp) {
                     <div class="nav-sub-wrap" id="subwrap_<?= htmlspecialchars($grp['id']) ?>">
                         <ul class="nav-sub-links" role="region" aria-labelledby="btn_<?= htmlspecialchars($grp['id']) ?>">
                             <?php foreach ($grp['items'] as $it): ?>
+                                <?php $itUrl = ($it['view'] === 'pos') ? get_pos_url() : APP_URL . '/index.php?view=' . $it['view']; ?>
                                 <li>
-                                    <a href="<?= APP_URL ?>/index.php?view=<?= $it['view'] ?>" 
+                                    <a href="<?= $itUrl ?>" 
                                        class="nav-link nav-sub-link <?= ($currentView === $it['view']) ? 'active' : '' ?>"
                                        data-tooltip="<?= htmlspecialchars($it['label']) ?>">
                                         <i class="fa-solid <?= $it['icon'] ?>"></i>
@@ -298,8 +302,9 @@ foreach ($rawMenuGroups as $grp) {
                         </div>
                         <ul class="sidebar-flyout-links">
                             <?php foreach ($grp['items'] as $it): ?>
+                                <?php $itUrl = ($it['view'] === 'pos') ? get_pos_url() : APP_URL . '/index.php?view=' . $it['view']; ?>
                                 <li>
-                                    <a href="<?= APP_URL ?>/index.php?view=<?= $it['view'] ?>" 
+                                    <a href="<?= $itUrl ?>" 
                                        class="sidebar-flyout-link <?= ($currentView === $it['view']) ? 'active' : '' ?>">
                                         <i class="fa-solid <?= $it['icon'] ?>"></i>
                                         <span><?= htmlspecialchars($it['label']) ?></span>

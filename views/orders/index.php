@@ -559,7 +559,7 @@ include dirname(__DIR__) . '/layouts/header.php';
         <p style="font-size: 14px; color: var(--text-muted);">Real-time tracking of vehicle wash status: Waiting &rarr; Washing &rarr; Finished &rarr; Paid.</p>
     </div>
     <div style="display: flex; gap: 12px;">
-        <a href="<?= APP_URL ?>/index.php?view=pos" class="btn btn-primary">
+        <a href="<?= get_pos_url() ?>" class="btn btn-primary">
             <i class="fa-solid fa-plus mr-1"></i> New Wash Order
         </a>
     </div>

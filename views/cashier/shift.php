@@ -178,7 +178,7 @@ include dirname(__DIR__) . '/layouts/header.php';
         <p style="font-size: 14px; color: var(--text-muted);">Manage starting cash, blind drawer handovers, manager spot audits, and day locking with Z-Reports.</p>
     </div>
     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-        <a href="<?= APP_URL ?>/index.php?view=pos" class="btn btn-secondary">
+        <a href="<?= get_pos_url() ?>" class="btn btn-secondary">
             <i class="fa-solid fa-cash-register mr-1"></i> POS Register
         </a>
         <button type="button" class="btn btn-secondary" onclick="openModal('drawerNoSaleModal')">

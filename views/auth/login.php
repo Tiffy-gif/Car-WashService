@@ -19,6 +19,7 @@ $error = $_GET['error'] ?? null;
 $remMins = (int)($_GET['rem'] ?? 10);
 $remAtt = isset($_GET['rem_att']) ? (int)$_GET['rem_att'] : null;
 $msg = $_GET['msg'] ?? null;
+$demoMode = get_setting('demo_mode', '0');
 ?>
 <!DOCTYPE html>
 <html lang="<?= $currentLang ?>" data-theme="light">
@@ -69,6 +70,11 @@ $msg = $_GET['msg'] ?? null;
     </style>
 </head>
 <body>
+<?php if ($demoMode === '1'): ?>
+<div style="background: #dc2626; color: #ffffff; padding: 10px 16px; text-align: center; font-weight: 700; font-size: 13px; letter-spacing: 0.5px; z-index: 99999; box-shadow: 0 2px 4px rgba(0,0,0,0.2); width: 100%;">
+    <i class="fa-solid fa-triangle-exclamation" style="margin-right: 8px;"></i> DEMO MODE ON - turn off before going live
+</div>
+<?php endif; ?>
 <div class="login-wrap">
     <div class="login-card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
@@ -166,10 +172,6 @@ $msg = $_GET['msg'] ?? null;
                 <i class="fa-solid fa-arrow-right-to-bracket mr-1"></i> Sign In with PIN
             </button>
         </form>
-
-        <?php
-        $demoMode = get_setting('demo_mode', '1');
-        ?>
 
         <?php if ($demoMode === '1'): ?>
         <!-- Quick 1-Click Demo Login for Back Office Roles (Active in Test Mode) -->
