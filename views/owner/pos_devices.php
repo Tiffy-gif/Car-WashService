@@ -44,10 +44,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($csrfError)) {
                     $message = "A device with ID '{$uid}' is already registered.";
                     $messageType = 'danger';
                 } else {
-                    $apiKey = 'pos_sec_' . bin2hex(random_bytes(12));
-                    $ins = $pdo->prepare("INSERT INTO pos_devices (device_name, device_uid, api_key, location, status) VALUES (?, ?, ?, ?, 'active')");
-                    $ins->execute([$name, $uid, $apiKey, $location]);
-                    $message = "New POS device '{$name}' approved successfully! Assigned API Key: {$apiKey}";
+                    $apiKey = 'pos_sec_' . bin2hex(random_bytes(16));
+                    $keyHash = hash('sha256', $apiKey);
+                    $ins = $pdo->prepare("INSERT INTO pos_devices (device_name, device_uid, api_key, api_key_hash, location, status) VALUES (?, ?, '', ?, ?, 'active')");
+                    $ins->execute([$name, $uid, $keyHash, $location]);
+                    $message = "New POS device '{$name}' approved successfully! Assigned API Key: {$apiKey} (Copy and save this key now; it is stored hashed and will not be displayed again)";
                 }
             }
         }
@@ -73,9 +74,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($csrfError)) {
             $messageType = 'danger';
         } else {
             $id = (int)($_POST['device_id'] ?? 0);
-            $newKey = 'pos_sec_' . bin2hex(random_bytes(12));
-            $pdo->prepare("UPDATE pos_devices SET api_key = ? WHERE id = ?")->execute([$newKey, $id]);
-            $message = "New API Key generated for device #{$id}: {$newKey}";
+            $newKey = 'pos_sec_' . bin2hex(random_bytes(16));
+            $newKeyHash = hash('sha256', $newKey);
+            $pdo->prepare("UPDATE pos_devices SET api_key = '', api_key_hash = ? WHERE id = ?")->execute([$newKeyHash, $id]);
+            $message = "New API Key generated for device #{$id}: {$newKey} (Copy and save this key now; it is stored hashed and will not be displayed again)";
         }
     }
 
@@ -245,7 +247,7 @@ if ($detailDevice):
                 <i class="fa-solid fa-key mr-1" style="color: #ea580c;"></i> Device API Authentication Key
             </div>
             <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
-                <input type="password" value="<?= htmlspecialchars($detailDevice['api_key']) ?>" readonly id="detailDevKey" style="font-family: var(--font-mono); font-size: 13px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; width: 280px; color: var(--text-main);">
+                <input type="text" value="<?= !empty($detailDevice['api_key']) ? htmlspecialchars($detailDevice['api_key']) : '[Secured as SHA-256 Hash]' ?>" readonly id="detailDevKey" style="font-family: var(--font-mono); font-size: 13px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; width: 280px; color: var(--text-main);" title="Stored as SHA-256 hash. Regenerate if lost.">
                 <button type="button" class="btn btn-secondary btn-sm" onclick="copyApiKey('detailDevKey')">
                     <i class="fa-solid fa-copy mr-1"></i> Copy
                 </button>
@@ -491,9 +493,10 @@ $devices = $pdo->query("SELECT * FROM pos_devices ORDER BY id DESC")->fetchAll(P
 
 // Warning 1: Check for Shared / Duplicate API Keys
 $sharedKeysStmt = $pdo->query("
-    SELECT api_key, COUNT(*) as dev_count, GROUP_CONCAT(device_name SEPARATOR ' & ') as device_names
+    SELECT api_key_hash, COUNT(*) as dev_count, GROUP_CONCAT(device_name SEPARATOR ' & ') as device_names
     FROM pos_devices
-    GROUP BY api_key
+    WHERE api_key_hash IS NOT NULL AND api_key_hash != ''
+    GROUP BY api_key_hash
     HAVING dev_count > 1
 ");
 $sharedKeys = $sharedKeysStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -900,7 +903,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                         </td>
                         <td>
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <input type="password" value="<?= htmlspecialchars($d['api_key']) ?>" readonly id="key_<?= $d['id'] ?>" style="font-family: var(--font-mono); font-size: 12px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; width: 170px;">
+                                <input type="text" value="<?= !empty($d['api_key']) ? htmlspecialchars($d['api_key']) : '[SHA-256 Hashed]' ?>" readonly id="key_<?= $d['id'] ?>" style="font-family: var(--font-mono); font-size: 12px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; width: 170px; color: var(--text-muted);" title="Stored as SHA-256 hash.">
                                 <button type="button" class="btn btn-secondary btn-sm" style="padding: 4px 8px;" onclick="copyApiKey('key_<?= $d['id'] ?>')" title="Copy Key">
                                     <i class="fa-solid fa-copy"></i>
                                 </button>

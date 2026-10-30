@@ -54,18 +54,68 @@ function migrate_pos_devices(): void {
         try { $pdo->exec("ALTER TABLE orders ADD COLUMN idempotency_key VARCHAR(100) DEFAULT NULL"); } catch (Exception $e) {}
     }
 
-    // 3. Seed Default / Sample Approved POS Device (ONLY in development)
+    // 3. Add api_key_hash (sha256) to pos_devices, migrate existing rows, blank plaintext
+    if ($driver === 'mysql') {
+        $pCols = $pdo->query("SHOW COLUMNS FROM pos_devices")->fetchAll(PDO::FETCH_COLUMN);
+        if (!in_array('api_key_hash', $pCols, true)) {
+            $pdo->exec("ALTER TABLE pos_devices ADD COLUMN api_key_hash CHAR(64) NULL AFTER api_key");
+            $pdo->exec("ALTER TABLE pos_devices ADD UNIQUE KEY uniq_api_key_hash (api_key_hash)");
+            migrateLog("Added column 'api_key_hash' to pos_devices.");
+        }
+
+        // Migrate any existing plaintext keys to sha256 hashes
+        $existingRows = $pdo->query("SELECT id, api_key FROM pos_devices WHERE api_key IS NOT NULL AND api_key != ''")->fetchAll(PDO::FETCH_ASSOC);
+        $updHash = $pdo->prepare("UPDATE pos_devices SET api_key_hash = ? WHERE id = ?");
+        foreach ($existingRows as $er) {
+            $hash = hash('sha256', $er['api_key']);
+            $updHash->execute([$hash, $er['id']]);
+        }
+        if (!empty($existingRows)) {
+            migrateLog("Hashed " . count($existingRows) . " existing POS device keys.");
+        }
+
+        // Drop unique constraint on api_key so blank strings don't collide
+        $indexes = $pdo->query("SHOW INDEX FROM pos_devices WHERE Column_name = 'api_key'")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($indexes as $idx) {
+            if ($idx['Key_name'] !== 'PRIMARY') {
+                try {
+                    $pdo->exec("ALTER TABLE pos_devices DROP INDEX `{$idx['Key_name']}`");
+                } catch (Exception $e) {}
+            }
+        }
+        $pdo->exec("ALTER TABLE pos_devices MODIFY COLUMN api_key VARCHAR(128) NULL DEFAULT ''");
+
+        // Blank plaintext keys
+        $pdo->exec("UPDATE pos_devices SET api_key = '' WHERE api_key_hash IS NOT NULL AND api_key_hash != ''");
+        migrateLog("Blanked plaintext api_key in pos_devices.");
+    } else {
+        try {
+            $pdo->exec("ALTER TABLE pos_devices ADD COLUMN api_key_hash CHAR(64) NULL");
+            $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS uniq_api_key_hash ON pos_devices(api_key_hash)");
+        } catch (Exception $e) {}
+
+        $existingRows = $pdo->query("SELECT id, api_key FROM pos_devices WHERE api_key IS NOT NULL AND api_key != ''")->fetchAll(PDO::FETCH_ASSOC);
+        $updHash = $pdo->prepare("UPDATE pos_devices SET api_key_hash = ? WHERE id = ?");
+        foreach ($existingRows as $er) {
+            $hash = hash('sha256', $er['api_key']);
+            $updHash->execute([$hash, $er['id']]);
+        }
+        $pdo->exec("UPDATE pos_devices SET api_key = '' WHERE api_key_hash IS NOT NULL AND api_key_hash != ''");
+    }
+
+    // 4. Seed Default / Sample Approved POS Device (ONLY in development)
     if (defined('APP_ENV') && APP_ENV === 'development') {
         $devStmt = $pdo->prepare("SELECT COUNT(*) FROM pos_devices WHERE device_uid = 'POS-TERMINAL-01'");
         $devStmt->execute();
         if ((int)$devStmt->fetchColumn() === 0) {
             $sampleKey = 'pos_sec_test_key_8899aabb';
+            $sampleHash = hash('sha256', $sampleKey);
             $insDev = $pdo->prepare("
-                INSERT INTO pos_devices (device_name, device_uid, api_key, location, status)
-                VALUES ('Counter Terminal 1 (Tablet)', 'POS-TERMINAL-01', ?, 'Lane 1 / Counter', 'active')
+                INSERT INTO pos_devices (device_name, device_uid, api_key, api_key_hash, location, status)
+                VALUES ('Counter Terminal 1 (Tablet)', 'POS-TERMINAL-01', '', ?, 'Lane 1 / Counter', 'active')
             ");
-            $insDev->execute([$sampleKey]);
-            migrateLog("Seeded default POS device: POS-TERMINAL-01 with API Key: {$sampleKey}");
+            $insDev->execute([$sampleHash]);
+            migrateLog("Seeded default POS device: POS-TERMINAL-01 with hashed API Key");
         }
     }
 

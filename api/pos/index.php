@@ -93,9 +93,10 @@ if (!$apiKey) {
     exit;
 }
 
-// Check device status in pos_devices table
-$devStmt = $pdo->prepare("SELECT * FROM pos_devices WHERE api_key = ?");
-$devStmt->execute([$apiKey]);
+// Check device status in pos_devices table by SHA-256 hash
+$keyHash = hash('sha256', $apiKey);
+$devStmt = $pdo->prepare("SELECT * FROM pos_devices WHERE api_key_hash = ?");
+$devStmt->execute([$keyHash]);
 $device = $devStmt->fetch();
 
 if (!$device) {

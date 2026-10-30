@@ -23,7 +23,12 @@ if (!$device) {
 }
 
 $deviceId = (int)$device['id'];
-$apiKey = (string)$device['api_key'];
+$apiKey = getenv('POS_DEVICE_KEY') ?: ($_ENV['POS_DEVICE_KEY'] ?? '');
+if (!$apiKey) {
+    // When keys are stored hashed, generate a temporary session test key for this device
+    $apiKey = 'test_auth_key_' . bin2hex(random_bytes(16));
+    $pdo->prepare("UPDATE pos_devices SET api_key_hash = ? WHERE id = ?")->execute([hash('sha256', $apiKey), $deviceId]);
+}
 $apiUrl = getenv('POS_URL') ?: ($_ENV['POS_URL'] ?? (rtrim(API_BASE_URL, '/') . '/api/pos/index.php'));
 
 echo "========================================================\n";

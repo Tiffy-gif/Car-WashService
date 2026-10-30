@@ -396,7 +396,8 @@ function initDatabase(bool $force = false): void {
         id {$autoInc},
         device_name VARCHAR(100) NOT NULL,
         device_uid VARCHAR(100) NOT NULL UNIQUE,
-        api_key VARCHAR(128) NOT NULL UNIQUE,
+        api_key VARCHAR(128) NULL DEFAULT '',
+        api_key_hash CHAR(64) NULL UNIQUE,
         location VARCHAR(100) DEFAULT 'Main Counter',
         status VARCHAR(20) DEFAULT 'active', -- active, blocked
         last_seen_at DATETIME DEFAULT NULL,

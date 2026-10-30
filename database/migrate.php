@@ -16,6 +16,7 @@ require_once __DIR__ . '/migrate_bank_stock_controls.php';
 require_once __DIR__ . '/migrate_crm_membership_reminders.php';
 require_once __DIR__ . '/migrate_pos_sessions.php';
 require_once __DIR__ . '/migrate_receipt_printed.php';
+require_once __DIR__ . '/migrate_pos_devices.php';
 
 /**
  * Run and verify all database schema migrations.
@@ -76,6 +77,7 @@ function runMigrations(bool $force = false): array {
         migrateCrmMembershipReminders($force);
         migratePosSessions($force);
         migrateReceiptPrinted($force);
+        migrate_pos_devices();
 
         // Record init_database as well
         if ($isSqlite) {
