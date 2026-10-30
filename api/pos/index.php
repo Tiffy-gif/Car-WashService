@@ -380,7 +380,7 @@ $ACTION_PERMISSIONS = [
     'pay_order' => ['pos.pay_order', 'orders.change_status'],
     'get_today_orders' => ['orders.list', 'pos.access'],
     'get_order' => ['orders.list', 'pos.access'],
-    'cancel_order' => ['pos.cancel_order', 'orders.cancel'],
+    'cancel_order' => ['pos.access'],
     'assign_crew' => ['orders.change_crew'],
     'process_refund' => ['pos.cancel_order', 'orders.cancel'],
     'submit_bank_transfer' => ['pos.pay_order'],
@@ -2882,8 +2882,8 @@ if ($action === 'get_today_orders') {
 // ========================================================
 if ($action === 'cancel_order') {
     $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
-    $orderNumber = trim($inputData['order_number'] ?? $_POST['order_number'] ?? '');
-    $reason = trim($inputData['reason'] ?? $_POST['reason'] ?? '');
+    $orderNumber = trim((string)($inputData['order_number'] ?? $_POST['order_number'] ?? ''));
+    $reason = trim((string)($inputData['reason'] ?? $_POST['reason'] ?? ''));
     $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
     if ($staffId <= 0) {
         http_response_code(401);
@@ -2910,31 +2910,99 @@ if ($action === 'cancel_order') {
         exit;
     }
 
-    if ($stf['role'] !== 'owner' && !Auth::userHasPermission($staffId, 'pos.cancel_order') && !Auth::userHasPermission($staffId, 'orders.cancel')) {
-        http_response_code(403);
+    // Cancellation reason must be at least 5 characters
+    if (mb_strlen($reason) < 5) {
+        http_response_code(400);
         echo json_encode([
             'success' => false,
-            'error' => 'PERMISSION_DENIED',
-            'message' => "Staff ID {$staffId} does not have permission to cancel orders."
+            'error' => 'REASON_TOO_SHORT',
+            'message' => 'Cancellation reason is required and must be at least 5 characters.'
         ]);
         exit;
     }
 
-    if ($reason === '') {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'Cancellation reason is required']);
-        exit;
+    // Manager / Owner physical authorization check:
+    // If requester role is NOT manager or owner, manager_username + manager_pin are mandatory.
+    // If manager credentials are provided (by any role), they are verified and self-approval is rejected.
+    $mgrUser = trim((string)($inputData['manager_username'] ?? $_POST['manager_username'] ?? ''));
+    $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
+    $isManagerOrOwner = in_array($stf['role'], ['manager', 'owner'], true);
+    $hasManagerCredentials = ($mgrUser !== '' || $mgrPin !== '');
+
+    if (!$isManagerOrOwner || $hasManagerCredentials) {
+        if ($mgrUser === '' || $mgrPin === '') {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'error' => 'Invalid manager credentials',
+                'message' => 'Invalid manager credentials'
+            ]);
+            exit;
+        }
+
+        try {
+            $mgr = CashierControl::verifyManagerPin($mgrUser, $mgrPin, $authDeviceId);
+        } catch (ManagerPinThrottledException $e) {
+            http_response_code(429);
+            echo json_encode([
+                'success' => false,
+                'error' => 'TOO_MANY_ATTEMPTS',
+                'message' => $e->getMessage()
+            ]);
+            exit;
+        } catch (Exception $e) {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'error' => 'Invalid manager credentials',
+                'message' => 'Invalid manager credentials'
+            ]);
+            exit;
+        }
+
+        if (!in_array($mgr['manager_role'], ['manager', 'owner'], true)) {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'error' => 'Invalid manager credentials',
+                'message' => 'Approver must have manager or owner role.'
+            ]);
+            exit;
+        }
+
+        if ((int)$mgr['manager_id'] === $staffId) {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'error' => 'SELF_APPROVAL_NOT_ALLOWED',
+                'message' => 'Approver cannot be the same user as the requester.'
+            ]);
+            exit;
+        }
+
+        $cancelledByUserId = $staffId;
+        $cancelApprovedByUserId = (int)$mgr['manager_id'];
+        $approverUsername = $mgr['manager_username'];
+        $approverName = $mgr['manager_name'];
+        $approverRole = $mgr['manager_role'];
+    } else {
+        // Direct cancellation by logged-in Manager or Owner session
+        $cancelledByUserId = $staffId;
+        $cancelApprovedByUserId = $staffId;
+        $approverUsername = $stf['username'];
+        $approverName = $stf['full_name'];
+        $approverRole = $stf['role'];
     }
 
     $ord = null;
     if ($orderId > 0) {
         $stmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?");
         $stmt->execute([$orderId]);
-        $ord = $stmt->fetch();
+        $ord = $stmt->fetch(PDO::FETCH_ASSOC);
     } elseif ($orderNumber !== '') {
         $stmt = $pdo->prepare("SELECT * FROM orders WHERE order_number = ?");
         $stmt->execute([$orderNumber]);
-        $ord = $stmt->fetch();
+        $ord = $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
     if (!$ord) {
@@ -2951,23 +3019,14 @@ if ($action === 'cancel_order') {
         exit;
     }
 
-    $isPaidOrder = ($ord['status'] === 'paid' || $ord['payment_status'] === 'paid');
-    if ($isPaidOrder) {
-        $realRole = ($stf && $stf['status'] === 'active') ? $stf['role'] : '';
-        if (!in_array($realRole, ['owner', 'manager'], true)) {
-            http_response_code(403);
-            echo json_encode([
-                'success' => false,
-                'error' => 'PERMISSION_DENIED',
-                'message' => 'Only Owner or Manager can cancel paid orders.'
-            ]);
-            exit;
-        }
-    }
-
     $id = (int)$ord['id'];
-    $cancellerTitle = $stf ? "{$stf['full_name']} (" . ucfirst($stf['role']) . ")" : "Staff ID #{$staffId}";
-    $fullReason = "Cancelled by {$cancellerTitle}: {$reason}";
+    $requesterTitle = "{$stf['full_name']} (" . ucfirst($stf['role']) . ")";
+    $approverTitle = "{$approverName} (" . ucfirst($approverRole) . ")";
+    if ($cancelledByUserId === $cancelApprovedByUserId) {
+        $fullReason = "Cancelled by {$requesterTitle}: {$reason}";
+    } else {
+        $fullReason = "Cancelled by {$requesterTitle}, approved by {$approverTitle}: {$reason}";
+    }
     $cancelNote = " [{$fullReason}]";
 
     $pdo->beginTransaction();
@@ -2985,23 +3044,29 @@ if ($action === 'cancel_order') {
         // 2. Soft-cancel crew commissions: Never hard delete
         $pdo->prepare("UPDATE order_washers SET is_active = 0, commission_usd = 0 WHERE order_id = ?")->execute([$id]);
         $pdo->prepare("UPDATE order_mechanics SET is_active = 0, commission_usd = 0 WHERE order_id = ?")->execute([$id]);
-        audit_log('ORDER_CANCEL', "POS cancelled order #{$order['order_number']}. Reason: {$fullReason}", 'order', (string)$id);
 
-        // 3. Mark order cancelled
+        // 3. Mark order cancelled with both user IDs
         $pdo->prepare("
             UPDATE orders 
             SET status = 'cancelled', 
                 payment_status = 'cancelled', 
                 repair_status = 'cancelled', 
                 cancel_reason = ?, 
+                cancelled_by_user_id = ?,
+                cancel_approved_by_user_id = ?,
                 cancelled_at = CURRENT_TIMESTAMP, 
                 notes = CONCAT(COALESCE(notes, ''), ?) 
             WHERE id = ?
-        ")->execute([$fullReason, $cancelNote, $id]);
+        ")->execute([$fullReason, $cancelledByUserId, $cancelApprovedByUserId, $cancelNote, $id]);
+
+        // 4. Audit-log both IDs/usernames, order number, amount, reason, and device ID
+        $orderAmount = number_format((float)($ord['total_usd'] ?? $ord['total_amount'] ?? 0), 2);
+        $logDetails = "POS order #{$ord['order_number']} (Amount: \${$orderAmount}) cancelled by User #{$cancelledByUserId} ({$stf['username']}) approved by Manager #{$cancelApprovedByUserId} ({$approverUsername}) on Device #{$authDeviceId}. Reason: {$reason}";
+        AuditLogger::log('ORDER_CANCEL', $logDetails, 'order', (string)$id, $cancelledByUserId, $stf['username'], $stf['role']);
 
         $pdo->commit();
 
-        // 4. Reverse loyalty points (refund redeemed points and clawback earned points)
+        // 5. Reverse loyalty points (refund redeemed points and clawback earned points)
         try {
             Loyalty::reversePointsForOrder($pdo, $id, $staffId ?: null, $fullReason);
         } catch (Exception $e) {
