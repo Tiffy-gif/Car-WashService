@@ -21,9 +21,9 @@ function migratePosSessions(bool $force = false): bool {
 
     // Check if migration has already been executed
     $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM schema_migrations WHERE migration = ?");
-    $checkStmt->execute(['migrate_pos_sessions']);
+    $checkStmt->execute(['migrate_pos_sessions_v2']);
     if (!$force && (int)$checkStmt->fetchColumn() > 0) {
-        migrateLog("Migration 'migrate_pos_sessions' has already been executed. Skipping.");
+        migrateLog("Migration 'migrate_pos_sessions_v2' has already been executed. Skipping.");
         return true;
     }
 
@@ -61,12 +61,29 @@ function migratePosSessions(bool $force = false): bool {
     }
 
     if ($isSqlite) {
-        $pdo->prepare("INSERT OR IGNORE INTO schema_migrations (migration) VALUES (?)")->execute(['migrate_pos_sessions']);
+        $pdo->prepare("INSERT OR IGNORE INTO schema_migrations (migration) VALUES (?)")->execute(['migrate_pos_sessions_v2']);
     } else {
-        $pdo->prepare("INSERT INTO schema_migrations (migration) VALUES (?) ON DUPLICATE KEY UPDATE executed_at = executed_at")->execute(['migrate_pos_sessions']);
+        $pdo->prepare("INSERT INTO schema_migrations (migration) VALUES (?) ON DUPLICATE KEY UPDATE executed_at = executed_at")->execute(['migrate_pos_sessions_v2']);
     }
 
     migrateLog("Table pos_sessions verified successfully.");
+
+    // 2. Ensure created_by and synced_by columns on orders table
+    if (!$isSqlite) {
+        $orderCols = $pdo->query("SHOW COLUMNS FROM orders")->fetchAll(PDO::FETCH_COLUMN);
+        if (!in_array('created_by', $orderCols, true)) {
+            $pdo->exec("ALTER TABLE orders ADD COLUMN created_by INT NULL AFTER cashier_id");
+            migrateLog("Added column 'created_by' to orders table.");
+        }
+        if (!in_array('synced_by', $orderCols, true)) {
+            $pdo->exec("ALTER TABLE orders ADD COLUMN synced_by INT NULL AFTER created_by");
+            migrateLog("Added column 'synced_by' to orders table.");
+        }
+    } else {
+        try { $pdo->exec("ALTER TABLE orders ADD COLUMN created_by INT NULL"); } catch (Exception $e) {}
+        try { $pdo->exec("ALTER TABLE orders ADD COLUMN synced_by INT NULL"); } catch (Exception $e) {}
+    }
+
     return true;
 }
 

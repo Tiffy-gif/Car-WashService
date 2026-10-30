@@ -1261,6 +1261,45 @@ if ($action === 'create_order') {
     $assignedWashers = $inputData['washers'] ?? $_POST['washers'] ?? [];
     $assignedMechanics = $inputData['mechanics'] ?? $_POST['mechanics'] ?? [];
 
+    // Offline order & creator extraction (Item 5)
+    $rawCreatedBy = !empty($inputData['created_by_staff_id']) ? (int)$inputData['created_by_staff_id'] : (!empty($_POST['created_by_staff_id']) ? (int)$_POST['created_by_staff_id'] : 0);
+    $rawCreatedAt = trim((string)($inputData['created_at'] ?? $_POST['created_at'] ?? ''));
+    $isOfflineSync = (!empty($rawCreatedBy) || !empty($inputData['is_offline_sync']) || !empty($_POST['is_offline_sync']) || !empty($rawCreatedAt));
+
+    $orderCreatedBy = null;
+    $creatorStaffUser = null;
+    $creatorName = null;
+
+    if ($rawCreatedBy > 0) {
+        $cStfStmt = $pdo->prepare("SELECT id, username, full_name, role, status FROM users WHERE id = ?");
+        $cStfStmt->execute([$rawCreatedBy]);
+        $cStf = $cStfStmt->fetch(PDO::FETCH_ASSOC);
+        if ($cStf && $cStf['status'] === 'active') {
+            $orderCreatedBy = (int)$cStf['id'];
+            $creatorStaffUser = $cStf;
+            $creatorName = $cStf['full_name'];
+        } else {
+            // ONLY if user exists and is active, otherwise null
+            $orderCreatedBy = null;
+            $creatorName = "Inactive or unknown user #{$rawCreatedBy}";
+        }
+    } else {
+        $orderCreatedBy = $verifiedUserId;
+        $creatorStaffUser = $sessionUser;
+        $creatorName = $sessionUser['full_name'] ?? 'Staff';
+    }
+
+    $orderSyncedBy = $verifiedUserId;
+
+    // Validate created_at from offline payload if present
+    $orderCreatedAt = date('Y-m-d H:i:s');
+    if (!empty($rawCreatedAt)) {
+        $ts = strtotime($rawCreatedAt);
+        if ($ts !== false && $ts > 0 && $ts <= (time() + 300)) {
+            $orderCreatedAt = date('Y-m-d H:i:s', $ts);
+        }
+    }
+
     // Validate Cashier / Staff ID: must exist, active, and have permission to create order
     if (empty($staffUserId)) {
         http_response_code(401);
@@ -1297,6 +1336,15 @@ if ($action === 'create_order') {
                 ]);
                 exit;
             }
+            if ($creatorStaffUser && ($creatorStaffUser['role'] ?? '') !== 'owner' && !Auth::userHasPermission((int)$creatorStaffUser['id'], 'pos.discount')) {
+                http_response_code(403);
+                echo json_encode([
+                    'success' => false,
+                    'error' => 'PERMISSION_DENIED',
+                    'message' => "Original order creator (ID {$creatorStaffUser['id']}) did not have permission to apply discounts."
+                ]);
+                exit;
+            }
         }
 
         // Validate payment permission if paid upfront
@@ -1307,6 +1355,15 @@ if ($action === 'create_order') {
                     'success' => false,
                     'error' => 'PERMISSION_DENIED',
                     'message' => "Order staff ID {$staffUserId} does not have permission to process payments (pos.pay_order required)."
+                ]);
+                exit;
+            }
+            if ($creatorStaffUser && ($creatorStaffUser['role'] ?? '') !== 'owner' && !Auth::userHasPermission((int)$creatorStaffUser['id'], 'pos.pay_order')) {
+                http_response_code(403);
+                echo json_encode([
+                    'success' => false,
+                    'error' => 'PERMISSION_DENIED',
+                    'message' => "Original order creator (ID {$creatorStaffUser['id']}) did not have permission to process payments."
                 ]);
                 exit;
             }
@@ -1714,13 +1771,15 @@ if ($action === 'create_order') {
                 subtotal_usd, discount_usd, points_redeemed, points_discount_usd, total_usd, total_khr,
                 status, repair_status, repair_notes,
                 payment_method, payment_status, amount_tendered_usd, change_usd, payment_ref,
-                cashier_id, notes, started_at, finished_at, paid_at,
+                cashier_id, created_by, synced_by, is_synced, synced_at,
+                notes, started_at, finished_at, paid_at, created_at,
                 current_mileage, next_oil_mileage, next_oil_date
             ) VALUES (
                 ?, ?, 'pos_app', ?, ?,
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?,
+                ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?
@@ -1733,10 +1792,24 @@ if ($action === 'create_order') {
             $subtotalUsd, $totalDiscountUsd, $actualPointsRedeemed, $pointsDiscountUsd, $totalUsd, $totalKhr,
             $status, $repairStatus, $repairNotes,
             $paymentMethod, $paymentStatus, $tenderedUsd, $changeUsd, $paymentRef,
-            $staffUserId, $notes, $startedAt, $finishedAt, $paidAt,
+            ($orderCreatedBy ?: $verifiedUserId), $orderCreatedBy, $orderSyncedBy, ($isOfflineSync ? 1 : 0), ($isOfflineSync ? date('Y-m-d H:i:s') : null),
+            $notes, $startedAt, $finishedAt, $paidAt, $orderCreatedAt,
             $currentMileage, $nextOilMileage, $nextOilDate
         ]);
         $orderId = (int)$pdo->lastInsertId();
+
+        // Audit-log order creation with created_by and synced_by
+        if (class_exists('AuditLogger')) {
+            AuditLogger::log(
+                $isOfflineSync ? 'OFFLINE_ORDER_SYNCED' : 'ORDER_CREATED',
+                "Order {$orderNumber} (" . ($isOfflineSync ? "offline synced" : "direct") . ") created_by: " . ($orderCreatedBy ? "user #{$orderCreatedBy} ({$creatorName})" : "none/unverified") . ", synced_by: user #{$orderSyncedBy} ({$sessionUser['username']}) on device #{$device['id']} ({$device['device_name']})",
+                'order',
+                (string)$orderId,
+                $orderSyncedBy,
+                $sessionUser['username'] ?? null,
+                $sessionUser['role'] ?? null
+            );
+        }
 
         // Record Loyalty Reward prompt action (Requirement 3: record whether the cashier gave it)
         $loyaltyRewardGiven = isset($inputData['loyalty_reward_given']) ? ($inputData['loyalty_reward_given'] ? 1 : 0) : (isset($_POST['loyalty_reward_given']) ? ($_POST['loyalty_reward_given'] ? 1 : 0) : null);
