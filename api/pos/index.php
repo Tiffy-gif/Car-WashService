@@ -702,7 +702,12 @@ if ($action === 'get_matching_upsells' || $action === 'get_upsell_offers') {
 if ($action === 'log_upsell_action' || $action === 'record_upsell_action') {
     $ruleId = (int)($inputData['rule_id'] ?? $_POST['rule_id'] ?? 0);
     $status = trim((string)($inputData['status'] ?? $_POST['status'] ?? 'shown'));
-    $cashierId = (int)($inputData['cashier_id'] ?? $_POST['cashier_id'] ?? Auth::getUserId() ?? 1);
+    $cashierId = (int)($inputData['cashier_id'] ?? $_POST['cashier_id'] ?? Auth::getUserId() ?? 0);
+    if ($cashierId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Staff ID is required to log upsell action.']);
+        exit;
+    }
     $orderId = !empty($inputData['order_id']) ? (int)$inputData['order_id'] : null;
     $customerId = !empty($inputData['customer_id']) ? (int)$inputData['customer_id'] : null;
     $vehicleId = !empty($inputData['vehicle_id']) ? (int)$inputData['vehicle_id'] : null;
@@ -913,20 +918,29 @@ if ($action === 'create_order') {
     $assignedMechanics = $inputData['mechanics'] ?? $_POST['mechanics'] ?? [];
 
     // Validate Cashier / Staff ID: must exist, active, and have permission to create order
-    if ($staffUserId) {
-        $stfStmt = $pdo->prepare("SELECT id, role, role_id, status FROM users WHERE id = ?");
-        $stfStmt->execute([$staffUserId]);
-        $stf = $stfStmt->fetch();
-        $hasCreatePerm = $stf && ($stf['role'] === 'owner' || in_array($stf['role'], ['cashier', 'owner'], true) || Auth::userHasPermission($staffUserId, 'pos.create_order') || Auth::userHasPermission($staffUserId, 'pos.access'));
-        if (!$stf || $stf['status'] !== 'active' || !$hasCreatePerm) {
-            http_response_code(403);
-            echo json_encode([
-                'success' => false,
-                'error' => 'PERMISSION_DENIED',
-                'message' => "Order staff ID {$staffUserId} does not have permission to create orders."
-            ]);
-            exit;
-        }
+    if (empty($staffUserId)) {
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'error' => 'STAFF_REQUIRED',
+            'message' => 'Staff ID is required to create an order.'
+        ]);
+        exit;
+    }
+
+    $stfStmt = $pdo->prepare("SELECT id, role, role_id, status FROM users WHERE id = ?");
+    $stfStmt->execute([$staffUserId]);
+    $stf = $stfStmt->fetch();
+    $hasCreatePerm = $stf && ($stf['role'] === 'owner' || in_array($stf['role'], ['cashier', 'owner'], true) || Auth::userHasPermission($staffUserId, 'pos.create_order') || Auth::userHasPermission($staffUserId, 'pos.access'));
+    if (!$stf || $stf['status'] !== 'active' || !$hasCreatePerm) {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'PERMISSION_DENIED',
+            'message' => "Order staff ID {$staffUserId} does not have permission to create orders."
+        ]);
+        exit;
+    }
 
         // Validate discount permission if discount is applied
         if ($manualDiscountUsd > 0.001) {
@@ -953,7 +967,6 @@ if ($action === 'create_order') {
                 exit;
             }
         }
-    }
 
     // Validate Assigned Washers: must exist, active, role washer OR can_assign_washer = 1
     if (!empty($assignedWashers) && is_array($assignedWashers)) {
@@ -1678,11 +1691,29 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
     }
 
     $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
-    if ($staffId > 0) {
-        $stfStmt = $pdo->prepare("SELECT id, role, status FROM users WHERE id = ?");
-        $stfStmt->execute([$staffId]);
-        $stf = $stfStmt->fetch();
-        if ($stf && $stf['role'] !== 'owner') {
+    if ($staffId <= 0) {
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'error' => 'STAFF_REQUIRED',
+            'message' => 'Staff ID is required to update order status.'
+        ]);
+        exit;
+    }
+
+    $stfStmt = $pdo->prepare("SELECT id, role, status FROM users WHERE id = ?");
+    $stfStmt->execute([$staffId]);
+    $stf = $stfStmt->fetch();
+    if (!$stf || $stf['status'] !== 'active') {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'STAFF_INACTIVE',
+            'message' => "Staff ID {$staffId} is inactive or not found."
+        ]);
+        exit;
+    }
+    if ($stf['role'] !== 'owner') {
             if ($newStatus === 'paid' && !Auth::userHasPermission($staffId, 'pos.pay_order') && !Auth::userHasPermission($staffId, 'orders.change_status')) {
                 http_response_code(403);
                 echo json_encode([
@@ -1711,7 +1742,6 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
                 exit;
             }
         }
-    }
 
     $ord = null;
     if ($orderId > 0) {
@@ -2330,16 +2360,32 @@ if ($action === 'cancel_order') {
     $orderNumber = trim($inputData['order_number'] ?? $_POST['order_number'] ?? '');
     $reason = trim($inputData['reason'] ?? $_POST['reason'] ?? '');
     $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
-
-    // Look up real staff member and their real role from the database (never trust client-supplied role)
-    $stf = null;
-    if ($staffId > 0) {
-        $stfStmt = $pdo->prepare("SELECT id, username, full_name, role, status FROM users WHERE id = ?");
-        $stfStmt->execute([$staffId]);
-        $stf = $stfStmt->fetch(PDO::FETCH_ASSOC);
+    if ($staffId <= 0) {
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'error' => 'STAFF_REQUIRED',
+            'message' => 'Staff ID is required to cancel an order.'
+        ]);
+        exit;
     }
 
-    if ($staffId > 0 && !Auth::userHasPermission($staffId, 'pos.cancel_order') && !Auth::userHasPermission($staffId, 'orders.cancel')) {
+    // Look up real staff member and their real role from the database (never trust client-supplied role)
+    $stfStmt = $pdo->prepare("SELECT id, username, full_name, role, status FROM users WHERE id = ?");
+    $stfStmt->execute([$staffId]);
+    $stf = $stfStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$stf || $stf['status'] !== 'active') {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'STAFF_INACTIVE',
+            'message' => "Staff ID {$staffId} is inactive or not found."
+        ]);
+        exit;
+    }
+
+    if ($stf['role'] !== 'owner' && !Auth::userHasPermission($staffId, 'pos.cancel_order') && !Auth::userHasPermission($staffId, 'orders.cancel')) {
         http_response_code(403);
         echo json_encode([
             'success' => false,
@@ -2468,8 +2514,30 @@ if ($action === 'assign_crew') {
     $washers = $inputData['washers'] ?? $_POST['washers'] ?? [];
     $mechanics = $inputData['mechanics'] ?? $_POST['mechanics'] ?? [];
     $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
+    if ($staffId <= 0) {
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'error' => 'STAFF_REQUIRED',
+            'message' => 'Staff ID is required to assign or change crew.'
+        ]);
+        exit;
+    }
 
-    if ($staffId > 0 && !Auth::userHasPermission($staffId, 'orders.change_crew')) {
+    $stfStmt = $pdo->prepare("SELECT id, role, status FROM users WHERE id = ?");
+    $stfStmt->execute([$staffId]);
+    $stf = $stfStmt->fetch();
+    if (!$stf || $stf['status'] !== 'active') {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'STAFF_INACTIVE',
+            'message' => "Staff ID {$staffId} is inactive or not found."
+        ]);
+        exit;
+    }
+
+    if ($stf['role'] !== 'owner' && !Auth::userHasPermission($staffId, 'orders.change_crew')) {
         http_response_code(403);
         echo json_encode([
             'success' => false,
@@ -3014,24 +3082,26 @@ if ($action === 'save_pos_closing' || $action === 'close_day' || $action === 'sa
     $deviceId = (int)($device['id'] ?? 0);
     $deviceName = $device['device_name'] ?? 'POS Terminal';
 
-    if ($staffUserId > 0) {
-        $uStmt = $pdo->prepare("SELECT id, full_name, role, status FROM users WHERE id = ?");
-        $uStmt->execute([$staffUserId]);
-        $u = $uStmt->fetch();
-        if ($u) {
-            $staffName = $u['full_name'];
-            $staffRole = $u['role'];
-            if ($u['status'] !== 'active') {
-                http_response_code(403);
-                echo json_encode(['success' => false, 'error' => 'ACCOUNT_INACTIVE', 'message' => 'Staff user account is inactive.']);
-                exit;
-            }
-            if ($staffRole !== 'owner' && !Auth::userHasPermission($staffUserId, 'reports.daily_close') && !Auth::userHasPermission($staffUserId, 'pos.close_day') && !in_array($staffRole, ['cashier', 'manager'], true)) {
-                http_response_code(403);
-                echo json_encode(['success' => false, 'error' => 'PERMISSION_DENIED', 'message' => 'You do not have permission to close the shift or day.']);
-                exit;
-            }
-        }
+    if ($staffUserId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Staff ID is required to close the shift or day.']);
+        exit;
+    }
+
+    $uStmt = $pdo->prepare("SELECT id, full_name, role, status FROM users WHERE id = ?");
+    $uStmt->execute([$staffUserId]);
+    $u = $uStmt->fetch();
+    if (!$u || $u['status'] !== 'active') {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'STAFF_INACTIVE', 'message' => 'Staff user account is inactive or not found.']);
+        exit;
+    }
+    $staffName = $u['full_name'];
+    $staffRole = $u['role'];
+    if ($staffRole !== 'owner' && !Auth::userHasPermission($staffUserId, 'reports.daily_close') && !Auth::userHasPermission($staffUserId, 'pos.close_day') && !in_array($staffRole, ['cashier', 'manager'], true)) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'PERMISSION_DENIED', 'message' => 'You do not have permission to close the shift or day.']);
+        exit;
     }
 
     if (in_array($staffRole, ['washer', 'mechanic', 'technical'], true)) {
@@ -3278,6 +3348,11 @@ if ($action === 'get_daily_close_status' || $action === 'daily_close_status' || 
 // ========================================================
 if ($action === 'shift_start') {
     $cashierId = (int)($inputData['cashier_id'] ?? $inputData['user_id'] ?? $_POST['cashier_id'] ?? 0);
+    if ($cashierId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Cashier staff ID is required to start a shift.']);
+        exit;
+    }
     $cashierName = trim($inputData['cashier_name'] ?? $_POST['cashier_name'] ?? '');
     $openingUsd = max(0.00, (float)($inputData['opening_cash_usd'] ?? $_POST['opening_cash_usd'] ?? 0.00));
     $openingKhr = max(0, (int)($inputData['opening_cash_khr'] ?? $_POST['opening_cash_khr'] ?? 0));
@@ -3322,7 +3397,12 @@ if ($action === 'open_drawer_no_sale') {
     $reason = trim($inputData['reason'] ?? $_POST['reason'] ?? '');
     $mgrUser = trim($inputData['manager_username'] ?? $_POST['manager_username'] ?? '');
     $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
-    $cashierId = (int)($inputData['cashier_id'] ?? $_POST['cashier_id'] ?? 0);
+    $cashierId = (int)($inputData['cashier_id'] ?? $inputData['user_id'] ?? $_POST['cashier_id'] ?? 0);
+    if ($cashierId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Cashier staff ID is required to open drawer.']);
+        exit;
+    }
 
     try {
         $res = CashierControl::openDrawerNoSale($reason, $mgrUser, $mgrPin, $cashierId, $authDeviceId);
@@ -3338,7 +3418,12 @@ if ($action === 'open_drawer_no_sale') {
 // 22. ACTION: spot_audit
 // ========================================================
 if ($action === 'spot_audit') {
-    $cashierId = (int)($inputData['cashier_id'] ?? $_POST['cashier_id'] ?? 0);
+    $cashierId = (int)($inputData['cashier_id'] ?? $inputData['user_id'] ?? $_POST['cashier_id'] ?? 0);
+    if ($cashierId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Cashier staff ID is required for spot audit.']);
+        exit;
+    }
     $countedUsd = max(0.00, (float)($inputData['counted_cash_usd'] ?? $_POST['counted_cash_usd'] ?? 0.00));
     $countedKhr = max(0, (int)($inputData['counted_cash_khr'] ?? $_POST['counted_cash_khr'] ?? 0));
     $mgrUser = trim($inputData['manager_username'] ?? $_POST['manager_username'] ?? '');
@@ -3364,7 +3449,12 @@ if ($action === 'process_refund') {
     $refundReason = trim($inputData['refund_reason'] ?? $_POST['refund_reason'] ?? '');
     $mgrUser = trim($inputData['manager_username'] ?? $_POST['manager_username'] ?? '');
     $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
-    $cashierId = (int)($inputData['cashier_id'] ?? $_POST['cashier_id'] ?? 0);
+    $cashierId = (int)($inputData['cashier_id'] ?? $inputData['user_id'] ?? $_POST['cashier_id'] ?? 0);
+    if ($cashierId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Cashier staff ID is required to process refund.']);
+        exit;
+    }
     $isOffline = !empty($inputData['is_offline']) && ($inputData['is_offline'] === true || $inputData['is_offline'] === '1');
 
     if ($isOffline) {
@@ -3491,7 +3581,12 @@ if ($action === 'submit_bank_transfer') {
     $tendered = (float)($inputData['tendered_usd'] ?? $_POST['tendered_usd'] ?? 0.00);
     $discount = (float)($inputData['discount_usd'] ?? $_POST['discount_usd'] ?? 0.00);
     $points = (int)($inputData['points_to_redeem'] ?? $_POST['points_to_redeem'] ?? 0);
-    $cashierId = (int)($inputData['cashier_id'] ?? $_POST['cashier_id'] ?? 0);
+    $cashierId = (int)($inputData['cashier_id'] ?? $inputData['staff_id'] ?? $inputData['user_id'] ?? $_POST['cashier_id'] ?? $_POST['staff_id'] ?? $_POST['user_id'] ?? 0);
+    if ($cashierId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Cashier staff ID is required to submit bank transfer.']);
+        exit;
+    }
 
     $slipInput = getSlipFileFromInput($inputData['slip_base64'] ?? $_POST['slip_base64'] ?? null, $_FILES['slip_image'] ?? $_FILES['slip_file'] ?? null);
 
@@ -3792,12 +3887,22 @@ if ($action === 'receive_from_wash') {
 // ========================================================
 if ($action === 'start_tech_task') {
     $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
+    if ($staffId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Staff ID is required']);
+        exit;
+    }
     $stfUser = BayManager::getRealStaffUser($pdo, $staffId);
     $taskId = (int)($inputData['task_id'] ?? $_POST['task_id'] ?? 0);
 
-    if (!$stfUser || $taskId <= 0) {
+    if (!$stfUser) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_NOT_FOUND', 'message' => 'Unauthorized: Invalid or inactive staff user']);
+        exit;
+    }
+    if ($taskId <= 0) {
         http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'Valid staff_id and task_id required']);
+        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'Valid task_id required']);
         exit;
     }
 
@@ -3816,13 +3921,23 @@ if ($action === 'start_tech_task') {
 // ========================================================
 if ($action === 'finish_tech_task') {
     $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
+    if ($staffId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Staff ID is required']);
+        exit;
+    }
     $stfUser = BayManager::getRealStaffUser($pdo, $staffId);
     $taskId = (int)($inputData['task_id'] ?? $_POST['task_id'] ?? 0);
     $actualOil = isset($inputData['actual_oil_used']) ? (float)$inputData['actual_oil_used'] : (isset($_POST['actual_oil_used']) ? (float)$_POST['actual_oil_used'] : null);
 
-    if (!$stfUser || $taskId <= 0) {
+    if (!$stfUser) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_NOT_FOUND', 'message' => 'Unauthorized: Invalid or inactive staff user']);
+        exit;
+    }
+    if ($taskId <= 0) {
         http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'Valid staff_id and task_id required']);
+        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'Valid task_id required']);
         exit;
     }
 
@@ -3841,6 +3956,11 @@ if ($action === 'finish_tech_task') {
 // ========================================================
 if ($action === 'update_checklist_item') {
     $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
+    if ($staffId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Staff ID is required']);
+        exit;
+    }
     $stfUser = BayManager::getRealStaffUser($pdo, $staffId);
     $itemId = (int)($inputData['item_id'] ?? $_POST['item_id'] ?? 0);
     $chkStatus = trim($inputData['status'] ?? $_POST['status'] ?? 'pass');
@@ -3860,9 +3980,14 @@ if ($action === 'update_checklist_item') {
         }
     }
 
-    if (!$stfUser || $itemId <= 0) {
+    if (!$stfUser) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_NOT_FOUND', 'message' => 'Unauthorized: Invalid or inactive staff user']);
+        exit;
+    }
+    if ($itemId <= 0) {
         http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'Valid staff_id and item_id required']);
+        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'Valid item_id required']);
         exit;
     }
 
@@ -3883,6 +4008,11 @@ if ($action === 'update_checklist_item') {
 // ========================================================
 if ($action === 'request_parts') {
     $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
+    if ($staffId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Staff ID is required']);
+        exit;
+    }
     $stfUser = BayManager::getRealStaffUser($pdo, $staffId);
     $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
     $productId = (int)($inputData['product_id'] ?? $_POST['product_id'] ?? 0);
@@ -3890,9 +4020,14 @@ if ($action === 'request_parts') {
     $taskId = !empty($inputData['task_id']) ? (int)$inputData['task_id'] : (!empty($_POST['task_id']) ? (int)$_POST['task_id'] : null);
     $notes = trim($inputData['notes'] ?? $_POST['notes'] ?? '');
 
-    if (!$stfUser || $orderId <= 0 || $productId <= 0) {
+    if (!$stfUser) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_NOT_FOUND', 'message' => 'Unauthorized: Invalid or inactive staff user']);
+        exit;
+    }
+    if ($orderId <= 0 || $productId <= 0) {
         http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'Valid staff_id, order_id, and product_id required']);
+        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'Valid order_id and product_id required']);
         exit;
     }
 
@@ -3924,13 +4059,23 @@ if ($action === 'request_parts') {
 // ========================================================
 if ($action === 'finish_tech_job') {
     $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
+    if ($staffId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Staff ID is required']);
+        exit;
+    }
     $stfUser = BayManager::getRealStaffUser($pdo, $staffId);
     $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
     $tookLonger = isset($inputData['took_longer']) ? (int)$inputData['took_longer'] : (isset($_POST['took_longer']) ? (int)$_POST['took_longer'] : null);
 
-    if (!$stfUser || $orderId <= 0) {
+    if (!$stfUser) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_NOT_FOUND', 'message' => 'Unauthorized: Invalid or inactive staff user']);
+        exit;
+    }
+    if ($orderId <= 0) {
         http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'Valid staff_id and order_id required']);
+        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'Valid order_id required']);
         exit;
     }
 
@@ -4240,7 +4385,18 @@ if ($action === 'create_appointment') {
 // ========================================================
 if ($action === 'appointment_arrived') {
     $appointmentId = (int)($inputData['appointment_id'] ?? $_POST['appointment_id'] ?? 0);
-    $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 2);
+    $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
+    if ($staffId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Staff ID is required for appointment arrival.']);
+        exit;
+    }
+    $stfUser = BayManager::getRealStaffUser($pdo, $staffId);
+    if (!$stfUser) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_NOT_FOUND', 'message' => 'Unauthorized: Invalid or inactive staff user']);
+        exit;
+    }
 
     if ($appointmentId <= 0) {
         http_response_code(400);
@@ -4304,10 +4460,6 @@ if ($action === 'appointment_arrived') {
             ->execute([$orderId]);
     }
 
-    $stfUser = BayManager::getRealStaffUser($pdo, $staffId);
-    if (!$stfUser) {
-        $stfUser = ['id' => 1, 'full_name' => 'Cashier / Admin', 'effective_role' => 'cashier'];
-    }
     $arrivalResult = BayManager::markCustomerArrived($pdo, $orderId, (int)$stfUser['id'], (string)$stfUser['full_name'], (string)$stfUser['effective_role']);
 
     echo json_encode([
