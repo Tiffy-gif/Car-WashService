@@ -53,7 +53,27 @@ class PosStorage {
         }
     }
 
-    // User Session
+    // User Session & Token
+    static getSessionToken() {
+        try {
+            return sessionStorage.getItem('cw_pos_session_token');
+        } catch (e) {
+            return null;
+        }
+    }
+
+    static setSessionToken(token) {
+        try {
+            if (token) {
+                sessionStorage.setItem('cw_pos_session_token', token);
+            } else {
+                sessionStorage.removeItem('cw_pos_session_token');
+            }
+        } catch (e) {
+            console.error('Failed to update session token in sessionStorage:', e);
+        }
+    }
+
     static getUser() {
         try {
             const data = localStorage.getItem(this.KEYS.USER);
@@ -65,10 +85,21 @@ class PosStorage {
 
     static setUser(user) {
         if (user) {
-            this.setItem(this.KEYS.USER, JSON.stringify(user));
+            // Strip any raw token from persistent localStorage user object
+            const userToStore = { ...user };
+            delete userToStore.session_token;
+            this.setItem(this.KEYS.USER, JSON.stringify(userToStore));
         } else {
             localStorage.removeItem(this.KEYS.USER);
+            this.setSessionToken(null);
         }
+    }
+
+    static clearUser() {
+        try {
+            localStorage.removeItem(this.KEYS.USER);
+        } catch (e) {}
+        this.setSessionToken(null);
     }
 
     // Catalog Cache (Services, Prices, Products, Categories)

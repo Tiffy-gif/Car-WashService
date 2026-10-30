@@ -2259,12 +2259,17 @@ class PosApp {
      */
     static checkSession() {
         const user = PosStorage.getUser();
-        if (user) {
+        const token = PosStorage.getSessionToken();
+        if (user && token) {
             this.currentUser = user;
             this.renderLoggedInState();
             // Automatically update catalog & prices in background without interrupting
             this.refreshCatalogSilently(false);
+            // Retry pending offline orders automatically
+            this.syncPendingOrdersNow();
         } else {
+            PosStorage.clearUser();
+            this.currentUser = null;
             this.renderLoggedOutState();
             // Check test mode silently on initial startup
             this.refreshCatalogSilently(false).then(() => {
@@ -2458,6 +2463,9 @@ class PosApp {
 
                 this.currentUser = response.user;
                 PosStorage.setUser(response.user);
+                if (response.session_token) {
+                    PosStorage.setSessionToken(response.session_token);
+                }
 
                 // Cache settings immediately if returned on login
                 if (response.settings || response.shop) {
@@ -2477,6 +2485,9 @@ class PosApp {
                 await PosApi.syncCustomers().catch(() => {});
 
                 this.renderLoggedInState();
+
+                // Retry any pending offline orders queued on device
+                this.syncPendingOrdersNow();
             } else {
                 this.currentPin = '';
                 this.updatePinDots();
@@ -2653,11 +2664,28 @@ class PosApp {
         }, 200);
     }
 
-    static handleLogout(isIdle = false) {
-        PosStorage.setUser(null);
+    static async handleLogout(isIdle = false) {
+        try {
+            await PosApi.staffLogout();
+        } catch (e) {}
+        PosStorage.clearUser();
         this.currentUser = null;
         this.applyLayoutPreference('right');
         this.renderLoggedOutState(isIdle);
+    }
+
+    /**
+     * Handle 401 SESSION_INVALID: clear user & show login screen while keeping pending orders
+     */
+    static handleSessionInvalid(message = null) {
+        PosStorage.clearUser();
+        this.currentUser = null;
+        this.applyLayoutPreference('right');
+        this.renderLoggedOutState(false);
+        const msg = message || (I18nManager.getLang() === 'km'
+            ? 'វគ្គការងាររបស់អ្នកបានផុតកំណត់។ សូមចូលប្រើប្រាស់ឡើងវិញ។'
+            : 'Session expired or invalid. Please enter your PIN to continue.');
+        this.showAlert('loginAlert', msg, 'warning');
     }
 
     /**
@@ -5550,6 +5578,8 @@ class PosApp {
                     total_usd: totals.totalUsd,
                     total_khr: totals.totalKhr,
                     created_at: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                    created_by_staff_id: this.currentUser?.id || null,
+                    is_offline_sync: true,
                     cashier_name: this.currentUser?.full_name || 'Cashier',
                     synced: false
                 };
@@ -5747,6 +5777,8 @@ class PosApp {
                     total_khr: totals.totalKhr,
                     failure_reason: err.originalMessage || err.message || 'Connection offline: Server unreachable',
                     created_at: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                    created_by_staff_id: this.currentUser?.id || null,
+                    is_offline_sync: true,
                     cashier_name: this.currentUser?.full_name || 'Cashier',
                     synced: false
                 };

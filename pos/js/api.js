@@ -19,23 +19,26 @@ class PosApi {
             headers['X-Idempotency-Key'] = options.idempotencyKey;
         }
 
+        // Attach verified staff session token on every request except staff_login
+        if (action !== 'staff_login' && typeof PosStorage !== 'undefined') {
+            const sessionToken = PosStorage.getSessionToken();
+            if (sessionToken) {
+                headers['X-Staff-Token'] = sessionToken;
+            }
+        }
+
         const bodyData = payload ? { action, ...payload } : { action };
         if (options.idempotencyKey) {
             bodyData.idempotency_key = options.idempotencyKey;
         }
 
-        // Attach active staff ID for back office action authorization (Requirement 4)
-        if (action !== 'staff_login' && typeof PosStorage !== 'undefined') {
-            const currentUser = PosStorage.getUser();
-            if (currentUser?.id) {
-                if (bodyData.staff_id === undefined && bodyData.user_id === undefined) {
-                    bodyData.staff_id = currentUser.id;
-                    bodyData.user_id = currentUser.id;
-                }
-                if (!bodyData.staff_role && currentUser.role) {
-                    bodyData.staff_role = currentUser.role;
-                }
-            }
+        // Stop sending client-controlled staff_id / user_id / cashier_id / staff_role
+        if (action !== 'staff_login') {
+            delete bodyData.staff_id;
+            delete bodyData.user_id;
+            delete bodyData.cashier_id;
+            delete bodyData.staff_role;
+            delete bodyData.user_role;
         }
 
         const fetchOptions = {
@@ -60,6 +63,14 @@ class PosApi {
                 err.status = response.status;
                 err.code = json?.error || 'SERVER_ERROR';
                 err.data = json;
+
+                // On 401 SESSION_INVALID, inform app to handle session expiration cleanly
+                if (response.status === 401 && (json?.error === 'SESSION_INVALID' || json?.error === 'STAFF_REQUIRED')) {
+                    if (typeof PosApp !== 'undefined' && typeof PosApp.handleSessionInvalid === 'function') {
+                        PosApp.handleSessionInvalid(json?.message || errMsg);
+                    }
+                }
+
                 throw err;
             }
 
@@ -165,6 +176,18 @@ class PosApi {
             pin: String(pin || '').trim(),
             password: String(pin || '').trim()
         });
+    }
+
+    /**
+     * Terminate active staff session
+     */
+    static async staffLogout() {
+        try {
+            return await this.request('staff_logout');
+        } catch (e) {
+            console.warn('staffLogout error (ignored):', e);
+            return { success: true };
+        }
     }
 
     /**
