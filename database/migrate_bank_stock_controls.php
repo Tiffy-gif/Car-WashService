@@ -81,9 +81,11 @@ function migrate_bank_stock_controls(bool $force = false): bool {
 
     // 3. Add columns to stock_movements table
     $stockCols = $pdo->query("DESCRIBE stock_movements")->fetchAll(PDO::FETCH_COLUMN);
+    $addedProdName = false;
     if (!in_array('product_name', $stockCols, true)) {
         $pdo->exec("ALTER TABLE stock_movements ADD COLUMN product_name VARCHAR(150) DEFAULT NULL AFTER product_id");
         migrateLog("  - Added product_name to stock_movements");
+        $addedProdName = true;
     }
 
     if (!in_array('performer_name', $stockCols, true)) {
@@ -91,13 +93,19 @@ function migrate_bank_stock_controls(bool $force = false): bool {
         migrateLog("  - Added performer_name to stock_movements");
     }
 
-    // Backfill product_name in stock_movements if empty
-    $pdo->exec("
-        UPDATE stock_movements sm
-        JOIN products p ON sm.product_id = p.id
-        SET sm.product_name = p.name_en
-        WHERE sm.product_name IS NULL OR sm.product_name = ''
-    ");
+    // Backfill product_name in stock_movements if newly added
+    if ($addedProdName) {
+        try {
+            $pdo->exec("
+                UPDATE stock_movements sm
+                JOIN products p ON sm.product_id = p.id
+                SET sm.product_name = p.name_en
+                WHERE sm.product_name IS NULL OR sm.product_name = ''
+            ");
+        } catch (Throwable $t) {
+            // Ignored if table is protected by immutable trigger
+        }
+    }
 
     // 4. Ensure uploads/bank_slips directory exists
     $slipDir = dirname(__DIR__) . '/public/uploads/bank_slips';
