@@ -8,13 +8,43 @@ const API_URL = process.env.POS_API_URL || `${BACKOFFICE_URL}/api/pos/index.php`
 const DEVICE_KEY = process.env.POS_DEVICE_KEY || '';
 const CHROME_PATH = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 
+let staffSessionToken = null;
+
+async function getStaffSessionToken() {
+  if (staffSessionToken) return staffSessionToken;
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Device-Key': DEVICE_KEY
+      },
+      body: JSON.stringify({ action: 'staff_login', username: 'admin', pin: '123456' })
+    });
+    const json = await res.json();
+    if (json.session_token) {
+      staffSessionToken = json.session_token;
+    }
+  } catch (err) {
+    console.warn('Failed to obtain staff session token:', err);
+  }
+  return staffSessionToken;
+}
+
 async function apiCall(action, data = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Device-Key': DEVICE_KEY
+  };
+  if (action !== 'staff_login') {
+    const token = await getStaffSessionToken();
+    if (token) {
+      headers['X-Staff-Token'] = token;
+    }
+  }
   const res = await fetch(API_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Device-Key': DEVICE_KEY
-    },
+    headers,
     body: JSON.stringify({ action, ...data })
   });
   return await res.json();

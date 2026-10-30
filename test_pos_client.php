@@ -5,10 +5,15 @@ require_once __DIR__ . '/config/app.php';
 require_once __DIR__ . '/core/Database.php';
 
 $pdo = Database::getInstance();
-// Fetch active POS device API key for default
-$sampleDev = $pdo->query("SELECT * FROM pos_devices WHERE status = 'active' ORDER BY id ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-$defaultApiKey = $sampleDev['api_key'] ?? 'pos_sec_test_key_8899aabb';
-$defaultUid = $sampleDev['device_uid'] ?? 'POS-TERMINAL-01';
+// Fetch active POS device API key and URL from environment or database defaults
+$defaultApiKey = getenv('POS_DEVICE_KEY') ?: ($_ENV['POS_DEVICE_KEY'] ?? '');
+$defaultUid = 'POS-TERMINAL-01';
+if (!$defaultApiKey) {
+    $sampleDev = $pdo->query("SELECT * FROM pos_devices WHERE status = 'active' ORDER BY id ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $defaultApiKey = $sampleDev['api_key'] ?? '';
+    $defaultUid = $sampleDev['device_uid'] ?? 'POS-TERMINAL-01';
+}
+$defaultApiUrl = getenv('POS_URL') ?: ($_ENV['POS_URL'] ?? (API_BASE_URL . '/api/pos/'));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -87,14 +92,22 @@ $defaultUid = $sampleDev['device_uid'] ?? 'POS-TERMINAL-01';
             <span><i class="fa-solid fa-plug mr-1" style="color: #0284c7;"></i> 1. POS Device Connection Settings</span>
             <span style="font-size: 11px; color: #94a3b8;">Easy to switch from Localhost to Cloud</span>
         </div>
-        <div style="display: grid; grid-template-columns: 2fr 1.5fr 1fr; gap: 14px;">
+        <div style="display: grid; grid-template-columns: 2fr 1.5fr 1fr 1fr 1fr; gap: 14px;">
             <div class="form-group" style="margin-bottom: 0;">
                 <label class="form-label">Central System API Endpoint</label>
-                <input type="text" id="apiEndpoint" class="form-input" value="<?= htmlspecialchars(API_BASE_URL) ?>/api/pos/">
+                <input type="text" id="apiEndpoint" class="form-input" value="<?= htmlspecialchars($defaultApiUrl) ?>">
             </div>
             <div class="form-group" style="margin-bottom: 0;">
                 <label class="form-label">POS Device API Key (Secret)</label>
                 <input type="text" id="deviceApiKey" class="form-input" value="<?= htmlspecialchars($defaultApiKey) ?>" style="font-family: 'JetBrains Mono', monospace;">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Staff User</label>
+                <input type="text" id="staffUsername" class="form-input" value="admin">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Staff PIN</label>
+                <input type="password" id="staffPin" class="form-input" value="123456" maxlength="6">
             </div>
             <div style="display: flex; align-items: flex-end;">
                 <button type="button" class="btn btn-primary" style="width: 100%; height: 42px;" onclick="testConnection()">
@@ -325,9 +338,49 @@ function genNewIdempotencyKey() {
     return uid;
 }
 
+let currentStaffToken = '';
+
+async function ensureStaffLogin() {
+    if (currentStaffToken) return currentStaffToken;
+    const username = document.getElementById('staffUsername')?.value?.trim() || 'admin';
+    const pin = document.getElementById('staffPin')?.value?.trim() || '123456';
+    log(`[AUTH] Logging in staff user '${username}' to acquire session token...`);
+    const baseUrl = document.getElementById('apiEndpoint').value.trim();
+    const apiKey = document.getElementById('deviceApiKey').value.trim();
+    const url = `${baseUrl}?action=staff_login`;
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Device-Key': apiKey
+            },
+            body: JSON.stringify({ action: 'staff_login', username, pin, password: pin })
+        });
+        const json = await res.json();
+        if (res.ok && json.session_token) {
+            currentStaffToken = json.session_token;
+            log(`[AUTH] Staff login successful. Session token acquired.`);
+            return currentStaffToken;
+        } else {
+            log(`[AUTH ERROR] Staff login failed: ${json.message || json.error || 'Unknown error'}`);
+            return null;
+        }
+    } catch (e) {
+        log(`[AUTH ERROR] Network error during staff login: ${e.message}`);
+        return null;
+    }
+}
+
 async function apiCall(action, payload = {}, headers = {}) {
     const baseUrl = document.getElementById('apiEndpoint').value.trim();
     const apiKey = document.getElementById('deviceApiKey').value.trim();
+
+    // Auto-login to obtain staff session token if calling protected actions
+    const deviceOnly = ['staff_login', 'sync_catalog', 'get_day_lock_status', 'ping', 'health'];
+    if (!deviceOnly.includes(action) && !currentStaffToken) {
+        await ensureStaffLogin();
+    }
 
     const url = `${baseUrl}?action=${encodeURIComponent(action)}`;
     const reqHeaders = {
@@ -335,6 +388,9 @@ async function apiCall(action, payload = {}, headers = {}) {
         'X-Device-Key': apiKey,
         ...headers
     };
+    if (currentStaffToken && action !== 'staff_login') {
+        reqHeaders['X-Staff-Token'] = currentStaffToken;
+    }
 
     log(`--> POST ${url}`, payload);
 
