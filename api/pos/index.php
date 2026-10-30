@@ -1056,6 +1056,18 @@ if ($action === 'create_order') {
         $preparedItems = [];
         $coveredMembershipUsages = [];
 
+        // Collect cart service & product IDs for server-side upsell verification
+        $cartServiceIds = [];
+        $cartProductIds = [];
+        foreach ($items as $chkIt) {
+            $chkType = $chkIt['type'] ?? 'service';
+            $chkSId = !empty($chkIt['service_id']) ? (int)$chkIt['service_id'] : (!empty($chkIt['id']) && in_array($chkType, ['service', 'repair'], true) ? (int)$chkIt['id'] : null);
+            $chkPId = !empty($chkIt['product_id']) ? (int)$chkIt['product_id'] : (!empty($chkIt['id']) && in_array($chkType, ['product', 'spare_part'], true) ? (int)$chkIt['id'] : null);
+            if ($chkSId) $cartServiceIds[] = $chkSId;
+            if ($chkPId) $cartProductIds[] = $chkPId;
+        }
+        $matchingUpsellOffers = MembershipManager::getMatchingUpsellOffers($pdo, $cartServiceIds, $cartProductIds, $vehicleType, $currentMileage);
+
         // Prepared statements for price lookup
         $svcPriceStmt = $pdo->prepare("SELECT price_usd FROM service_prices WHERE service_id = ? AND vehicle_type = ?");
         $svcFallbackStmt = $pdo->prepare("SELECT price_usd FROM service_prices WHERE service_id = ? LIMIT 1");
@@ -1128,9 +1140,19 @@ if ($action === 'create_order') {
                     $itemName .= ' (Included Member Benefit)';
                 }
 
-                if (!empty($it['is_upsell']) && isset($it['offer_price_usd']) && is_numeric($it['offer_price_usd'])) {
-                    // Accepted Upsell Offer price
-                    $unitPriceUsd = round((float)$it['offer_price_usd'], 2);
+                // Server-side upsell verification: never trust client offer_price_usd
+                if (!empty($it['is_upsell'])) {
+                    $matchedUpsellPrice = null;
+                    foreach ($matchingUpsellOffers as $uOffer) {
+                        if (!empty($uOffer['offer_service_id']) && (int)$uOffer['offer_service_id'] === (int)$sId && $uOffer['offer_price_usd'] !== null) {
+                            $matchedUpsellPrice = round((float)$uOffer['offer_price_usd'], 2);
+                            break;
+                        }
+                    }
+                    if ($matchedUpsellPrice !== null) {
+                        $unitPriceUsd = $matchedUpsellPrice;
+                    }
+                    // If no active rule matches, normal catalog price ($unitPriceUsd) is retained
                 }
             } elseif (in_array($type, ['product', 'spare_part'], true) && $pId) {
                 $prodInfoStmt->execute([$pId]);
@@ -1143,11 +1165,37 @@ if ($action === 'create_order') {
                     }
                 }
 
-                if (!empty($it['is_upsell']) && isset($it['offer_price_usd']) && is_numeric($it['offer_price_usd'])) {
-                    $unitPriceUsd = round((float)$it['offer_price_usd'], 2);
+                // Server-side upsell verification: never trust client offer_price_usd
+                if (!empty($it['is_upsell'])) {
+                    $matchedUpsellPrice = null;
+                    foreach ($matchingUpsellOffers as $uOffer) {
+                        if (!empty($uOffer['offer_product_id']) && (int)$uOffer['offer_product_id'] === (int)$pId && $uOffer['offer_price_usd'] !== null) {
+                            $matchedUpsellPrice = round((float)$uOffer['offer_price_usd'], 2);
+                            break;
+                        }
+                    }
+                    if ($matchedUpsellPrice !== null) {
+                        $unitPriceUsd = $matchedUpsellPrice;
+                    }
+                    // If no active rule matches, normal catalog price ($unitPriceUsd) is retained
                 }
             } else {
                 $unitPriceUsd = (float)($it['price_usd'] ?? 0);
+            }
+
+            // Reject negative or zero prices unless the item is an included member benefit
+            $isBenefitCovered = !empty($isFreeBenefit);
+            if ($unitPriceUsd <= 0.0 && !$isBenefitCovered) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                http_response_code(400);
+                echo json_encode([
+                    'success' => false,
+                    'error' => 'INVALID_ITEM_PRICE',
+                    'message' => "Item '{$itemName}' has an invalid or zero price and is not an included member benefit."
+                ]);
+                exit;
             }
 
             $lineTotalUsd = round($unitPriceUsd * $qty, 2);
