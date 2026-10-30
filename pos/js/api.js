@@ -277,13 +277,15 @@ class PosApi {
     /**
      * Cancel Order
      */
-    static async cancelOrder(orderId, orderNumber, reason = 'Cancelled by staff', staffRole = '') {
-        return await this.request('cancel_order', {
+    static async cancelOrder(orderId, orderNumber, reason = 'Cancelled by staff', managerUsername = '', managerPin = '') {
+        const payload = {
             order_id: orderId,
             order_number: orderNumber,
-            reason,
-            staff_role: staffRole
-        });
+            reason
+        };
+        if (managerUsername) payload.manager_username = managerUsername;
+        if (managerPin) payload.manager_pin = managerPin;
+        return await this.request('cancel_order', payload);
     }
 
     /**

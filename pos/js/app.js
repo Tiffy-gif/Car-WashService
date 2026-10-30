@@ -7450,13 +7450,6 @@ class PosApp {
             return;
         }
 
-        // Requirement 3: Cashiers cannot void or refund
-        const userRole = (this.currentUser?.role || '').toLowerCase();
-        if (userRole === 'cashier') {
-            this.showAppAlert('Cashiers cannot void or refund orders. A Manager or Owner must perform this action.', 'danger', 'Permission Denied');
-            return;
-        }
-
         this.targetCancelOrder = { id: orderId, order_number: orderNumber, plate, isPaid };
         const prompt = document.getElementById('cancelOrderPromptText');
         if (prompt) {
@@ -7471,22 +7464,28 @@ class PosApp {
         if (!this.targetCancelOrder) return;
         const btn = document.getElementById('btnConfirmCancelOrder');
 
-        // Requirement 13: Reason required
+        // Requirement 13: Reason required (at least 5 characters)
         const reason = document.getElementById('cancelReasonInput')?.value.trim();
-        if (!reason) {
-            alert(I18nManager.t('cancelReasonRequired') || 'Cancellation reason is required.');
+        if (!reason || reason.length < 5) {
+            alert(I18nManager.t('cancelReasonRequired') || 'Cancellation reason is required and must be at least 5 characters.');
             document.getElementById('cancelReasonInput')?.focus();
             return;
         }
 
-        // Requirement 3: Require Manager PIN to authorize order cancellation
+        // Physical Manager PIN authorization on screen
         document.getElementById('modalCancelOrder')?.classList.remove('open');
         this.requestManagerPin(
             "Manager Void Authorization",
             `Enter Manager PIN to authorize voiding order #${this.targetCancelOrder.order_number}`,
             async (mgr) => {
                 try {
-                    const res = await PosApi.cancelOrder(this.targetCancelOrder.id, this.targetCancelOrder.order_number, reason, mgr.role);
+                    const res = await PosApi.cancelOrder(
+                        this.targetCancelOrder.id,
+                        this.targetCancelOrder.order_number,
+                        reason,
+                        mgr.username,
+                        mgr.pin
+                    );
                     if (res && res.success) {
                         const successMsg = I18nManager.t('orderCancelledSuccess') || `Order #${this.targetCancelOrder.order_number} cancelled and product stock returned!`;
                         alert(successMsg);
@@ -7495,10 +7494,10 @@ class PosApp {
                         await this.renderTodayOrders();
                         await this.renderDailyClose();
                     } else {
-                        alert(res?.message || 'Cancellation failed');
+                        alert(res?.message || res?.error || 'Cancellation failed');
                     }
                 } catch (err) {
-                    alert(err.data?.message || err.message);
+                    alert(err.data?.message || err.data?.error || err.message || 'Cancellation failed');
                 }
             }
         );
