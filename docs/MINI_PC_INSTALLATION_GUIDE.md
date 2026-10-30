@@ -242,4 +242,23 @@ During extended power cuts or total network blackouts, the shop server provides 
    - Records the author's name, timestamp, and an audit trail entry.
 
 ---
+
+## 11. Step 10: Queue TV Realtime Streaming (SSE) & Apache Worker Limits on XAMPP
+
+The customer waiting lounge and bay Queue TVs use **Server-Sent Events (SSE)** via `api/queue_stream.php` to receive instant screen updates whenever queue status or bay assignments change.
+
+### Apache Worker Limits on Windows XAMPP:
+- Windows XAMPP runs the `mpm_winnt` multi-processing module with a fixed pool of worker threads (default `ThreadsPerChild 150`).
+- Unlike standard HTTP requests that terminate in milliseconds, SSE connections remain open to stream live events. Having many persistent TV connections could tie up worker threads and prevent other POS tablets from connecting.
+
+### How the System Protects Against Worker Exhaustion:
+1. **Immediate Session Release**: `api/queue_stream.php` executes `session_write_close()` before beginning its event loop, preventing session file locks from stalling concurrent POS requests.
+2. **Bounded Connection Cycling (`tv_stream_max_seconds`)**:
+   - Each stream connection runs for up to approximately 25 seconds (configurable via the `tv_stream_max_seconds` setting in `system_settings`), sends events when queue data changes, and sends a `: keep-alive` comment every 10 seconds.
+   - At the 25-second mark, the script cleanly completes the HTTP response, releasing the Apache worker thread back to the pool.
+   - The browser's native `EventSource` automatically and transparently reconnects within seconds.
+3. **Automatic 3-Error Polling Fallback**:
+   - If EventSource encounters three consecutive connection failures, `tv.php` automatically transitions to periodic HTTP polling (`tv.php?action=feed`) as a resilient fallback.
+
+---
 *End of Mini-PC Installation & Hardening Guide. Keep this document printed in the shop office.*

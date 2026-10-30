@@ -935,7 +935,8 @@ $t = [
     <script>
         const SECRET_CODE = <?= json_encode($providedCode) ?>;
         const FEED_URL = 'tv.php?action=feed&code=' + encodeURIComponent(SECRET_CODE);
-        const POLL_INTERVAL = 1000; // 1 second live updates
+        const STREAM_URL = 'api/queue_stream.php?code=' + encodeURIComponent(SECRET_CODE);
+        const POLL_INTERVAL = 1000; // 1 second live updates fallback
 
         const translations = <?= json_encode($t) ?>;
 
@@ -974,8 +975,72 @@ $t = [
                 .replace(/'/g, '&#039;');
         }
 
-        // 4. Polling Function (Maintains Last Screen upon Failure)
+        // 4. Server-Sent Events (SSE) with Automatic 3-Error Polling Fallback
         let consecutiveFailures = 0;
+        let eventSource = null;
+        let sseErrorCount = 0;
+        let sseFallbackActive = false;
+        let pollIntervalId = null;
+        let lastPayloadHash = '';
+
+        function startPollingFallback() {
+            if (sseFallbackActive) return;
+            sseFallbackActive = true;
+            console.warn('EventSource failed 3 times in a row. Switching to automatic HTTP polling fallback.');
+            if (eventSource) {
+                try { eventSource.close(); } catch (e) {}
+                eventSource = null;
+            }
+            if (!pollIntervalId) {
+                pollIntervalId = setInterval(pollQueueData, POLL_INTERVAL);
+                pollQueueData();
+            }
+        }
+
+        function initEventSource() {
+            if (!window.EventSource) {
+                startPollingFallback();
+                return;
+            }
+
+            try {
+                const url = STREAM_URL + (lastPayloadHash ? '&last_hash=' + encodeURIComponent(lastPayloadHash) : '');
+                eventSource = new EventSource(url);
+
+                const handlePayload = function(e) {
+                    try {
+                        sseErrorCount = 0;
+                        const reconnectingEl = document.getElementById('reconnectingPill');
+                        if (reconnectingEl) reconnectingEl.style.display = 'none';
+                        if (e.lastEventId) {
+                            lastPayloadHash = e.lastEventId;
+                        }
+                        const data = JSON.parse(e.data);
+                        if (data && data.success) {
+                            renderTvDisplay(data);
+                        }
+                    } catch (err) {
+                        console.error('Error handling SSE payload:', err);
+                    }
+                };
+
+                eventSource.addEventListener('queue_update', handlePayload);
+                eventSource.onmessage = handlePayload;
+
+                eventSource.onerror = function(err) {
+                    sseErrorCount++;
+                    console.warn(`EventSource connection error (${sseErrorCount}/3)`);
+                    const reconnectingEl = document.getElementById('reconnectingPill');
+                    if (sseErrorCount >= 3) {
+                        startPollingFallback();
+                    } else if (reconnectingEl && sseErrorCount >= 2) {
+                        reconnectingEl.style.display = 'inline-flex';
+                    }
+                };
+            } catch (err) {
+                startPollingFallback();
+            }
+        }
 
         async function pollQueueData() {
             const reconnectingEl = document.getElementById('reconnectingPill');
@@ -1145,8 +1210,8 @@ $t = [
             }
         }
 
-        // Start Auto-Polling Loop
-        setInterval(pollQueueData, POLL_INTERVAL);
+        // Start Realtime SSE Connection (with fallback polling if 3 errors occur)
+        initEventSource();
     </script>
 </body>
 </html>
