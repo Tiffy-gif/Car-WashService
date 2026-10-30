@@ -16,6 +16,8 @@ This step-by-step guide is written in plain language for shop managers and techn
 8. [Step 7: Keep Guest Wi-Fi Separate (Network Isolation)](#8-step-7-keep-guest-wi-fi-separate)
 9. [Step 8: Configure Automated 2:00 AM Daily Backups](#9-step-8-configure-automated-200-am-daily-backups)
 10. [Step 9: Disaster Mode, Paper Forms & Recovery Entry](#10-step-9-disaster-mode-paper-forms--recovery-entry)
+11. [Step 10: Queue TV Realtime Streaming (SSE) & Apache Worker Limits on XAMPP](#11-step-10-queue-tv-realtime-streaming-sse--apache-worker-limits-on-xampp)
+12. [Step 11: Install as PWA (Progressive Web App on Tablets)](#12-step-11-install-as-pwa-progressive-web-app-on-tablets)
 
 ---
 
@@ -259,6 +261,96 @@ The customer waiting lounge and bay Queue TVs use **Server-Sent Events (SSE)** v
    - The browser's native `EventSource` automatically and transparently reconnects within seconds.
 3. **Automatic 3-Error Polling Fallback**:
    - If EventSource encounters three consecutive connection failures, `tv.php` automatically transitions to periodic HTTP polling (`tv.php?action=feed`) as a resilient fallback.
+
+---
+
+## 12. Step 11: Install as PWA (Progressive Web App on Tablets)
+
+The Counter POS (`/pos/index.html`) is built as a lightweight Progressive Web App (PWA) designed for touch-screen Android tablets and iPads with no heavy frameworks. When installed to the tablet home screen, it launches in fullscreen standalone kiosk mode with instant offline shell loading.
+
+### A. Prerequisite: HTTPS & Local Root CA (`mkcert`)
+Modern browsers (Chrome, Edge, Safari) strictly require **HTTPS** (or localhost) to allow Service Worker registration and PWA installation to the home screen. On a local shop LAN without a public domain name, use **`mkcert`** to create a locally trusted Certificate Authority.
+
+1. **Install `mkcert` on the Mini-PC Server**:
+   - Download the Windows binary from [github.com/FiloSottile/mkcert/releases](https://github.com/FiloSottile/mkcert/releases) (or install via Chocolatey: `choco install mkcert`).
+   - Open PowerShell as Administrator and initialize the local root CA:
+     ```powershell
+     mkcert -install
+     ```
+2. **Generate Apache SSL Certificate for Local IP**:
+   - Run the command with your mini-PC's static LAN IP and local hostnames:
+     ```powershell
+     mkcert -cert-file C:\xampp\apache\conf\ssl.crt\server.crt -key-file C:\xampp\apache\conf\ssl.key\server.key 192.168.1.100 carwash.local localhost 127.0.0.1
+     ```
+3. **Enable SSL in XAMPP Apache**:
+   - Ensure `conf/extra/httpd-ssl.conf` points to `server.crt` and `server.key`.
+   - Restart Apache service via `nssm restart CarWashApache`.
+4. **Install Root CA on Tablets**:
+   - Locate the root CA on the mini-PC by running `mkcert -CAROOT` (usually `rootCA.pem`).
+   - Transfer `rootCA.pem` to each tablet (via USB, email, or local HTTP download):
+     - **Android Tablets**: Open **Settings** &rarr; **Security** (or **Security & Privacy**) &rarr; **Encryption & Credentials** &rarr; **Install a certificate** &rarr; **CA certificate** &rarr; select `rootCA.pem` and confirm.
+     - **iPads (iOS/iPadOS)**: AirDrop or open `rootCA.pem` in Safari &rarr; install the configuration profile in **Settings** &rarr; **Profile Downloaded** &rarr; then navigate to **Settings** &rarr; **General** &rarr; **About** &rarr; **Certificate Trust Settings** &rarr; toggle **Enable Full Trust for Root Certificates** on.
+
+> **Note**: While running locally on the mini-PC browser itself (`http://localhost/Car-WashService/pos/` or `http://127.0.0.1/`), the Service Worker registers automatically without HTTPS. Over plain LAN HTTP, the service worker registration is skipped silently to avoid browser security exceptions.
+
+---
+
+### B. Installing on Android / Chrome Tablets
+1. Connect the tablet to the dedicated shop Wi-Fi network.
+2. Open **Google Chrome** (or Microsoft Edge).
+3. Navigate to:
+   ```
+   https://192.168.1.100/Car-WashService/pos/
+   ```
+4. Verify the green padlock icon appears in the address bar (indicating trusted HTTPS).
+5. Tap the browser menu (**⋮** three dots in the top right).
+6. Tap **"Add to Home screen"** or **"Install app"** (or click the install prompt in the address bar).
+7. Confirm the name **"Car Wash POS"** and tap **Install**.
+8. The POS icon will appear on the Android home screen. Tapping it opens the POS in fullscreen standalone kiosk mode with no browser address bar.
+
+---
+
+### C. Installing on iPad / Safari Tablets
+1. Connect the iPad to the shop Wi-Fi network.
+2. Open **Safari**.
+3. Navigate to:
+   ```
+   https://192.168.1.100/Car-WashService/pos/
+   ```
+4. Tap the **Share** button (the square icon with an upward-pointing arrow).
+5. Scroll down the sharing menu and tap **"Add to Home Screen"**.
+6. Verify the name displays **"Car Wash POS"** and tap **Add**.
+7. Launch the app from the iPad home screen. It will open as a borderless full-screen web app.
+
+---
+
+### D. Offline Behavior & Local Storage Queuing
+- **Instant App Shell**: The service worker automatically caches HTML, CSS, JavaScript, fonts, and icon assets. If the network hiccups or drops, the user interface continues loading instantly.
+- **API Exclusions**: API calls (`/api/`) and session authentication are never cached by the service worker to prevent stale data or credential leaks.
+- **Offline Orders**: When offline, new customer orders are safely queued in tablet `localStorage` (`cw_pos_pending_orders`) and sync to the server when connection returns.
+- **60-Second Warning**: If disconnected from the server for over 60 seconds, the top alert banner activates:
+  ```
+  Offline - Use Manual Mode
+  ```
+
+---
+
+### E. Version Bumping & Automatic Tablet Updates
+When new code changes are deployed to `pos/` (updates to JavaScript, CSS, or templates), release them to connected tablets using the cache-busting mechanism:
+
+1. Open `pos/sw.js` in a text editor.
+2. Locate the `POS_VERSION` constant at the top of the file:
+   ```javascript
+   const POS_VERSION = 'v20261030_101'; // <-- Bump this string
+   ```
+3. Change it to the new release tag, for example:
+   ```javascript
+   const POS_VERSION = 'v20261030_102';
+   ```
+4. Save the file.
+5. When tablets next access or refresh the POS, the browser detects the updated `sw.js` in the background, pre-caches the updated files into the new cache bucket, and triggers an on-screen toast:
+   > *"New version available - tap to reload"*
+6. Cashiers simply tap the notification or refresh the screen to switch to the new version. The service worker automatically cleans up obsolete cache versions.
 
 ---
 *End of Mini-PC Installation & Hardening Guide. Keep this document printed in the shop office.*
