@@ -206,7 +206,227 @@ try {
         $allPassed = false;
     }
 
+    // ========================================================
+    // REFUNDS & VOIDS / OVERRIDE AUTHORIZATION TESTS (ITEM 6)
+    // ========================================================
+    $testOrderIds = [];
+    $testUserIds = [];
+
+    // Create temporary dedicated test manager & test cashier users
+    $testPin = '123456';
+    $testMgrUsername = 'test_mgr_' . bin2hex(random_bytes(4));
+    $testCashierUsername = 'test_csh_' . bin2hex(random_bytes(4));
+
+    $pdo->prepare("
+        INSERT INTO users (username, full_name, role, password_hash, status, created_at)
+        VALUES (?, 'Test Manager Auth', 'manager', ?, 'active', NOW())
+    ")->execute([$testMgrUsername, password_hash($testPin, PASSWORD_DEFAULT)]);
+    $testMgrId = (int)$pdo->lastInsertId();
+    $testUserIds[] = $testMgrId;
+
+    $pdo->prepare("
+        INSERT INTO users (username, full_name, role, password_hash, status, created_at)
+        VALUES (?, 'Test Cashier Auth', 'cashier', ?, 'active', NOW())
+    ")->execute([$testCashierUsername, password_hash('123456', PASSWORD_DEFAULT)]);
+    $testCashierId = (int)$pdo->lastInsertId();
+    $testUserIds[] = $testCashierId;
+
+    $dedicatedCashierToken = registerTestSession($pdo, $testCashierId, $deviceId, $validExpires);
+    $dedicatedMgrToken = registerTestSession($pdo, $testMgrId, $deviceId, $validExpires);
+
+    $insOrd = $pdo->prepare("
+        INSERT INTO orders (
+            order_number, customer_name, plate_number, vehicle_type, total_usd, status, payment_status, cashier_id, created_at
+        ) VALUES (?, 'Test Customer', '2A-9999', 'sedan', 25.00, ?, ?, ?, NOW())
+    ");
+
+    // ----------------------------------------------------
+    // CASE 6: Cashier cancel without PIN => 403
+    // ----------------------------------------------------
+    $ordNum1 = 'TEST-ORD-' . bin2hex(random_bytes(4));
+    $insOrd->execute([$ordNum1, 'pending', 'unpaid', $testCashierId]);
+    $ordId1 = (int)$pdo->lastInsertId();
+    $testOrderIds[] = $ordId1;
+
+    $res6 = callPosApi($apiUrl, [
+        'action' => 'cancel_order',
+        'order_id' => $ordId1,
+        'order_number' => $ordNum1,
+        'reason' => 'Customer requested cancellation'
+    ], [
+        'X-Device-Key' => $apiKey,
+        'X-Staff-Token' => $dedicatedCashierToken
+    ]);
+
+    if ($res6['status'] === 403) {
+        echo "[PASS] Case 6: Cashier cancel without PIN => 403\n";
+    } else {
+        echo "[FAIL] Case 6: Expected HTTP 403, got HTTP {$res6['status']} - " . json_encode($res6['json']) . "\n";
+        $allPassed = false;
+    }
+
+    // ----------------------------------------------------
+    // CASE 7: Cashier cancel with wrong PIN => 403
+    // ----------------------------------------------------
+    $res7 = callPosApi($apiUrl, [
+        'action' => 'cancel_order',
+        'order_id' => $ordId1,
+        'order_number' => $ordNum1,
+        'reason' => 'Customer requested cancellation',
+        'manager_username' => $testMgrUsername,
+        'manager_pin' => '000000'
+    ], [
+        'X-Device-Key' => $apiKey,
+        'X-Staff-Token' => $dedicatedCashierToken
+    ]);
+
+    if ($res7['status'] === 403) {
+        echo "[PASS] Case 7: Cashier cancel with wrong PIN => 403\n";
+    } else {
+        echo "[FAIL] Case 7: Expected HTTP 403, got HTTP {$res7['status']} - " . json_encode($res7['json']) . "\n";
+        $allPassed = false;
+    }
+
+    // ----------------------------------------------------
+    // CASE 8: Valid manager PIN => success with both IDs stored
+    // ----------------------------------------------------
+    $res8 = callPosApi($apiUrl, [
+        'action' => 'cancel_order',
+        'order_id' => $ordId1,
+        'order_number' => $ordNum1,
+        'reason' => 'Customer requested cancellation',
+        'manager_username' => $testMgrUsername,
+        'manager_pin' => $testPin
+    ], [
+        'X-Device-Key' => $apiKey,
+        'X-Staff-Token' => $dedicatedCashierToken
+    ]);
+
+    $chkStmt = $pdo->prepare("SELECT status, cancelled_by_user_id, cancel_approved_by_user_id FROM orders WHERE id = ?");
+    $chkStmt->execute([$ordId1]);
+    $row8 = $chkStmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($res8['status'] === 200 && ($res8['json']['success'] ?? false) === true
+        && ($row8['status'] ?? '') === 'cancelled'
+        && (int)($row8['cancelled_by_user_id'] ?? 0) === $testCashierId
+        && (int)($row8['cancel_approved_by_user_id'] ?? 0) === $testMgrId) {
+        echo "[PASS] Case 8: Valid manager PIN => success with both IDs stored\n";
+    } else {
+        echo "[FAIL] Case 8: Expected HTTP 200 with both IDs stored, got HTTP {$res8['status']} row: " . json_encode($row8) . " - " . json_encode($res8['json']) . "\n";
+        $allPassed = false;
+    }
+
+    // ----------------------------------------------------
+    // CASE 9: Cashier cancel of a PAID order with valid manager PIN => success
+    // ----------------------------------------------------
+    $ordNumPaid = 'TEST-ORD-PAID-' . bin2hex(random_bytes(4));
+    $insOrd->execute([$ordNumPaid, 'paid', 'paid', $testCashierId]);
+    $ordIdPaid = (int)$pdo->lastInsertId();
+    $testOrderIds[] = $ordIdPaid;
+
+    $res9 = callPosApi($apiUrl, [
+        'action' => 'cancel_order',
+        'order_id' => $ordIdPaid,
+        'order_number' => $ordNumPaid,
+        'reason' => 'Customer requested refund authorized by manager',
+        'manager_username' => $testMgrUsername,
+        'manager_pin' => $testPin
+    ], [
+        'X-Device-Key' => $apiKey,
+        'X-Staff-Token' => $dedicatedCashierToken
+    ]);
+
+    $chkStmt->execute([$ordIdPaid]);
+    $row9 = $chkStmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($res9['status'] === 200 && ($res9['json']['success'] ?? false) === true
+        && ($row9['status'] ?? '') === 'cancelled'
+        && (int)($row9['cancelled_by_user_id'] ?? 0) === $testCashierId
+        && (int)($row9['cancel_approved_by_user_id'] ?? 0) === $testMgrId) {
+        echo "[PASS] Case 9: Cashier cancel of a PAID order with valid manager PIN => success\n";
+    } else {
+        echo "[FAIL] Case 9: Expected HTTP 200 success for cancelling paid order, got HTTP {$res9['status']} row: " . json_encode($row9) . " - " . json_encode($res9['json']) . "\n";
+        $allPassed = false;
+    }
+
+    // ----------------------------------------------------
+    // CASE 10: Approver equal to requester => rejected
+    // ----------------------------------------------------
+    $ordNumSelf = 'TEST-ORD-SELF-' . bin2hex(random_bytes(4));
+    $insOrd->execute([$ordNumSelf, 'pending', 'unpaid', $testMgrId]);
+    $ordIdSelf = (int)$pdo->lastInsertId();
+    $testOrderIds[] = $ordIdSelf;
+
+    $res10 = callPosApi($apiUrl, [
+        'action' => 'cancel_order',
+        'order_id' => $ordIdSelf,
+        'order_number' => $ordNumSelf,
+        'reason' => 'Self cancellation test attempt',
+        'manager_username' => $testMgrUsername,
+        'manager_pin' => $testPin
+    ], [
+        'X-Device-Key' => $apiKey,
+        'X-Staff-Token' => $dedicatedMgrToken
+    ]);
+
+    if ($res10['status'] === 403 && (
+        ($res10['json']['error'] ?? '') === 'SELF_APPROVAL_NOT_ALLOWED' ||
+        stripos($res10['json']['message'] ?? '', 'same user') !== false ||
+        stripos($res10['json']['message'] ?? '', 'requester') !== false
+    )) {
+        echo "[PASS] Case 10: Approver equal to requester => rejected\n";
+    } else {
+        echo "[FAIL] Case 10: Expected HTTP 403 SELF_APPROVAL_NOT_ALLOWED, got HTTP {$res10['status']} - " . json_encode($res10['json']) . "\n";
+        $allPassed = false;
+    }
+
+    // ----------------------------------------------------
+    // CASE 11: create_order with override flag and no PIN => rejected
+    // ----------------------------------------------------
+    $res11 = callPosApi($apiUrl, [
+        'action' => 'create_order',
+        'order_number' => 'TEST-ORD-OVR-' . bin2hex(random_bytes(4)),
+        'plate_number' => '2A-1111',
+        'vehicle_type' => 'sedan',
+        'manager_override' => true,
+        'items' => [
+            [
+                'type' => 'service',
+                'id' => 1,
+                'service_id' => 1,
+                'name' => 'Regular Wash',
+                'price_usd' => 5.00,
+                'qty' => 1
+            ]
+        ]
+    ], [
+        'X-Device-Key' => $apiKey,
+        'X-Staff-Token' => $dedicatedCashierToken
+    ]);
+
+    if ($res11['status'] === 403 && (
+        ($res11['json']['error'] ?? '') === 'MANAGER_PIN_REQUIRED' ||
+        stripos($res11['json']['message'] ?? '', 'manager') !== false
+    )) {
+        echo "[PASS] Case 11: create_order with override flag and no PIN => rejected\n";
+    } else {
+        echo "[FAIL] Case 11: Expected HTTP 403 rejection for override without PIN, got HTTP {$res11['status']} - " . json_encode($res11['json']) . "\n";
+        $allPassed = false;
+    }
+
 } finally {
+    // Cleanup any created test orders
+    if (!empty($testOrderIds)) {
+        $inOrdClause = implode(',', array_fill(0, count($testOrderIds), '?'));
+        $pdo->prepare("DELETE FROM orders WHERE id IN ({$inOrdClause})")->execute($testOrderIds);
+    }
+
+    // Cleanup any created test users
+    if (!empty($testUserIds)) {
+        $inUserClause = implode(',', array_fill(0, count($testUserIds), '?'));
+        $pdo->prepare("DELETE FROM users WHERE id IN ({$inUserClause})")->execute($testUserIds);
+    }
+
     // Cleanup any created test sessions
     if (!empty($testSessionHashes)) {
         $inClause = implode(',', array_fill(0, count($testSessionHashes), '?'));
@@ -217,7 +437,7 @@ try {
 
 echo "\n========================================================\n";
 if ($allPassed) {
-    echo "ALL 5 POS AUTHENTICATION & PERMISSION TESTS PASSED!\n";
+    echo "ALL 11 POS AUTHENTICATION, PERMISSION & VOID TESTS PASSED!\n";
     echo "========================================================\n";
     exit(0);
 } else {
