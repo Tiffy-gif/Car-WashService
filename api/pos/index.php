@@ -497,6 +497,17 @@ if (!in_array($action, $DEVICE_ONLY_ACTIONS, true)) {
 // Log in using the same staff accounts as this system
 // ========================================================
 if ($action === 'staff_login') {
+    // Device-level rate limiting: Max 15 failed logins per device per 10 minutes
+    if ($authDeviceId > 0 && CashierControl::isDeviceLoginThrottled($authDeviceId)) {
+        http_response_code(429);
+        echo json_encode([
+            'success' => false,
+            'error' => 'DEVICE_THROTTLED',
+            'message' => 'Too many failed login attempts from this POS terminal. Please wait 10 minutes before trying again.'
+        ]);
+        exit;
+    }
+
     $username = trim($inputData['username'] ?? $_POST['username'] ?? '');
     $pin = (string)($inputData['pin'] ?? $_POST['pin'] ?? $inputData['password'] ?? $_POST['password'] ?? '');
 
@@ -511,6 +522,9 @@ if ($action === 'staff_login') {
     }
 
     if (!Auth::login($username, $pin)) {
+        if ($authDeviceId > 0) {
+            CashierControl::recordFailedDeviceLogin($authDeviceId);
+        }
         $lastErr = Auth::getLastError();
         $errData = Auth::getLastErrorData();
 
@@ -569,6 +583,10 @@ if ($action === 'staff_login') {
             'remaining_attempts' => $remAttempts
         ]);
         exit;
+    }
+
+    if ($authDeviceId > 0) {
+        CashierControl::clearFailedDeviceLogins($authDeviceId);
     }
 
     $uStmt = $pdo->prepare("SELECT id, username, full_name, role, phone, commission_type, commission_rate, status, is_sample_account FROM users WHERE username = ?");

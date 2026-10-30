@@ -84,6 +84,95 @@ class CashierControl {
     }
 
     /**
+     * Ensure pos_device_login_attempts table exists for device-level login rate limiting.
+     */
+    public static function ensureLoginAttemptsTable(?PDO $pdo = null): void {
+        $pdo = $pdo ?? Database::getInstance();
+        $isSqlite = (Database::getDriver() === 'sqlite');
+        if ($isSqlite) {
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS pos_device_login_attempts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id INT NOT NULL,
+                    attempted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_dev_login_time ON pos_device_login_attempts(device_id, attempted_at);
+            ");
+        } else {
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS pos_device_login_attempts (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    device_id INT NOT NULL,
+                    attempted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_dev_login_time (device_id, attempted_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ");
+        }
+    }
+
+    /**
+     * Check if a POS device is throttled for staff_login.
+     * Max 15 failed logins per device per 10 minutes.
+     */
+    public static function isDeviceLoginThrottled(int $deviceId): bool {
+        if ($deviceId <= 0) {
+            return false;
+        }
+        $pdo = Database::getInstance();
+        self::ensureLoginAttemptsTable($pdo);
+        $isSqlite = (Database::getDriver() === 'sqlite');
+        $timeClause = $isSqlite ? "datetime('now', '-10 minutes')" : "DATE_SUB(NOW(), INTERVAL 10 MINUTE)";
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) 
+            FROM pos_device_login_attempts 
+            WHERE device_id = ? AND attempted_at >= {$timeClause}
+        ");
+        $stmt->execute([$deviceId]);
+        return ((int)$stmt->fetchColumn()) >= 15;
+    }
+
+    /**
+     * Record a failed staff_login attempt for a POS device.
+     */
+    public static function recordFailedDeviceLogin(int $deviceId): void {
+        if ($deviceId <= 0) {
+            return;
+        }
+        try {
+            $pdo = Database::getInstance();
+            self::ensureLoginAttemptsTable($pdo);
+            $stmt = $pdo->prepare("INSERT INTO pos_device_login_attempts (device_id, attempted_at) VALUES (?, NOW())");
+            $stmt->execute([$deviceId]);
+
+            // Periodic cleanup (5% chance): delete records older than 24 hours
+            if (mt_rand(1, 20) === 1) {
+                $isSqlite = (Database::getDriver() === 'sqlite');
+                $timeClause = $isSqlite ? "datetime('now', '-24 hours')" : "DATE_SUB(NOW(), INTERVAL 24 HOUR)";
+                $pdo->exec("DELETE FROM pos_device_login_attempts WHERE attempted_at < {$timeClause}");
+            }
+        } catch (Exception $e) {
+            // Silently continue
+        }
+    }
+
+    /**
+     * Clear failed staff_login attempts for a POS device on successful login.
+     */
+    public static function clearFailedDeviceLogins(int $deviceId): void {
+        if ($deviceId <= 0) {
+            return;
+        }
+        try {
+            $pdo = Database::getInstance();
+            self::ensureLoginAttemptsTable($pdo);
+            $stmt = $pdo->prepare("DELETE FROM pos_device_login_attempts WHERE device_id = ?");
+            $stmt->execute([$deviceId]);
+        } catch (Exception $e) {
+            // Ignore
+        }
+    }
+
+    /**
      * Verify Manager or Owner 6-digit PIN for sensitive action authorization.
      * Returns manager data on success, throws Exception on failure.
      * Throws ManagerPinThrottledException if device failed 10+ attempts in 10 minutes.
