@@ -307,12 +307,9 @@ if ($action === 'staff_login') {
         // Oil reminders
         'default_oil_mileage' => (int)($settings['default_oil_mileage'] ?? 10000),
         'default_oil_months' => (int)($settings['default_oil_months'] ?? 3),
-        // Telegram alerts
-        'telegram_bot_token' => $settings['telegram_bot_token'] ?? '',
-        'telegram_chat_id' => $settings['telegram_chat_id'] ?? '',
         // System
         'default_language' => $settings['default_language'] ?? 'en',
-        'demo_mode' => (int)($settings['demo_mode'] ?? 1),
+        'demo_mode' => (int)($settings['demo_mode'] ?? 0),
         'app_timezone' => $settings['app_timezone'] ?? 'Asia/Phnom_Penh'
     ];
 
@@ -504,12 +501,9 @@ if ($action === 'sync_catalog') {
         // Oil reminders
         'default_oil_mileage' => (int)($settings['default_oil_mileage'] ?? 10000),
         'default_oil_months' => (int)($settings['default_oil_months'] ?? 3),
-        // Telegram alerts
-        'telegram_bot_token' => $settings['telegram_bot_token'] ?? '',
-        'telegram_chat_id' => $settings['telegram_chat_id'] ?? '',
         // System
         'default_language' => $settings['default_language'] ?? 'en',
-        'demo_mode' => (int)($settings['demo_mode'] ?? 1),
+        'demo_mode' => (int)($settings['demo_mode'] ?? 0),
         'app_timezone' => $settings['app_timezone'] ?? 'Asia/Phnom_Penh'
     ];
 
