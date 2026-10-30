@@ -319,9 +319,23 @@ if ($action === 'staff_login') {
     $user['role_name_km'] = $roleDetails['role_name_km'] ?? $user['role'];
     $user['permissions'] = Auth::getPermissionsByUserId((int)$user['id']);
 
+    // Create session bound to authenticated device
+    // Absolute max 12 hours, idle max 60 minutes
+    $rawToken = bin2hex(random_bytes(32));
+    $tokenHash = hash('sha256', $rawToken);
+    $expiresIn = 12 * 3600; // 12 hours in seconds
+    $nowStr = date('Y-m-d H:i:s');
+    $expiresAtStr = date('Y-m-d H:i:s', time() + $expiresIn);
+
+    $sessStmt = $pdo->prepare("INSERT INTO pos_sessions (token_hash, user_id, device_id, created_at, last_seen_at, expires_at, ip) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $sessStmt->execute([$tokenHash, (int)$user['id'], (int)$device['id'], $nowStr, $nowStr, $expiresAtStr, $clientIp]);
+
     echo json_encode([
         'success' => true,
         'message' => 'Staff login successful',
+        'session_token' => $rawToken,
+        'expires_in' => $expiresIn,
+        'idle_timeout' => 3600,
         'user' => $user,
         'device' => [
             'id' => $device['id'],
@@ -332,6 +346,27 @@ if ($action === 'staff_login') {
         'exchange_rate' => get_exchange_rate(),
         'settings' => $settings,
         'shop' => $shopData
+    ]);
+    exit;
+}
+
+// ========================================================
+// 1b. ACTION: staff_logout
+// Delete the active staff session
+// ========================================================
+if ($action === 'staff_logout') {
+    $rawToken = $_SERVER['HTTP_X_STAFF_TOKEN'] ?? $inputData['session_token'] ?? '';
+    if (!empty($rawToken)) {
+        $tokenHash = hash('sha256', $rawToken);
+        $delStmt = $pdo->prepare("DELETE FROM pos_sessions WHERE token_hash = ?");
+        $delStmt->execute([$tokenHash]);
+    }
+    if (class_exists('Auth')) {
+        Auth::logout();
+    }
+    echo json_encode([
+        'success' => true,
+        'message' => 'Logged out successfully.'
     ]);
     exit;
 }
