@@ -29,6 +29,30 @@ class PosStorage {
         CURRENT_SHIFT: 'cw_pos_current_shift'
     };
 
+    /**
+     * Safe localStorage wrapper that catches quota errors and displays a user toast.
+     */
+    static setItem(key, value) {
+        try {
+            localStorage.setItem(key, value);
+            return true;
+        } catch (e) {
+            const isQuota = (
+                e.name === 'QuotaExceededError' ||
+                e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+                e.code === 22 ||
+                e.code === 1014
+            );
+            console.error(`PosStorage: Failed to write "${key}" to localStorage:`, e);
+            if (isQuota) {
+                if (typeof PosApp !== 'undefined' && typeof PosApp.showToastNotice === 'function') {
+                    PosApp.showToastNotice('Storage full! Browser storage quota exceeded. Some offline data could not be saved.', 'danger');
+                }
+            }
+            return false;
+        }
+    }
+
     // User Session
     static getUser() {
         try {
@@ -41,7 +65,7 @@ class PosStorage {
 
     static setUser(user) {
         if (user) {
-            localStorage.setItem(this.KEYS.USER, JSON.stringify(user));
+            this.setItem(this.KEYS.USER, JSON.stringify(user));
         } else {
             localStorage.removeItem(this.KEYS.USER);
         }
@@ -63,9 +87,9 @@ class PosStorage {
     }
 
     static setCatalog(catalog, timestamp = null) {
-        localStorage.setItem(this.KEYS.CATALOG, JSON.stringify(catalog));
+        this.setItem(this.KEYS.CATALOG, JSON.stringify(catalog));
         const time = timestamp || new Date().toISOString();
-        localStorage.setItem(this.KEYS.CATALOG_UPDATED_AT, time);
+        this.setItem(this.KEYS.CATALOG_UPDATED_AT, time);
     }
 
     static getCatalogUpdatedAt() {
@@ -83,9 +107,9 @@ class PosStorage {
     }
 
     static setCustomers(customersData) {
-        localStorage.setItem(this.KEYS.CUSTOMERS, JSON.stringify(customersData));
+        this.setItem(this.KEYS.CUSTOMERS, JSON.stringify(customersData));
         const time = customersData?.synced_at || new Date().toISOString();
-        localStorage.setItem(this.KEYS.CUSTOMERS_UPDATED_AT, time);
+        this.setItem(this.KEYS.CUSTOMERS_UPDATED_AT, time);
     }
 
     static getCustomersLastUpdated() {
@@ -114,18 +138,18 @@ class PosStorage {
         } else {
             queue.push(order);
         }
-        localStorage.setItem(this.KEYS.PENDING_ORDERS, JSON.stringify(queue));
+        this.setItem(this.KEYS.PENDING_ORDERS, JSON.stringify(queue));
         return queue.length;
     }
 
     static removePendingOrder(idempotencyKey) {
         const queue = this.getPendingOrders().filter(o => o.idempotency_key !== idempotencyKey);
-        localStorage.setItem(this.KEYS.PENDING_ORDERS, JSON.stringify(queue));
+        this.setItem(this.KEYS.PENDING_ORDERS, JSON.stringify(queue));
         return queue.length;
     }
 
     static clearPendingOrders() {
-        localStorage.setItem(this.KEYS.PENDING_ORDERS, JSON.stringify([]));
+        this.setItem(this.KEYS.PENDING_ORDERS, JSON.stringify([]));
     }
 
     // Synced Orders (For daily reporting and receipt re-printing)
@@ -140,7 +164,7 @@ class PosStorage {
 
     static setSyncedOrders(orders) {
         if (!Array.isArray(orders)) orders = [];
-        localStorage.setItem(this.KEYS.SYNCED_ORDERS, JSON.stringify(orders.slice(0, 200)));
+        this.setItem(this.KEYS.SYNCED_ORDERS, JSON.stringify(orders.slice(0, 200)));
     }
 
     static addSyncedOrder(order) {
@@ -150,7 +174,7 @@ class PosStorage {
         filtered.unshift(order);
         // Keep last 200 orders in memory
         if (filtered.length > 200) filtered.length = 200;
-        localStorage.setItem(this.KEYS.SYNCED_ORDERS, JSON.stringify(filtered));
+        this.setItem(this.KEYS.SYNCED_ORDERS, JSON.stringify(filtered));
     }
 
     static updatePendingOrderFailure(idempotencyKey, reason) {
@@ -160,7 +184,7 @@ class PosStorage {
             ord.failure_reason = reason;
             ord.failed_at = new Date().toISOString();
             ord.retry_count = (ord.retry_count || 0) + 1;
-            localStorage.setItem(this.KEYS.PENDING_ORDERS, JSON.stringify(queue));
+            this.setItem(this.KEYS.PENDING_ORDERS, JSON.stringify(queue));
         }
     }
 
@@ -175,7 +199,7 @@ class PosStorage {
     }
 
     static setTodayOrders(orders) {
-        localStorage.setItem(this.KEYS.TODAY_ORDERS, JSON.stringify(orders || []));
+        this.setItem(this.KEYS.TODAY_ORDERS, JSON.stringify(orders || []));
     }
 
     // Cash Drawer Counts (for Daily Close Reconciliation)
@@ -189,7 +213,7 @@ class PosStorage {
     }
 
     static setDrawerCount(data) {
-        localStorage.setItem(this.KEYS.DRAWER_COUNTS, JSON.stringify(data));
+        this.setItem(this.KEYS.DRAWER_COUNTS, JSON.stringify(data));
     }
 
     // Language
@@ -198,7 +222,7 @@ class PosStorage {
     }
 
     static setLanguage(lang) {
-        localStorage.setItem(this.KEYS.LANGUAGE, lang || 'km');
+        this.setItem(this.KEYS.LANGUAGE, lang || 'km');
     }
 
     // Settings Cache (System settings, Shop profile, Receipt config, Exchange rate)
@@ -217,7 +241,7 @@ class PosStorage {
     }
 
     static setSettings(settings) {
-        localStorage.setItem(this.KEYS.SETTINGS, JSON.stringify(settings || {}));
+        this.setItem(this.KEYS.SETTINGS, JSON.stringify(settings || {}));
     }
 
     // Cached Offline Asset URIs (Data URIs for Logo & KHQR)
@@ -227,7 +251,7 @@ class PosStorage {
 
     static setLogoDataUri(dataUri) {
         if (dataUri) {
-            localStorage.setItem(this.KEYS.LOGO_DATA_URI, dataUri);
+            this.setItem(this.KEYS.LOGO_DATA_URI, dataUri);
         } else {
             localStorage.removeItem(this.KEYS.LOGO_DATA_URI);
         }
@@ -239,7 +263,7 @@ class PosStorage {
 
     static setKhqrDataUri(dataUri) {
         if (dataUri) {
-            localStorage.setItem(this.KEYS.KHQR_DATA_URI, dataUri);
+            this.setItem(this.KEYS.KHQR_DATA_URI, dataUri);
         } else {
             localStorage.removeItem(this.KEYS.KHQR_DATA_URI);
         }
@@ -257,7 +281,7 @@ class PosStorage {
 
     static setCurrentShift(shift) {
         if (shift) {
-            localStorage.setItem(this.KEYS.CURRENT_SHIFT, JSON.stringify(shift));
+            this.setItem(this.KEYS.CURRENT_SHIFT, JSON.stringify(shift));
         } else {
             localStorage.removeItem(this.KEYS.CURRENT_SHIFT);
         }
@@ -296,9 +320,9 @@ class PosStorage {
                 id = u?.id || u?.username;
             }
             if (id) {
-                localStorage.setItem(`cw_pos_pictures_user_${id}`, strVal);
+                this.setItem(`cw_pos_pictures_user_${id}`, strVal);
             } else {
-                localStorage.setItem(this.KEYS.SHOW_PICTURES, strVal);
+                this.setItem(this.KEYS.SHOW_PICTURES, strVal);
             }
             return boolVal;
         } catch (e) {
@@ -312,7 +336,7 @@ class PosStorage {
     }
 
     static setTheme(theme) {
-        localStorage.setItem(this.KEYS.THEME, theme === 'dark' ? 'dark' : 'light');
+        this.setItem(this.KEYS.THEME, theme === 'dark' ? 'dark' : 'light');
     }
 
     // Layout Preference (per staff user on this device, with device fallback to 'right')
@@ -344,9 +368,9 @@ class PosStorage {
                 id = u?.id || u?.username;
             }
             if (id) {
-                localStorage.setItem(`cw_pos_layout_user_${id}`, val);
+                this.setItem(`cw_pos_layout_user_${id}`, val);
             } else {
-                localStorage.setItem(this.KEYS.LAYOUT, val);
+                this.setItem(this.KEYS.LAYOUT, val);
             }
             return val;
         } catch (e) {
@@ -387,12 +411,12 @@ class PosStorage {
         } else {
             queue.push({ ...change, updatedAt: Date.now() });
         }
-        localStorage.setItem(this.KEYS.OFFLINE_STATUS_QUEUE, JSON.stringify(queue));
+        this.setItem(this.KEYS.OFFLINE_STATUS_QUEUE, JSON.stringify(queue));
     }
 
     static removeOfflineStatusChange(orderNumber) {
         const queue = this.getOfflineStatusQueue().filter(q => q.orderNumber !== orderNumber);
-        localStorage.setItem(this.KEYS.OFFLINE_STATUS_QUEUE, JSON.stringify(queue));
+        this.setItem(this.KEYS.OFFLINE_STATUS_QUEUE, JSON.stringify(queue));
     }
 
     // Cached Oil Reminders
@@ -407,8 +431,8 @@ class PosStorage {
     }
 
     static setOilRemindersCache(reminders, updatedAt = null) {
-        localStorage.setItem(this.KEYS.OIL_REMINDERS_CACHE, JSON.stringify(reminders || []));
-        localStorage.setItem(this.KEYS.OIL_REMINDERS_UPDATED_AT, updatedAt || new Date().toISOString());
+        this.setItem(this.KEYS.OIL_REMINDERS_CACHE, JSON.stringify(reminders || []));
+        this.setItem(this.KEYS.OIL_REMINDERS_UPDATED_AT, updatedAt || new Date().toISOString());
     }
 
     // Daily Close Status Cache
@@ -427,7 +451,7 @@ class PosStorage {
         try {
             const all = JSON.parse(localStorage.getItem(this.KEYS.DAILY_CLOSE_STATUS) || '{}');
             all[d] = record;
-            localStorage.setItem(this.KEYS.DAILY_CLOSE_STATUS, JSON.stringify(all));
+            this.setItem(this.KEYS.DAILY_CLOSE_STATUS, JSON.stringify(all));
         } catch (e) {}
     }
 }

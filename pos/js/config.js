@@ -62,7 +62,20 @@ class PosConfig {
 
     static save(newConfig) {
         const merged = { ...this.get(), ...newConfig };
-        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(merged));
+        try {
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(merged));
+        } catch (e) {
+            const isQuota = (
+                e.name === 'QuotaExceededError' ||
+                e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+                e.code === 22 ||
+                e.code === 1014
+            );
+            if (isQuota && typeof PosApp !== 'undefined' && typeof PosApp.showToastNotice === 'function') {
+                PosApp.showToastNotice('Storage full! Browser storage quota exceeded.', 'danger');
+            }
+            console.error('Failed to save config to localStorage:', e);
+        }
         return merged;
     }
 

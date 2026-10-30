@@ -39,6 +39,17 @@ class PosApp {
         return (first + last).toUpperCase();
     }
 
+    static generateIdempotencyKey() {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            try {
+                return crypto.randomUUID();
+            } catch (e) {
+                // fallback to timestamp + random
+            }
+        }
+        return `pos_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    }
+
     static highlightMatch(text, query) {
         if (!text) return '';
         const plainText = this.stripHtml(String(text));
@@ -2082,7 +2093,7 @@ class PosApp {
             const data = await PosApi.syncCatalog();
             if (data && data.success) {
                 this.setOnlineStatus(true);
-                localStorage.setItem('carwash_pos_has_connected', 'true');
+                PosStorage.setItem('carwash_pos_has_connected', 'true');
                 if (data.system_revision?.hash) {
                     this.lastSystemRevision = data.system_revision.hash;
                 }
@@ -2195,7 +2206,7 @@ class PosApp {
             const res = await PosApi.testConnection();
             if (res.success) {
                 this.setOnlineStatus(true);
-                localStorage.setItem('carwash_pos_has_connected', 'true');
+                PosStorage.setItem('carwash_pos_has_connected', 'true');
                 // Refresh catalog, prices, and shop branding from back office
                 await this.refreshCatalogSilently(false);
             } else {
@@ -5463,7 +5474,7 @@ class PosApp {
         const repairNotes = document.getElementById('cartRepairNotesInput')?.value.trim() || '';
 
         // Unique Idempotency Key
-        const idempotencyKey = `pos_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const idempotencyKey = this.generateIdempotencyKey();
 
         const orderPayload = {
             idempotency_key: idempotencyKey,
@@ -5653,7 +5664,7 @@ class PosApp {
         const selectedMechanic = document.getElementById('cartMechanicSelect')?.value || document.getElementById('selectDutyMechanic')?.value;
         const repairNotes = document.getElementById('cartRepairNotesInput')?.value?.trim() || '';
 
-        const idempotencyKey = `pos_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const idempotencyKey = this.generateIdempotencyKey();
 
         const orderPayload = {
             idempotency_key: idempotencyKey,
@@ -9016,58 +9027,68 @@ class PosApp {
     // ========================================================
     // OFFLINE IDEMPOTENT SYNC ENGINE
     // ========================================================
+    static _isSyncingPendingOrders = false;
     static async syncPendingOrdersNow() {
-        const queue = PosStorage.getPendingOrders();
-        if (queue.length === 0) return;
-
-        console.log(`Syncing ${queue.length} pending offline orders to back office...`);
-        const badge = document.getElementById('syncBadge');
-        if (badge) {
-            badge.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Syncing...`;
+        if (this._isSyncingPendingOrders) {
+            console.log('syncPendingOrdersNow already in progress, skipping concurrent run.');
+            return;
         }
+        this._isSyncingPendingOrders = true;
+        try {
+            const queue = PosStorage.getPendingOrders();
+            if (queue.length === 0) return;
 
-        let syncedCount = 0;
-        for (const order of queue) {
-            try {
-                const res = await PosApi.createOrder(order, order.idempotency_key);
-                if (res.success || res.is_duplicate) {
-                    PosStorage.removePendingOrder(order.idempotency_key);
-                    syncedCount++;
-                } else {
-                    PosStorage.updatePendingOrderFailure(order.idempotency_key, res.message || 'Server rejected');
-                }
-            } catch (err) {
-                PosStorage.updatePendingOrderFailure(order.idempotency_key, err.message || 'Network timeout');
-                console.warn(`Could not sync order ${order.idempotency_key}:`, err);
-                break; // Stop loop if server connection failed
+            console.log(`Syncing ${queue.length} pending offline orders to back office...`);
+            const badge = document.getElementById('syncBadge');
+            if (badge) {
+                badge.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Syncing...`;
             }
-        }
 
-        this.updatePendingSyncBadge();
-        if (syncedCount > 0) {
-            console.log(`Successfully synced ${syncedCount} orders.`);
-            this.renderJobQueue();
-        }
-
-        // Requirement 7: Sync pending offline status changes
-        const statusQueue = PosStorage.getOfflineStatusQueue();
-        if (statusQueue.length > 0) {
-            for (const item of statusQueue) {
+            let syncedCount = 0;
+            for (const order of queue) {
                 try {
-                    const res = await PosApi.syncOrderStatus(0, item.orderNumber, item.status);
-                    if (res && res.success) {
-                        PosStorage.removeOfflineStatusChange(item.orderNumber);
+                    const res = await PosApi.createOrder(order, order.idempotency_key);
+                    if (res.success || res.is_duplicate) {
+                        PosStorage.removePendingOrder(order.idempotency_key);
+                        syncedCount++;
+                    } else {
+                        PosStorage.updatePendingOrderFailure(order.idempotency_key, res.message || 'Server rejected');
                     }
-                } catch (e) {
-                    console.warn(`Could not sync status change for ${item.orderNumber}:`, e);
-                    break;
+                } catch (err) {
+                    PosStorage.updatePendingOrderFailure(order.idempotency_key, err.message || 'Network timeout');
+                    console.warn(`Could not sync order ${order.idempotency_key}:`, err);
+                    break; // Stop loop if server connection failed
                 }
             }
-        }
 
-        // If pending modal is currently open, refresh its content
-        if (document.getElementById('modalPendingOrders')?.classList.contains('open')) {
-            this.openPendingOrdersModal();
+            this.updatePendingSyncBadge();
+            if (syncedCount > 0) {
+                console.log(`Successfully synced ${syncedCount} orders.`);
+                this.renderJobQueue();
+            }
+
+            // Requirement 7: Sync pending offline status changes
+            const statusQueue = PosStorage.getOfflineStatusQueue();
+            if (statusQueue.length > 0) {
+                for (const item of statusQueue) {
+                    try {
+                        const res = await PosApi.syncOrderStatus(0, item.orderNumber, item.status);
+                        if (res && res.success) {
+                            PosStorage.removeOfflineStatusChange(item.orderNumber);
+                        }
+                    } catch (e) {
+                        console.warn(`Could not sync status change for ${item.orderNumber}:`, e);
+                        break;
+                    }
+                }
+            }
+
+            // If pending modal is currently open, refresh its content
+            if (document.getElementById('modalPendingOrders')?.classList.contains('open')) {
+                this.openPendingOrdersModal();
+            }
+        } finally {
+            this._isSyncingPendingOrders = false;
         }
     }
 
@@ -9173,7 +9194,7 @@ class PosApp {
 
             if (res.success) {
                 // Connection works! Clear green message
-                localStorage.setItem('carwash_pos_has_connected', 'true');
+                PosStorage.setItem('carwash_pos_has_connected', 'true');
                 this.setOnlineStatus(true);
 
                 const devName = res.device?.name || testUid || 'POS Terminal';
@@ -9338,7 +9359,7 @@ class PosApp {
             document.getElementById('modalSettings')?.classList.remove('open');
             const res = await PosApi.testConnection();
             if (res.success) {
-                localStorage.setItem('carwash_pos_has_connected', 'true');
+                PosStorage.setItem('carwash_pos_has_connected', 'true');
                 this.setOnlineStatus(true);
                 PosApi.syncCatalog().then(() => this.renderCatalog());
             } else {
