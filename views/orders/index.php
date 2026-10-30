@@ -371,7 +371,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
 
     // 4. Cancel Order: Restore stock, remove commission, reverse loyalty points, exclude from reports
     elseif ($action === 'cancel_order' && $orderId > 0) {
-        if (!Auth::can('orders.cancel') && !Auth::can('pos.cancel_order')) {
+        if ((!Auth::can('orders.cancel') && !Auth::can('pos.cancel_order')) || !in_array(Auth::getRole(), ['owner', 'manager', 'system_admin'], true)) {
             $message = 'Permission denied: Cannot cancel order.';
             $messageType = 'danger';
         } else {
@@ -841,7 +841,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                                     </button>
 
                                     <!-- Cancel Order Button: Unpaid orders or Manager/Owner for paid orders -->
-                                    <?php if ($ord['status'] !== 'paid' || in_array(Auth::getRole(), ['owner', 'manager', 'system_admin'], true)): ?>
+                                    <?php if ((Auth::can('orders.cancel') || Auth::can('pos.cancel_order')) && in_array(Auth::getRole(), ['owner', 'manager', 'system_admin'], true)): ?>
                                         <button type="button" class="btn btn-secondary btn-sm" style="color: var(--danger);" title="Cancel Order (Restores Stock & Commission)"
                                                 data-order-id="<?= (int)$ord['id'] ?>"
                                                 data-order-num="<?= htmlspecialchars($ord['order_number'], ENT_QUOTES, 'UTF-8') ?>"
@@ -1097,6 +1097,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 </div>
 
 <!-- Modal: Cancel Order -->
+<?php if ((Auth::can('orders.cancel') || Auth::can('pos.cancel_order')) && in_array(Auth::getRole(), ['owner', 'manager', 'system_admin'], true)): ?>
 <div class="modal-backdrop" id="cancelOrderModal">
     <div class="modal" style="max-width: 460px;">
         <div class="modal-header">
@@ -1147,6 +1148,8 @@ include dirname(__DIR__) . '/layouts/header.php';
         </form>
     </div>
 </div>
+
+<?php endif; ?>
 
 <!-- Modal: Process Refund / Void (Requires Manager PIN, Blocks Offline) -->
 <div class="modal-backdrop" id="refundModal">

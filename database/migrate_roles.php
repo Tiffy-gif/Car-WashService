@@ -377,8 +377,8 @@ function migrateRoles(bool $force = false): bool {
     // 8b. Cashier gets POS, Orders, Customers, Extras, Oil Care list, Vehicle History, Daily Close
     if ($cashierId) {
         $cashierPermCodes = [
-            'pos.access', 'pos.create_order', 'pos.discount', 'pos.pay_order', 'pos.pay_later', 'pos.cancel_order', 'pos.receipt',
-            'orders.list', 'orders.change_status', 'orders.change_crew', 'orders.cancel',
+            'pos.access', 'pos.create_order', 'pos.discount', 'pos.pay_order', 'pos.pay_later', 'pos.receipt',
+            'orders.list', 'orders.change_status', 'orders.change_crew',
             'customers.list', 'customers.add', 'customers.edit',
             'vehicle_history.list',
             'oil_care.list',

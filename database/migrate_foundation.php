@@ -389,7 +389,7 @@ function migrateFoundation(bool $force = false): bool {
         $managerPerms = [
             'orders.list', 'orders.change_status', 'orders.change_crew', 'orders.cancel',
             'bays.view', 'bays.manage',
-            'pos.access', 'pos.create_order', 'pos.discount', 'pos.pay_order', 'pos.pay_later', 'pos.receipt',
+            'pos.access', 'pos.create_order', 'pos.discount', 'pos.pay_order', 'pos.pay_later', 'pos.cancel_order', 'pos.receipt',
             'customers.list', 'customers.add', 'customers.edit',
             'services.list', 'services.add', 'services.edit',
             'categories.list',
@@ -424,8 +424,8 @@ function migrateFoundation(bool $force = false): bool {
     $cashierId = $rolesMap['cashier'] ?? null;
     if ($cashierId) {
         $cashierPerms = [
-            'pos.access', 'pos.create_order', 'pos.discount', 'pos.pay_order', 'pos.pay_later', 'pos.cancel_order', 'pos.receipt',
-            'orders.list', 'orders.change_status', 'orders.change_crew', 'orders.cancel',
+            'pos.access', 'pos.create_order', 'pos.discount', 'pos.pay_order', 'pos.pay_later', 'pos.receipt',
+            'orders.list', 'orders.change_status', 'orders.change_crew',
             'customers.list', 'customers.add', 'customers.edit',
             'vehicle_history.list', 'oil_care.list', 'extras.list',
             'daily_close.view', 'daily_close.close'
