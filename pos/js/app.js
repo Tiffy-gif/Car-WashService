@@ -2706,7 +2706,7 @@ class PosApp {
 
         const userNameEl = document.getElementById('userName');
         if (userNameEl && !userFullNameEl) {
-            userNameEl.innerHTML = `<span class="user-fullname">${cleanName}</span><span class="user-role-badge">${roleName}</span>`;
+            userNameEl.innerHTML = `<span class="user-fullname">${this.escapeHtml(cleanName)}</span><span class="user-role-badge">${this.escapeHtml(roleName)}</span>`;
         }
 
         const userPill = document.getElementById('userPill');
@@ -3114,9 +3114,9 @@ class PosApp {
                 if (stockQty <= 0) {
                     stockEl.innerHTML = `<span style="color: var(--danger); font-weight: 700;"><i class="fa-solid fa-circle-xmark"></i> Out of Stock</span>`;
                 } else if (stockQty <= (item.min_stock_alert || 5)) {
-                    stockEl.innerHTML = `<span style="color: var(--warning); font-weight: 700;"><i class="fa-solid fa-triangle-exclamation"></i> Low: ${stockQty} ${item.unit || ''}</span>`;
+                    stockEl.innerHTML = `<span style="color: var(--warning); font-weight: 700;"><i class="fa-solid fa-triangle-exclamation"></i> Low: ${stockQty} ${this.escapeHtml(item.unit || '')}</span>`;
                 } else {
-                    stockEl.innerHTML = `<span style="color: var(--success); font-weight: 700;"><i class="fa-solid fa-circle-check"></i> ${stockQty} ${item.unit || ''}</span>`;
+                    stockEl.innerHTML = `<span style="color: var(--success); font-weight: 700;"><i class="fa-solid fa-circle-check"></i> ${stockQty} ${this.escapeHtml(item.unit || '')}</span>`;
                 }
             }
             const isSpare = (item.category === 'spare_part' || item.category === 'oil_filter');
@@ -3381,7 +3381,7 @@ class PosApp {
             const displayName = this.getShortCategoryName(rawName, lang);
             const fullName = (lang === 'km') ? (cat.name_km || cat.name_en) : (cat.name_en || cat.name_km);
 
-            btn.innerHTML = `<span>${displayName}</span>`;
+            btn.innerHTML = `<span>${this.escapeHtml(displayName)}</span>`;
             btn.title = fullName || displayName;
 
             if (!activeItemsExist) {
@@ -3491,8 +3491,8 @@ class PosApp {
                         </div>
                         <div class="item-card-body">
                             <div class="item-titles">
-                                <div class="item-name-km">${svc.name_km || svc.name_en}</div>
-                                <div class="item-name-en">${svc.name_en}</div>
+                                <div class="item-name-km">${this.escapeHtml(svc.name_km || svc.name_en)}</div>
+                                <div class="item-name-en">${this.escapeHtml(svc.name_en)}</div>
                             </div>
                             <div class="item-meta-row">
                                 <div class="item-price-block">
@@ -3520,8 +3520,8 @@ class PosApp {
                             ${svcIconHtml}
                         </div>
                         <div class="item-titles">
-                            <div class="item-name-km">${svc.name_km || svc.name_en}</div>
-                            <div class="item-name-en">${svc.name_en}</div>
+                            <div class="item-name-km">${this.escapeHtml(svc.name_km || svc.name_en)}</div>
+                            <div class="item-name-en">${this.escapeHtml(svc.name_en)}</div>
                         </div>
                         <div class="item-meta-row">
                             <div class="item-price-block">
@@ -3602,8 +3602,8 @@ class PosApp {
                         </div>
                         <div class="item-card-body">
                             <div class="item-titles">
-                                <div class="item-name-km">${prod.name_km || prod.name_en}</div>
-                                <div class="item-name-en">${prod.name_en}</div>
+                                <div class="item-name-km">${this.escapeHtml(prod.name_km || prod.name_en)}</div>
+                                <div class="item-name-en">${this.escapeHtml(prod.name_en)}</div>
                             </div>
                             <div class="item-meta-row">
                                 <div class="item-price-block">
@@ -3630,8 +3630,8 @@ class PosApp {
                             ${prodIconHtml}
                         </div>
                         <div class="item-titles">
-                            <div class="item-name-km">${prod.name_km || prod.name_en}</div>
-                            <div class="item-name-en">${prod.name_en}</div>
+                            <div class="item-name-km">${this.escapeHtml(prod.name_km || prod.name_en)}</div>
+                            <div class="item-name-en">${this.escapeHtml(prod.name_en)}</div>
                         </div>
                         <div class="item-meta-row">
                             <div class="item-price-block">
@@ -4160,8 +4160,8 @@ class PosApp {
                     <div class="cart-item-row">
                         <div class="cart-item-main">
                             <div class="cart-item-info">
-                                <span class="cart-item-title">${it.name_km || it.name_en} ${freeBadge}${upsellBadge}</span>
-                                <span class="cart-item-sub">${it.name_en}${it.note ? ` • ${this.escapeHtml(it.note)}` : ''}</span>
+                                <span class="cart-item-title">${this.escapeHtml(it.name_km || it.name_en)} ${freeBadge}${upsellBadge}</span>
+                                <span class="cart-item-sub">${this.escapeHtml(it.name_en)}${it.note ? ` • ${this.escapeHtml(it.note)}` : ''}</span>
                             </div>
                             <div>
                                 <div class="cart-item-price">${isFree ? '$0.00' : '$' + lineTotalUsd.toFixed(2)}</div>
@@ -5349,12 +5349,12 @@ class PosApp {
         const washers = catalog.washers || [];
         let wHtml = '<option value="">-- All Active Washers --</option>';
         (catalog.washers || []).forEach(w => {
-            wHtml += `<option value="${w.id}">${w.full_name}</option>`;
+            wHtml += `<option value="${w.id}">${this.escapeHtml(w.full_name)}</option>`;
         });
 
         let mHtml = '<option value="">-- Duty Mechanic --</option>';
         (catalog.mechanics || []).forEach(m => {
-            mHtml += `<option value="${m.id}">${m.full_name}</option>`;
+            mHtml += `<option value="${m.id}">${this.escapeHtml(m.full_name)}</option>`;
         });
 
         if (wSelect) wSelect.innerHTML = wHtml;
@@ -7435,7 +7435,7 @@ class PosApp {
                 wHtml += `
                     <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.88rem; cursor: pointer;">
                         <input type="checkbox" name="crewWasherCheck" value="${w.id}" ${isChecked}>
-                        <span>${w.full_name} (${w.commission_type === 'percentage' ? w.commission_rate + '%' : '$' + w.commission_rate})</span>
+                        <span>${this.escapeHtml(w.full_name)} (${w.commission_type === 'percentage' ? w.commission_rate + '%' : '$' + w.commission_rate})</span>
                     </label>
                 `;
             });
@@ -7450,7 +7450,7 @@ class PosApp {
                 mHtml += `
                     <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.88rem; cursor: pointer;">
                         <input type="checkbox" name="crewMechanicCheck" value="${m.id}" ${isChecked}>
-                        <span>${m.full_name} (${m.commission_type === 'percentage' ? m.commission_rate + '%' : '$' + m.commission_rate})</span>
+                        <span>${this.escapeHtml(m.full_name)} (${m.commission_type === 'percentage' ? m.commission_rate + '%' : '$' + m.commission_rate})</span>
                     </label>
                 `;
             });
@@ -8945,6 +8945,7 @@ class PosApp {
         const queue = PosStorage.getPendingOrders();
         if (queue.length === 0) {
             container.innerHTML = `<div style="text-align: center; padding: 2rem; color: var(--text-muted);"><i class="fa-solid fa-circle-check fa-2x" style="color: var(--success); margin-bottom: 0.5rem;"></i><p style="font-weight: 700; margin: 0;">All orders are synchronized with the back office. No pending offline orders!</p></div>`;
+            container.onclick = null;
         } else {
             let html = '';
             queue.forEach(ord => {
@@ -8956,19 +8957,19 @@ class PosApp {
                     <div style="background: white; border: 1.5px solid var(--border); border-left: 4px solid #ea580c; border-radius: var(--radius-md); padding: 0.75rem 1rem;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
                             <div>
-                                <span style="font-weight: 800; font-size: 1rem; color: var(--text-main);">${ord.plate_number}</span>
-                                <span style="font-size: 0.8rem; color: var(--text-muted); margin-left: 6px;">#${ord.order_number || 'PENDING'}</span>
+                                <span style="font-weight: 800; font-size: 1rem; color: var(--text-main);">${this.escapeHtml(ord.plate_number)}</span>
+                                <span style="font-size: 0.8rem; color: var(--text-muted); margin-left: 6px;">#${this.escapeHtml(ord.order_number || 'PENDING')}</span>
                             </div>
                             <span style="font-weight: 900; color: var(--primary); font-size: 1.1rem;">$${parseFloat(ord.total_usd || 0).toFixed(2)}</span>
                         </div>
                         <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.4rem;">
-                            Customer: <strong>${ord.customer_name || 'Walk-in'}</strong> • ${ord.items?.length || 1} items • Time: ${time} (Retries: ${retryCount})
+                            Customer: <strong>${this.escapeHtml(ord.customer_name || 'Walk-in')}</strong> • ${ord.items?.length || 1} items • Time: ${time} (Retries: ${retryCount})
                         </div>
                         <div style="background: #fff7ed; border: 1px solid #fed7aa; padding: 0.4rem 0.6rem; border-radius: 4px; font-size: 0.78rem; color: #9a3412; margin-bottom: 0.5rem;">
-                            <i class="fa-solid fa-triangle-exclamation"></i> <strong>Reason:</strong> ${reason}
+                            <i class="fa-solid fa-triangle-exclamation"></i> <strong>Reason:</strong> ${this.escapeHtml(reason)}
                         </div>
                         <div style="text-align: right;">
-                            <button type="button" class="btn btn-outline btn-sm" onclick="PosApp.retrySinglePendingOrder('${ord.idempotency_key}')">
+                            <button type="button" class="btn btn-outline btn-sm btn-retry-pending" data-idempotency-key="${this.escapeHtml(ord.idempotency_key)}">
                                 <i class="fa-solid fa-rotate"></i> Try Now
                             </button>
                         </div>
@@ -8976,6 +8977,12 @@ class PosApp {
                 `;
             });
             container.innerHTML = html;
+            container.onclick = (e) => {
+                const btn = e.target.closest('.btn-retry-pending');
+                if (btn && btn.dataset.idempotencyKey) {
+                    PosApp.retrySinglePendingOrder(btn.dataset.idempotencyKey);
+                }
+            };
         }
 
         modal.classList.add('open');
@@ -9239,7 +9246,7 @@ class PosApp {
                     <i class="fa-solid fa-circle-xmark" style="color: #dc2626; font-size: 1.2rem; margin-right: 6px;"></i>
                     <div>
                         <strong>ម៉ាស៊ីនព្រីនមិនអាចទាក់ទងបាន (Printer Unreachable):</strong><br>
-                        ${res.error || 'Connection failed: Please check printer power cable, network cable / IP address.'}
+                        ${this.escapeHtml(res.error || 'Connection failed: Please check printer power cable, network cable / IP address.')}
                     </div>
                 `;
             }
@@ -9250,7 +9257,7 @@ class PosApp {
                 <i class="fa-solid fa-circle-xmark" style="color: #dc2626; font-size: 1.2rem; margin-right: 6px;"></i>
                 <div>
                     <strong>បរាជ័យក្នុងការតេស្ត (Test Print Failed):</strong><br>
-                    ${err.message || 'Thermal printer communication error.'}
+                    ${this.escapeHtml(err.message || 'Thermal printer communication error.')}
                 </div>
             `;
         } finally {
@@ -9510,8 +9517,8 @@ class PosApp {
         const banner = document.getElementById('posPrinterAlertBanner');
         const bannerMsg = document.getElementById('posPrinterAlertMsg');
         if (banner && bannerMsg) {
-            const ordNum = order?.order_number ? ` (#${order.order_number})` : '';
-            bannerMsg.innerHTML = `ម៉ាស៊ីនព្រីនមិនដំណើរការ ឬដាច់ខ្សែ៖ <strong>${errorMsg || 'Cannot connect'}</strong><br>ការកុម្ម៉ង់${ordNum}ត្រូវបានរក្សាទុកយ៉ាងមានសុវត្ថិភាព! អ្នកអាចចុច <strong>ព្រីនម្តងទៀត</strong> នៅពេលម៉ាស៊ីនព្រីនបើកឡើងវិញ។`;
+            const ordNum = order?.order_number ? ` (#${this.escapeHtml(order.order_number)})` : '';
+            bannerMsg.innerHTML = `ម៉ាស៊ីនព្រីនមិនដំណើរការ ឬដាច់ខ្សែ៖ <strong>${this.escapeHtml(errorMsg || 'Cannot connect')}</strong><br>ការកុម្ម៉ង់${ordNum}ត្រូវបានរក្សាទុកយ៉ាងមានសុវត្ថិភាព! អ្នកអាចចុច <strong>ព្រីនម្តងទៀត</strong> នៅពេលម៉ាស៊ីនព្រីនបើកឡើងវិញ។`;
             banner.style.display = 'block';
         }
 
@@ -9536,7 +9543,7 @@ class PosApp {
         if (!el) return;
         el.className = `alert alert-${type}`;
         el.style.display = 'flex';
-        el.innerHTML = `<i class="fa-solid fa-circle-info"></i> <span>${message}</span>`;
+        el.innerHTML = `<i class="fa-solid fa-circle-info"></i> <span>${this.escapeHtml(message)}</span>`;
     }
 
     static clearAlert(elementId) {
