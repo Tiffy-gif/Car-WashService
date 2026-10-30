@@ -482,4 +482,190 @@ class PerformanceAnalytics {
             'leaderboard' => $ranked
         ];
     }
+
+    /**
+     * Build 7-day rolling daily performance metrics snapshot per technician/washer.
+     * Contract matching Car-WashCloud:
+     * {client_id, username, role, metric_date, jobs_completed, cars_served, actual_minutes, standard_minutes, efficiency_ratio, labor_minutes, upsell_offered, upsell_accepted}
+     * client_id = sha1(shop_code|username|metric_date)
+     */
+    public static function getDailyPerformanceMetrics(PDO $pdo, int $days = 7): array {
+        $shopCode = function_exists('get_setting') ? get_setting('shop_code', get_setting('cloud_shop_id', 'SHOP-PP-001')) : 'SHOP-PP-001';
+
+        // Multipliers from settings
+        $multSedan = function_exists('get_setting') ? (float)get_setting('multiplier_small_car', '1.0') : 1.0;
+        $multSuv = function_exists('get_setting') ? (float)get_setting('multiplier_suv_pickup', '1.25') : 1.25;
+        $multVan = function_exists('get_setting') ? (float)get_setting('multiplier_van_truck', '1.4') : 1.4;
+        $multMoto = function_exists('get_setting') ? (float)get_setting('multiplier_motorbike', '0.6') : 0.6;
+
+        // Fetch all active or relevant technicians/washers
+        $uStmt = $pdo->query("
+            SELECT id, username, role 
+            FROM users 
+            WHERE role IN ('washer', 'mechanic', 'technical') AND status = 'active'
+            ORDER BY id ASC
+        ");
+        $users = $uStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if (empty($users)) {
+            return [];
+        }
+
+        $results = [];
+
+        // Prepared statements for efficiency across dates
+        // 1. Washer orders on date
+        $wOrdersStmt = $pdo->prepare("
+            SELECT 
+                COUNT(DISTINCT o.id) as cars_served,
+                COUNT(DISTINCT o.id) as jobs_completed,
+                SUM(
+                    COALESCE(s.base_duration_minutes, 15) * 
+                    CASE 
+                        WHEN o.vehicle_type IN ('suv', 'pickup') THEN {$multSuv}
+                        WHEN o.vehicle_type IN ('van', 'truck') THEN {$multVan}
+                        WHEN o.vehicle_type = 'motorbike' THEN {$multMoto}
+                        ELSE {$multSedan}
+                    END
+                ) as standard_minutes,
+                SUM(
+                    GREATEST(1,
+                        CASE 
+                            WHEN o.actual_duration_minutes IS NOT NULL AND o.actual_duration_minutes > 0 THEN o.actual_duration_minutes
+                            WHEN o.started_at IS NOT NULL AND (o.finished_at IS NOT NULL OR o.paid_at IS NOT NULL) THEN 
+                                TIMESTAMPDIFF(MINUTE, o.started_at, COALESCE(o.finished_at, o.paid_at))
+                            ELSE COALESCE(s.base_duration_minutes, 15)
+                        END
+                    )
+                ) as actual_minutes
+            FROM orders o
+            JOIN order_washers ow ON o.id = ow.order_id
+            LEFT JOIN order_items oi ON o.id = oi.order_id
+            LEFT JOIN services s ON oi.service_id = s.id
+            WHERE ow.washer_id = ?
+              AND DATE(COALESCE(o.finished_at, o.paid_at, o.created_at)) = ?
+              AND o.status IN ('paid', 'finished')
+        ");
+
+        // 2. Mechanic/tech tasks on date
+        $mTasksStmt = $pdo->prepare("
+            SELECT 
+                COUNT(DISTINCT ot.order_id) as cars_served,
+                COUNT(ot.id) as jobs_completed,
+                SUM(CASE 
+                    WHEN ot.task_type = 'oil_change' THEN 20
+                    WHEN ot.task_type = 'detailing' THEN 45
+                    ELSE 15
+                END) as standard_minutes,
+                SUM(
+                    GREATEST(1,
+                        CASE 
+                            WHEN ot.started_at IS NOT NULL AND ot.completed_at IS NOT NULL THEN 
+                                TIMESTAMPDIFF(MINUTE, ot.started_at, ot.completed_at)
+                            ELSE 15
+                        END
+                    )
+                ) as actual_minutes
+            FROM order_tasks ot
+            WHERE ot.assigned_user_id = ?
+              AND DATE(COALESCE(ot.completed_at, ot.updated_at)) = ?
+              AND ot.status = 'completed'
+        ");
+
+        // 3. Labor minutes from timecards
+        $tcStmt = $pdo->prepare("
+            SELECT COALESCE(SUM(total_hours), 0) * 60
+            FROM staff_timecards
+            WHERE user_id = ?
+              AND DATE(clock_in) = ?
+              AND status IN ('completed', 'corrected')
+        ");
+
+        // 4. Upsell logs check
+        $hasUpsellsTable = true;
+        try {
+            $pdo->query("SELECT 1 FROM upsell_logs LIMIT 1");
+        } catch (Throwable $t) {
+            $hasUpsellsTable = false;
+        }
+
+        $upsellStmt = $hasUpsellsTable ? $pdo->prepare("
+            SELECT 
+                COUNT(*) as offered,
+                SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) as accepted
+            FROM upsell_logs
+            WHERE cashier_id = ?
+              AND DATE(offered_at) = ?
+        ") : null;
+
+        // Iterate through rolling days
+        for ($i = $days - 1; $i >= 0; $i--) {
+            $metricDate = date('Y-m-d', strtotime("-{$i} days"));
+
+            foreach ($users as $user) {
+                $uid = (int)$user['id'];
+                $uname = $user['username'];
+                $urole = $user['role'];
+
+                $cars = 0;
+                $jobs = 0;
+                $stdMin = 0.0;
+                $actMin = 0.0;
+
+                if ($urole === 'washer') {
+                    $wOrdersStmt->execute([$uid, $metricDate]);
+                    $wRow = $wOrdersStmt->fetch(PDO::FETCH_ASSOC);
+                    $cars = (int)($wRow['cars_served'] ?? 0);
+                    $jobs = (int)($wRow['jobs_completed'] ?? 0);
+                    $stdMin = (float)($wRow['standard_minutes'] ?? 0.0);
+                    $actMin = (float)($wRow['actual_minutes'] ?? 0.0);
+                } else {
+                    // Mechanic / technical
+                    $mTasksStmt->execute([$uid, $metricDate]);
+                    $mRow = $mTasksStmt->fetch(PDO::FETCH_ASSOC);
+                    $cars = (int)($mRow['cars_served'] ?? 0);
+                    $jobs = (int)($mRow['jobs_completed'] ?? 0);
+                    $stdMin = (float)($mRow['standard_minutes'] ?? 0.0);
+                    $actMin = (float)($mRow['actual_minutes'] ?? 0.0);
+                }
+
+                // Labor minutes
+                $tcStmt->execute([$uid, $metricDate]);
+                $laborMin = (int)round((float)$tcStmt->fetchColumn());
+
+                // Upsells
+                $upOffered = 0;
+                $upAccepted = 0;
+                if ($upsellStmt) {
+                    $upsellStmt->execute([$uid, $metricDate]);
+                    $upRow = $upsellStmt->fetch(PDO::FETCH_ASSOC);
+                    $upOffered = (int)($upRow['offered'] ?? 0);
+                    $upAccepted = (int)($upRow['accepted'] ?? 0);
+                }
+
+                // Efficiency ratio: standard / actual
+                $effRatio = ($actMin > 0) ? round($stdMin / $actMin, 2) : 1.00;
+
+                // client_id = sha1(shop_code|username|metric_date)
+                $clientId = sha1("{$shopCode}|{$uname}|{$metricDate}");
+
+                $results[] = [
+                    'client_id' => $clientId,
+                    'username' => $uname,
+                    'role' => $urole,
+                    'metric_date' => $metricDate,
+                    'jobs_completed' => $jobs,
+                    'cars_served' => $cars,
+                    'actual_minutes' => round($actMin, 1),
+                    'standard_minutes' => round($stdMin, 1),
+                    'efficiency_ratio' => $effRatio,
+                    'labor_minutes' => $laborMin,
+                    'upsell_offered' => $upOffered,
+                    'upsell_accepted' => $upAccepted
+                ];
+            }
+        }
+
+        return $results;
+    }
 }

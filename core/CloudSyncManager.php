@@ -5,6 +5,7 @@ require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/AuditLogger.php';
 require_once __DIR__ . '/Helpers.php';
+require_once __DIR__ . '/PerformanceAnalytics.php';
 
 class CloudSyncManager {
 
@@ -41,6 +42,8 @@ class CloudSyncManager {
         $crmMsg = (int)$pdo->query("SELECT COUNT(*) FROM crm_message_queue WHERE is_synced = 0 OR is_synced IS NULL")->fetchColumn();
         $crm = $crmTx + $crmMsg;
         $upsells = (int)$pdo->query("SELECT COUNT(*) FROM upsell_logs WHERE is_synced = 0 OR is_synced IS NULL")->fetchColumn();
+        $perfData = PerformanceAnalytics::getDailyPerformanceMetrics($pdo, 7);
+        $perfCount = count($perfData);
 
         $total = $sales + $jobs + $stock + $shifts + $timecards + $logs + $crm + $upsells;
 
@@ -59,6 +62,7 @@ class CloudSyncManager {
             'crm_messages' => $crmMsg,
             'loyalty' => $crmTx,
             'upsell_logs' => $upsells,
+            'performance_metrics' => $perfCount,
             'total' => $total
         ];
     }
@@ -85,6 +89,7 @@ class CloudSyncManager {
         $cloudToken = get_setting('cloud_api_token', 'cloud_tok_live_778899aabbcc');
         $cloudSecret = get_setting('cloud_api_secret', 'cloud_sec_live_x99y88z77w66v55');
         $shopId = get_setting('cloud_shop_id', 'SHOP-PP-001');
+        $shopCode = get_setting('shop_code', $shopId);
 
         if (empty($cloudUrl) || empty($cloudSecret)) {
             return [
@@ -142,7 +147,10 @@ class CloudSyncManager {
         $upsellStmt = $pdo->query("SELECT * FROM upsell_logs WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 100");
         $upsellData = $upsellStmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $totalRecordsToSend = count($salesData) + count($jobsData) + count($stockData) + count($shiftData) + count($tcData) + count($alData) + count($crmData) + count($upsellData);
+        // Performance metrics (rolling 7-day snapshot)
+        $perfData = PerformanceAnalytics::getDailyPerformanceMetrics($pdo, 7);
+
+        $totalRecordsToSend = count($salesData) + count($jobsData) + count($stockData) + count($shiftData) + count($tcData) + count($alData) + count($crmData) + count($upsellData) + count($perfData);
 
         if ($totalRecordsToSend === 0 && !$force) {
             return [
@@ -155,6 +163,7 @@ class CloudSyncManager {
         // 2. Pack payload
         $payload = [
             'shop_id' => $shopId,
+            'shop_code' => $shopCode,
             'timestamp' => time(),
             'sales' => $salesData,
             'job_orders' => $jobsData,
@@ -163,7 +172,8 @@ class CloudSyncManager {
             'timecards' => $tcData,
             'audit_logs' => $alData,
             'crm_events' => $crmData,
-            'upsell_logs' => $upsellData
+            'upsell_logs' => $upsellData,
+            'performance_metrics' => $perfData
         ];
 
         $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);

@@ -178,6 +178,10 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
             <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-shield-halved mr-1"></i> Audit Logs</div>
             <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['audit'] ?></div>
         </div>
+        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
+            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-chart-line mr-1"></i> Performance Metrics</div>
+            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['performance_metrics'] ?? 0 ?></div>
+        </div>
     </div>
 </div>
 
