@@ -436,6 +436,8 @@ include dirname(__DIR__) . '/layouts/header.php';
                         'mechanic' => 'badge-amber'
                     ];
                     $rBadge = $roleBadges[$st['role']] ?? 'badge-slate';
+                    $safeStaffJson = $st;
+                    unset($safeStaffJson['password_hash'], $safeStaffJson['local_pin'], $safeStaffJson['local_pin_hash']);
                 ?>
                 <tr style="<?= ($st['status'] === 'inactive') ? 'opacity: 0.6; background: var(--bg-subtle);' : '' ?>">
                     <td>
@@ -501,7 +503,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <?php if (Auth::can('staff.edit')): ?>
                                 <!-- Edit Button -->
                                 <button type="button" class="btn btn-secondary btn-sm" title="Edit Staff Member"
-                                        data-staff="<?= htmlspecialchars(json_encode($st, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>"
+                                        data-staff="<?= htmlspecialchars(json_encode($safeStaffJson, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>"
                                         onclick="openEditStaffModal(this)">
                                     <i class="fa-solid fa-pen-to-square"></i>
                                 </button>

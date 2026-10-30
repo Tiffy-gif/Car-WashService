@@ -557,6 +557,70 @@ class CloudSyncManager {
             }
         }
 
+        // Process Staff Users from Cloud (PIN hash handling)
+        $cloudUsers = $cloudData['users'] ?? ($cloudData['master_data']['users'] ?? ($cloudData['data']['users'] ?? []));
+        if (!empty($cloudUsers) && is_array($cloudUsers)) {
+            $hasLocalPinHash = false;
+            try {
+                $cols = $pdo->query("SHOW COLUMNS FROM users")->fetchAll(PDO::FETCH_COLUMN);
+                $hasLocalPinHash = in_array('local_pin_hash', $cols, true);
+            } catch (Throwable $t) {
+                try {
+                    $tInfo = $pdo->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_ASSOC);
+                    $hasLocalPinHash = in_array('local_pin_hash', array_column($tInfo, 'name'), true);
+                } catch (Throwable $t2) {}
+            }
+
+            foreach ($cloudUsers as $cu) {
+                $username = trim((string)($cu['username'] ?? ''));
+                if ($username === '') continue;
+
+                $fullName = trim((string)($cu['full_name'] ?? $username));
+                $role = strtolower(trim((string)($cu['role'] ?? 'cashier')));
+                $isActive = isset($cu['is_active']) ? (int)$cu['is_active'] : 1;
+                $status = ($isActive === 1) ? 'active' : 'inactive';
+
+                // If the pulled row contains local_pin_hash, store/use that bcrypt hash and ignore local_pin;
+                // fall back to local_pin only when the hash is absent (legacy). Never log or display a PIN.
+                $pinHash = null;
+                if (!empty($cu['local_pin_hash'])) {
+                    $pinHash = (string)$cu['local_pin_hash'];
+                } elseif (isset($cu['local_pin']) && $cu['local_pin'] !== null && trim((string)$cu['local_pin']) !== '') {
+                    $pinHash = password_hash(trim((string)$cu['local_pin']), PASSWORD_BCRYPT);
+                }
+
+                $existStmt = $pdo->prepare("SELECT id, password_hash, role, status FROM users WHERE username = ? LIMIT 1");
+                $existStmt->execute([$username]);
+                $existingUser = $existStmt->fetch(PDO::FETCH_ASSOC);
+
+                if ($existingUser) {
+                    $updateSql = "UPDATE users SET full_name = ?, role = ?, status = ?";
+                    $params = [$fullName, $role, $status];
+                    if ($pinHash !== null) {
+                        $updateSql .= ", password_hash = ?";
+                        $params[] = $pinHash;
+                        if ($hasLocalPinHash) {
+                            $updateSql .= ", local_pin_hash = ?";
+                            $params[] = $pinHash;
+                        }
+                    }
+                    $updateSql .= " WHERE id = ?";
+                    $params[] = $existingUser['id'];
+                    $pdo->prepare($updateSql)->execute($params);
+                } else {
+                    $finalHash = $pinHash ?? password_hash('123456', PASSWORD_BCRYPT);
+                    if ($hasLocalPinHash) {
+                        $ins = $pdo->prepare("INSERT INTO users (username, password_hash, local_pin_hash, full_name, role, status) VALUES (?, ?, ?, ?, ?, ?)");
+                        $ins->execute([$username, $finalHash, $finalHash, $fullName, $role, $status]);
+                    } else {
+                        $ins = $pdo->prepare("INSERT INTO users (username, password_hash, full_name, role, status) VALUES (?, ?, ?, ?, ?)");
+                        $ins->execute([$username, $finalHash, $fullName, $role, $status]);
+                    }
+                }
+                $recordsReceived++;
+            }
+        }
+
         // Update version cache timestamp
         $newVer = (string)($cloudData['catalog_version'] ?? time());
         update_setting($pdo, 'catalog_price_version', $newVer, 0, 'CloudSync');

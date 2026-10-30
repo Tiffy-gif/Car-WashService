@@ -35,12 +35,27 @@ function migrateReceiptPrinted(bool $force = false): bool {
             $pdo->exec("ALTER TABLE orders ADD COLUMN receipt_printed_at DATETIME DEFAULT NULL AFTER paid_at");
             migrateLog("Added 'receipt_printed_at' to orders table.");
         }
+
+        $uCols = $pdo->query("SHOW COLUMNS FROM users")->fetchAll(PDO::FETCH_COLUMN);
+        if (!in_array('local_pin_hash', $uCols, true)) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN local_pin_hash VARCHAR(255) DEFAULT NULL AFTER password_hash");
+            $pdo->exec("UPDATE users SET local_pin_hash = password_hash WHERE password_hash IS NOT NULL AND (local_pin_hash IS NULL OR local_pin_hash = '')");
+            migrateLog("Added 'local_pin_hash' to users table.");
+        }
     } else {
         $tInfo = $pdo->query("PRAGMA table_info(orders)")->fetchAll(PDO::FETCH_ASSOC);
         $cols = array_column($tInfo, 'name');
         if (!in_array('receipt_printed_at', $cols, true)) {
             $pdo->exec("ALTER TABLE orders ADD COLUMN receipt_printed_at DATETIME DEFAULT NULL");
             migrateLog("Added 'receipt_printed_at' to orders table (SQLite).");
+        }
+
+        $uInfo = $pdo->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_ASSOC);
+        $uCols = array_column($uInfo, 'name');
+        if (!in_array('local_pin_hash', $uCols, true)) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN local_pin_hash VARCHAR(255) DEFAULT NULL");
+            $pdo->exec("UPDATE users SET local_pin_hash = password_hash WHERE password_hash IS NOT NULL AND (local_pin_hash IS NULL OR local_pin_hash = '')");
+            migrateLog("Added 'local_pin_hash' to users table (SQLite).");
         }
     }
 

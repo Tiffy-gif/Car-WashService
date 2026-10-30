@@ -63,8 +63,7 @@ class Auth {
 
         $pdo = Database::getInstance();
         $stmt = $pdo->prepare('
-            SELECT id, username, password_hash, full_name, role, role_id, status,
-                   failed_login_attempts, locked_until, must_change_pin, is_sample_account
+            SELECT *
             FROM users
             WHERE username = ?
             LIMIT 1
@@ -121,7 +120,25 @@ class Auth {
         }
 
         // 6. Verify 6-digit PIN hash
-        if (!password_verify($pin, $user['password_hash'])) {
+        // Check local_pin_hash (bcrypt) first; fallback to password_hash (bcrypt), and then legacy local_pin
+        $pinValid = false;
+        if (!empty($user['local_pin_hash']) && password_verify($pin, $user['local_pin_hash'])) {
+            $pinValid = true;
+        } elseif (!empty($user['password_hash']) && password_verify($pin, $user['password_hash'])) {
+            $pinValid = true;
+        } elseif (isset($user['local_pin']) && $user['local_pin'] !== null && (string)$user['local_pin'] === $pin) {
+            // Legacy plain-text PIN matched: upgrade to bcrypt hash
+            $pinValid = true;
+            $newHash = password_hash($pin, PASSWORD_BCRYPT);
+            $hasCol = array_key_exists('local_pin_hash', $user);
+            if ($hasCol) {
+                $pdo->prepare("UPDATE users SET password_hash = ?, local_pin_hash = ?, local_pin = NULL WHERE id = ?")->execute([$newHash, $newHash, $user['id']]);
+            } else {
+                $pdo->prepare("UPDATE users SET password_hash = ?, local_pin = NULL WHERE id = ?")->execute([$newHash, $user['id']]);
+            }
+        }
+
+        if (!$pinValid) {
             $attempts = (int)$user['failed_login_attempts'] + 1;
             if ($attempts >= 5) {
                 $lockedUntil = date('Y-m-d H:i:s', time() + 600); // 10 minutes from now
