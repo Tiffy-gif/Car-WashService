@@ -195,6 +195,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         }
     }
 
+    // 8b. Start Technical Job Order
+    elseif ($action === 'update_status' && ($_POST['new_status'] ?? '') === 'working') {
+        try {
+            OrderGate::assertReceiptPrinted($pdo, $orderId, $_POST['manager_pin'] ?? null, $_POST['override_reason'] ?? null, null, (int)$mechanic['id'], $mechanic['full_name'] ?? 'Mechanic', 'mechanic');
+            $pdo->prepare("UPDATE orders SET repair_status = 'working', started_at = COALESCE(started_at, CURRENT_TIMESTAMP) WHERE id = ?")
+                ->execute([$orderId]);
+            $message = "Technical Job Order started.";
+            $messageType = 'success';
+        } catch (Throwable $e) {
+            $message = $e->getMessage();
+            $messageType = 'danger';
+        }
+    }
+
     // 9. Save Mechanic Note
     elseif ($action === 'save_repair_note' && $orderId > 0) {
         $noteText = trim($_POST['repair_notes'] ?? '');
@@ -599,6 +613,11 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <span class="badge badge-secondary" style="font-family: var(--font-mono); font-size: 11px;">
                                 <i class="fa-solid fa-receipt mr-1"></i> Order #<?= htmlspecialchars($job['order_number']) ?>
                             </span>
+                            <?php if (empty($job['receipt_printed_at'])): ?>
+                                <span class="badge" style="background: #f59e0b; color: #fff; font-weight: 700; font-size: 11px;">
+                                    <i class="fa-solid fa-receipt mr-1"></i> Receipt Pending
+                                </span>
+                            <?php endif; ?>
                             <?php if (!empty($job['job_order_uid'])): ?>
                                 <span class="badge badge-slate" style="font-family: var(--font-mono); font-size: 11px;">
                                     <i class="fa-solid fa-hashtag mr-1"></i> <?= htmlspecialchars($job['job_order_uid']) ?>

@@ -6,6 +6,7 @@ require_once __DIR__ . '/AuditLogger.php';
 require_once __DIR__ . '/Helpers.php';
 require_once __DIR__ . '/StockControl.php';
 require_once __DIR__ . '/BayManager.php';
+require_once __DIR__ . '/OrderGate.php';
 
 class TechnicalManager {
 
@@ -156,7 +157,15 @@ class TechnicalManager {
     /**
      * Start a specific task.
      */
-    public static function startTask(PDO $pdo, int $taskId, int $userId, string $userName): array {
+    public static function startTask(
+        PDO $pdo,
+        int $taskId,
+        int $userId,
+        string $userName,
+        ?string $managerPin = null,
+        ?string $overrideReason = null,
+        ?string $managerUsername = null
+    ): array {
         $tStmt = $pdo->prepare("SELECT * FROM order_tasks WHERE id = ?");
         $tStmt->execute([$taskId]);
         $task = $tStmt->fetch(PDO::FETCH_ASSOC);
@@ -166,6 +175,9 @@ class TechnicalManager {
         }
 
         $orderId = (int)$task['order_id'];
+
+        // Enforce "No receipt, no wash/work"
+        OrderGate::assertReceiptPrinted($pdo, $orderId, $managerPin, $overrideReason, $managerUsername, $userId, $userName, 'mechanic');
 
         $pdo->prepare("
             UPDATE order_tasks 

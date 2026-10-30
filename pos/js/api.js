@@ -231,6 +231,10 @@ class PosApi {
         return await this.request('create_order', orderData, { idempotencyKey });
     }
 
+    static async markReceiptPrinted(orderId, orderNumber = '') {
+        return await this.request('mark_receipt_printed', { order_id: orderId, order_number: orderNumber });
+    }
+
     /**
      * Update job status in Back Office (waiting, washing, working, finished, paid, cancelled)
      */
@@ -242,7 +246,10 @@ class PosApi {
             payment_method: paymentMethod,
             amount_tendered_usd: paymentDetails.amount_tendered_usd,
             change_usd: paymentDetails.change_usd,
-            payment_ref: paymentDetails.payment_ref
+            payment_ref: paymentDetails.payment_ref,
+            manager_pin: paymentDetails.manager_pin,
+            manager_username: paymentDetails.manager_username,
+            override_reason: paymentDetails.override_reason || paymentDetails.reason
         });
     }
 
@@ -325,14 +332,19 @@ class PosApi {
     /**
      * Assign Car to Bay with Back Office Concurrency Lock
      */
-    static async assignBay(bayId, orderId, staffId = null) {
+    static async assignBay(bayId, orderId, extra = {}) {
         const user = PosStorage.getUser();
-        const effectiveStaffId = staffId || user?.id || 1;
-        return await this.request('assign_bay', {
+        let payload = {
             bay_id: bayId,
             order_id: orderId,
-            staff_id: effectiveStaffId
-        });
+            staff_id: user?.id || 1
+        };
+        if (typeof extra === 'number') {
+            payload.staff_id = extra;
+        } else if (extra && typeof extra === 'object') {
+            payload = { ...payload, ...extra };
+        }
+        return await this.request('assign_bay', payload);
     }
 
     /**

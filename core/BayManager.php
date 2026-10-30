@@ -5,6 +5,7 @@ require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/TechnicalManager.php';
 require_once __DIR__ . '/NotificationManager.php';
+require_once __DIR__ . '/OrderGate.php';
 
 class BayManager {
 
@@ -121,6 +122,9 @@ class BayManager {
             if (!in_array('took_longer_than_expected', $cols, true)) {
                 $pdo->exec("ALTER TABLE orders ADD COLUMN took_longer_than_expected TINYINT(1) DEFAULT NULL AFTER is_mixed");
             }
+            if (!in_array('receipt_printed_at', $cols, true)) {
+                $pdo->exec("ALTER TABLE orders ADD COLUMN receipt_printed_at DATETIME DEFAULT NULL AFTER paid_at");
+            }
         } else {
             $tableInfo = $pdo->query("PRAGMA table_info(orders)")->fetchAll(PDO::FETCH_ASSOC);
             $existingCols = array_column($tableInfo, 'name');
@@ -147,6 +151,9 @@ class BayManager {
             }
             if (!in_array('took_longer_than_expected', $existingCols, true)) {
                 $pdo->exec("ALTER TABLE orders ADD COLUMN took_longer_than_expected TINYINT(1) DEFAULT NULL");
+            }
+            if (!in_array('receipt_printed_at', $existingCols, true)) {
+                $pdo->exec("ALTER TABLE orders ADD COLUMN receipt_printed_at DATETIME DEFAULT NULL");
             }
         }
 
@@ -822,8 +829,35 @@ class BayManager {
      * only the first one succeeds and the other gets "Bay already taken".
      * Server-side enforced with DB transactions and atomic row matching.
      */
-    public static function assignCarToBay(PDO $pdo, int $bayId, int $orderId, int $userId, string $userName, string $userRole, ?string $reason = null): array {
+    public static function assignCarToBay(
+        PDO $pdo,
+        int $bayId,
+        int $orderId,
+        int $userId,
+        string $userName,
+        string $userRole,
+        ?string $reason = null,
+        ?string $managerPin = null,
+        ?string $managerUsername = null
+    ): array {
         self::ensureTables($pdo);
+
+        // "No receipt, no wash" rule enforcement
+        try {
+            OrderGate::assertReceiptPrinted($pdo, $orderId, $managerPin, $reason, $managerUsername, $userId, $userName, $userRole);
+        } catch (ReceiptRequiredException $re) {
+            return [
+                'success' => false,
+                'error' => 'RECEIPT_REQUIRED',
+                'message' => $re->getMessage()
+            ];
+        } catch (Throwable $e) {
+            return [
+                'success' => false,
+                'error' => 'RECEIPT_REQUIRED',
+                'message' => $e->getMessage()
+            ];
+        }
 
         // 1. Fetch bay
         $bayStmt = $pdo->prepare("SELECT * FROM bays WHERE id = ?");

@@ -270,6 +270,7 @@ function initDatabase(bool $force = false): void {
         started_at DATETIME DEFAULT NULL,
         finished_at DATETIME DEFAULT NULL,
         paid_at DATETIME DEFAULT NULL,
+        receipt_printed_at DATETIME DEFAULT NULL,
         cancelled_at DATETIME DEFAULT NULL,
         current_mileage INT DEFAULT NULL,
         next_oil_mileage INT DEFAULT NULL,
@@ -887,6 +888,7 @@ function seedSampleData(PDO $pdo): void {
         'loyalty_wax_discount_platinum' => '15',
         'default_oil_mileage' => '10000',
         'default_oil_months' => '3',
+        'require_receipt_before_wash' => '1',
         'demo_mode' => '1',
         'default_pw_dismissed' => '0'
     ];

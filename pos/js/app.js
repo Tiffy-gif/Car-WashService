@@ -6750,7 +6750,31 @@ class PosApp {
                 await this.fetchBaysAndQueue();
                 await this.renderJobQueue();
             } else {
-                if (res?.error === 'BAY_ALREADY_TAKEN' || res?.error === 'BAY_BUSY') {
+                if (res?.error === 'RECEIPT_REQUIRED') {
+                    this.requestManagerPin(
+                        "Receipt Required Override",
+                        `Receipt not printed for ${plate}. Enter Manager PIN and override reason to proceed:`,
+                        async (mgr) => {
+                            const reason = prompt("Enter manager override reason:", "Customer requested wash before payment/receipt") || "Manager Override";
+                            try {
+                                const overrideRes = await PosApi.assignBay(bayId, orderId, {
+                                    manager_pin: mgr.pin,
+                                    manager_username: mgr.username,
+                                    reason: reason
+                                });
+                                if (overrideRes && overrideRes.success) {
+                                    this.showToastNotice(`Manager override authorized: ${plate} assigned to ${bayName}`, 'success');
+                                    await this.fetchBaysAndQueue();
+                                    await this.renderJobQueue();
+                                } else {
+                                    this.showAppAlert(overrideRes?.message || 'Override failed');
+                                }
+                            } catch (err) {
+                                this.showAppAlert(err?.data?.message || err.message || 'Override failed');
+                            }
+                        }
+                    );
+                } else if (res?.error === 'BAY_ALREADY_TAKEN' || res?.error === 'BAY_BUSY') {
                     this.showAppAlert(I18nManager.t('bayAlreadyTaken') || 'Bay already taken! Another terminal or washer just occupied this bay.');
                     await this.fetchBaysAndQueue();
                 } else {
@@ -6759,7 +6783,31 @@ class PosApp {
             }
         } catch (e) {
             console.error('Assign bay error:', e);
-            if (e.data?.error === 'BAY_ALREADY_TAKEN' || e.message?.includes('taken') || e.message?.includes('busy')) {
+            if (e.data?.error === 'RECEIPT_REQUIRED' || e.message?.includes('RECEIPT_REQUIRED')) {
+                this.requestManagerPin(
+                    "Receipt Required Override",
+                    `Receipt not printed for ${plate}. Enter Manager PIN and override reason to proceed:`,
+                    async (mgr) => {
+                        const reason = prompt("Enter manager override reason:", "Customer requested wash before payment/receipt") || "Manager Override";
+                        try {
+                            const overrideRes = await PosApi.assignBay(bayId, orderId, {
+                                manager_pin: mgr.pin,
+                                manager_username: mgr.username,
+                                reason: reason
+                            });
+                            if (overrideRes && overrideRes.success) {
+                                this.showToastNotice(`Manager override authorized: ${plate} assigned to ${bayName}`, 'success');
+                                await this.fetchBaysAndQueue();
+                                await this.renderJobQueue();
+                            } else {
+                                this.showAppAlert(overrideRes?.message || 'Override failed');
+                            }
+                        } catch (err) {
+                            this.showAppAlert(err?.data?.message || err.message || 'Override failed');
+                        }
+                    }
+                );
+            } else if (e.data?.error === 'BAY_ALREADY_TAKEN' || e.message?.includes('taken') || e.message?.includes('busy')) {
                 this.showAppAlert(I18nManager.t('bayAlreadyTaken') || 'Bay already taken! Another terminal or washer just occupied this bay.');
                 await this.fetchBaysAndQueue();
             } else {
@@ -7065,6 +7113,7 @@ class PosApp {
             const totalNum = parseFloat(ord.total_usd || 0);
 
             const pendingBadgeHtml = ord._isPendingSync ? `<span class="badge" style="background: #fef3c7; color: #b45309; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px;"><i class="fa-solid fa-cloud-arrow-up"></i> ${I18nManager.t('pendingSyncBadge') || 'Pending Sync'}</span>` : '';
+            const receiptPendingBadge = (!ord.receipt_printed_at && status !== 'cancelled') ? `<span class="badge" style="background: #f59e0b; color: #fff; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px;"><i class="fa-solid fa-receipt"></i> ${I18nManager.t('receiptPendingBadge') || 'Receipt Pending'}</span>` : '';
 
             const isReadyToPay = (status === 'finished');
 
@@ -7077,6 +7126,7 @@ class PosApp {
                         </div>
                         <div style="display: flex; gap: 0.35rem; align-items: center;">
                             ${pendingBadgeHtml}
+                            ${receiptPendingBadge}
                             <span class="queue-badge ${badgeClass}"><i class="fa-solid ${badgeIcon}"></i> ${statusText}</span>
                         </div>
                     </div>
@@ -8367,7 +8417,10 @@ class PosApp {
                     <td style="text-align: right; font-weight: 800; font-size: 0.95rem; color: var(--primary); white-space: nowrap;">
                         $${totalNum.toFixed(2)}
                     </td>
-                    <td style="white-space: nowrap;">${badgeHtml}</td>
+                    <td style="white-space: nowrap;">
+                        ${badgeHtml}
+                        ${(!ord.receipt_printed_at && !isCancelled) ? `<span class="badge" style="background: #f59e0b; color: #fff; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px; margin-left: 4px;"><i class="fa-solid fa-receipt"></i> ${I18nManager.t('receiptPendingBadge') || 'Receipt Pending'}</span>` : ''}
+                    </td>
                     <td style="text-align: right; white-space: nowrap;">
                         <div class="action-btn-group" style="justify-content: flex-end;">
                             ${isUnpaid ? `
@@ -9403,6 +9456,45 @@ class PosApp {
     // ========================================================
     // DIRECT THERMAL PRINTING DISPATCHER & ALERTS
     // ========================================================
+    static async markReceiptPrinted(order) {
+        if (!order) return;
+        const orderId = order.id || 0;
+        const orderNumber = order.order_number || '';
+        if (!orderId && !orderNumber) return;
+
+        try {
+            const res = await PosApi.markReceiptPrinted(orderId, orderNumber);
+            if (res && res.success) {
+                const nowIso = res.receipt_printed_at || new Date().toISOString();
+                order.receipt_printed_at = nowIso;
+                if (this.currentReceiptOrder && (this.currentReceiptOrder.id === orderId || this.currentReceiptOrder.order_number === orderNumber)) {
+                    this.currentReceiptOrder.receipt_printed_at = nowIso;
+                }
+                if (this.lastCompletedOrder && (this.lastCompletedOrder.id === orderId || this.lastCompletedOrder.order_number === orderNumber)) {
+                    this.lastCompletedOrder.receipt_printed_at = nowIso;
+                }
+                // Update local storage cached copies
+                const synced = PosStorage.getSyncedOrders() || [];
+                const found = synced.find(o => (orderId && o.id === orderId) || (orderNumber && o.order_number === orderNumber));
+                if (found) {
+                    found.receipt_printed_at = nowIso;
+                    PosStorage.setSyncedOrders(synced);
+                }
+                if (this.currentTodayOrdersList) {
+                    const foundToday = this.currentTodayOrdersList.find(o => (orderId && o.id === orderId) || (orderNumber && o.order_number === orderNumber));
+                    if (foundToday) foundToday.receipt_printed_at = nowIso;
+                }
+                // Re-render views if visible
+                const queueGrid = document.getElementById('queueGrid');
+                if (queueGrid) this.renderJobQueue();
+                const ordersTable = document.getElementById('todayOrdersTableBody');
+                if (ordersTable) this.renderTodayOrders();
+            }
+        } catch (e) {
+            console.warn('Failed to notify server of receipt print:', e);
+        }
+    }
+
     static async handlePrintReceiptButton() {
         if (this.isFullscreen()) {
             this.wasFullscreenPreferred = true;
@@ -9427,15 +9519,18 @@ class PosApp {
                 if (!res.success) {
                     this.showPrinterAlert(res.error, order);
                     if (cfg.printerFallbackWindow) {
-                        this.executeBrowserPrint();
+                        this.executeBrowserPrint(order);
                     }
                 } else {
                     this.hidePrinterAlert();
+                    if (!isTicket && !isDailyReport) {
+                        this.markReceiptPrinted(order);
+                    }
                 }
             } catch (e) {
                 this.showPrinterAlert(e.message, order);
                 if (cfg.printerFallbackWindow) {
-                    this.executeBrowserPrint();
+                    this.executeBrowserPrint(order);
                 }
             } finally {
                 if (btn) {
@@ -9444,11 +9539,16 @@ class PosApp {
                 }
             }
         } else {
-            this.executeBrowserPrint();
+            this.executeBrowserPrint(order);
         }
     }
 
-    static executeBrowserPrint() {
+    static executeBrowserPrint(order = null) {
+        const targetOrder = order || this.currentReceiptOrder || this.lastCompletedOrder;
+        if (targetOrder && !this.isPrintingDailyReport && !this.isPrintingWorkshopTicket) {
+            this.markReceiptPrinted(targetOrder);
+        }
+
         if (this.isFullscreen()) {
             this.wasFullscreenPreferred = true;
         }
@@ -9500,16 +9600,19 @@ class PosApp {
             if (!res.success) {
                 this.showPrinterAlert(res.error, order);
                 if (cfg.printerFallbackWindow) {
-                    this.executeBrowserPrint();
+                    this.executeBrowserPrint(order);
                 }
             } else {
                 this.hidePrinterAlert();
+                if (!isWasherTicketOnly) {
+                    this.markReceiptPrinted(order);
+                }
             }
         } catch (e) {
             console.error('Direct print error:', e);
             this.showPrinterAlert(e.message || 'Thermal printer offline', order);
             if (cfg.printerFallbackWindow) {
-                this.executeBrowserPrint();
+                this.executeBrowserPrint(order);
             }
         }
     }

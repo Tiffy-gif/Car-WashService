@@ -45,7 +45,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $message = 'Please select a valid bay and vehicle.';
             $messageType = 'danger';
         } else {
-            $res = BayManager::assignCarToBay($pdo, $bayId, $orderId, $currentUserId, $currentUserName, $currentUserRole, $reason ?: null);
+            $mgrPin = !empty($_POST['manager_pin']) ? trim((string)$_POST['manager_pin']) : null;
+            $mgrUser = !empty($_POST['manager_username']) ? trim((string)$_POST['manager_username']) : null;
+            $res = BayManager::assignCarToBay($pdo, $bayId, $orderId, $currentUserId, $currentUserName, $currentUserRole, $reason ?: null, $mgrPin, $mgrUser);
             if (!empty($res['success'])) {
                 $message = $res['message'];
                 $messageType = 'success';

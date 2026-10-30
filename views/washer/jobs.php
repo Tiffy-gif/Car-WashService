@@ -91,10 +91,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action']) 
                 $msgType = 'danger';
             }
         } else {
-            $pdo->prepare("UPDATE orders SET status = 'washing', started_at = COALESCE(started_at, CURRENT_TIMESTAMP) WHERE id = ?")
-                ->execute([$orderId]);
-            $msg = "Order marked as Washing.";
-            $msgType = 'success';
+            try {
+                OrderGate::assertReceiptPrinted($pdo, $orderId, $_POST['manager_pin'] ?? null, $_POST['override_reason'] ?? null, null, (int)$washer['id'], $washer['full_name'] ?? 'Washer', 'washer');
+                $pdo->prepare("UPDATE orders SET status = 'washing', started_at = COALESCE(started_at, CURRENT_TIMESTAMP) WHERE id = ?")
+                    ->execute([$orderId]);
+                $msg = "Order marked as Washing.";
+                $msgType = 'success';
+            } catch (Throwable $e) {
+                $msg = $e->getMessage();
+                $msgType = 'danger';
+            }
         }
     }
 }
@@ -249,6 +255,11 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <?= htmlspecialchars($q['plate_number']) ?>
                         </span>
                         <?= vehicleTypeBadge($q['vehicle_type']) ?>
+                        <?php if (empty($q['receipt_printed_at'])): ?>
+                            <span class="badge" style="background: #f59e0b; color: #fff; font-weight: 700; font-size: 11px;">
+                                <i class="fa-solid fa-receipt mr-1"></i> Receipt Pending
+                            </span>
+                        <?php endif; ?>
                         <span class="text-xs text-muted">
                             <?= htmlspecialchars($q['service_names'] ?: 'Wash') ?> • <?= $q['wait_minutes'] ?>m waiting
                         </span>
@@ -304,6 +315,11 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <?php if (!empty($job['bay_name'])): ?>
                             <span class="badge badge-primary" style="margin-left: 6px;">
                                 <i class="fa-solid fa-warehouse mr-1"></i> <?= htmlspecialchars($job['bay_name']) ?>
+                            </span>
+                        <?php endif; ?>
+                        <?php if (empty($job['receipt_printed_at'])): ?>
+                            <span class="badge" style="background: #f59e0b; color: #fff; font-weight: 700; font-size: 11px; margin-left: 6px;">
+                                <i class="fa-solid fa-receipt mr-1"></i> Receipt Pending
                             </span>
                         <?php endif; ?>
                         <div style="margin-top: 6px;">

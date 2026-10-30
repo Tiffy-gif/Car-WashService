@@ -15,6 +15,7 @@ require_once dirname(__DIR__, 2) . '/core/BankTransferControl.php';
 require_once dirname(__DIR__, 2) . '/core/SmartQueueEngine.php';
 require_once dirname(__DIR__, 2) . '/core/MembershipManager.php';
 require_once dirname(__DIR__, 2) . '/core/AuditLogger.php';
+require_once dirname(__DIR__, 2) . '/core/OrderGate.php';
 
 function getSlipFileFromInput(?string $base64Data, ?array $uploadedFile = null): ?array {
     if (!empty($uploadedFile) && !empty($uploadedFile['tmp_name'])) {
@@ -360,6 +361,7 @@ $ACTION_PERMISSIONS = [
 
     // Orders & Sales
     'create_order' => ['pos.create_order'],
+    'mark_receipt_printed' => ['pos.create_order'],
     'sync_order_status' => ['pos.pay_order', 'orders.change_status'],
     'pay_order' => ['pos.pay_order', 'orders.change_status'],
     'get_today_orders' => ['orders.list', 'pos.access'],
@@ -2039,6 +2041,50 @@ if ($action === 'create_order') {
 }
 
 // ========================================================
+// 5b. ACTION: mark_receipt_printed
+// ========================================================
+if ($action === 'mark_receipt_printed') {
+    $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
+    $orderNumber = trim($inputData['order_number'] ?? $_POST['order_number'] ?? '');
+
+    if ($orderId <= 0 && $orderNumber === '') {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'order_id or order_number is required']);
+        exit;
+    }
+
+    if ($orderId <= 0 && $orderNumber !== '') {
+        $stmt = $pdo->prepare("SELECT id FROM orders WHERE order_number = ? LIMIT 1");
+        $stmt->execute([$orderNumber]);
+        $orderId = (int)$stmt->fetchColumn();
+    }
+
+    if ($orderId <= 0) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'ORDER_NOT_FOUND', 'message' => 'Order not found']);
+        exit;
+    }
+
+    $actorId = $sessionUser['id'] ?? null;
+    $actorName = $sessionUser['full_name'] ?? ($sessionUser['username'] ?? 'Staff');
+    $actorRole = $sessionUser['role'] ?? 'cashier';
+
+    $ok = OrderGate::markReceiptPrinted($pdo, $orderId, $actorId, $actorName, $actorRole);
+    if ($ok) {
+        echo json_encode([
+            'success' => true,
+            'message' => 'Receipt marked as printed successfully',
+            'order_id' => $orderId,
+            'receipt_printed_at' => date('Y-m-d H:i:s')
+        ]);
+    } else {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'ORDER_NOT_FOUND', 'message' => 'Failed to mark receipt printed']);
+    }
+    exit;
+}
+
+// ========================================================
 // 6. ACTION: sync_order_status & pay_order
 // Handles later payment with discount, cash received, change,
 // payment ref, and recalculated commissions (identical to web)
@@ -2395,6 +2441,21 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
         $pdo->prepare("UPDATE orders SET status = 'finished', finished_at = CURRENT_TIMESTAMP, repair_status = CASE WHEN repair_status IS NOT NULL THEN 'finished' ELSE repair_status END WHERE id = ?")
             ->execute([$id]);
     } elseif ($newStatus === 'washing') {
+        $mgrPin = $inputData['manager_pin'] ?? $_POST['manager_pin'] ?? null;
+        $overrideReason = $inputData['override_reason'] ?? $_POST['override_reason'] ?? ($inputData['reason'] ?? $_POST['reason'] ?? null);
+        $mgrUser = $inputData['manager_username'] ?? $_POST['manager_username'] ?? null;
+        try {
+            OrderGate::assertReceiptPrinted($pdo, $id, $mgrPin, $overrideReason, $mgrUser, $sessionUser['id'] ?? null, $sessionUser['full_name'] ?? ($sessionUser['username'] ?? 'Staff'), $sessionUser['role'] ?? null);
+        } catch (ReceiptRequiredException $re) {
+            http_response_code(422);
+            echo json_encode(['success' => false, 'error' => 'RECEIPT_REQUIRED', 'message' => $re->getMessage()]);
+            exit;
+        } catch (Throwable $e) {
+            http_response_code(422);
+            echo json_encode(['success' => false, 'error' => 'RECEIPT_REQUIRED', 'message' => $e->getMessage()]);
+            exit;
+        }
+
         $pdo->prepare("UPDATE orders SET status = 'washing', started_at = COALESCE(started_at, CURRENT_TIMESTAMP) WHERE id = ?")
             ->execute([$id]);
     } elseif ($newStatus === 'waiting') {
@@ -2616,6 +2677,9 @@ if ($action === 'assign_bay' || $action === 'assign_car_to_bay') {
 
     $bayId = (int)($inputData['bay_id'] ?? $_POST['bay_id'] ?? 0);
     $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
+    $reason = trim((string)($inputData['reason'] ?? $_POST['reason'] ?? ''));
+    $managerPin = trim((string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? ''));
+    $managerUsername = trim((string)($inputData['manager_username'] ?? $_POST['manager_username'] ?? ''));
 
     if ($bayId <= 0 || $orderId <= 0) {
         http_response_code(400);
@@ -2623,11 +2687,23 @@ if ($action === 'assign_bay' || $action === 'assign_car_to_bay') {
         exit;
     }
 
-    $res = BayManager::assignCarToBay($pdo, $bayId, $orderId, $stfUser['id'], $stfUser['full_name'], $stfUser['effective_role']);
+    $res = BayManager::assignCarToBay(
+        $pdo,
+        $bayId,
+        $orderId,
+        $stfUser['id'],
+        $stfUser['full_name'],
+        $stfUser['effective_role'],
+        $reason !== '' ? $reason : null,
+        $managerPin !== '' ? $managerPin : null,
+        $managerUsername !== '' ? $managerUsername : null
+    );
 
     if (!$res['success']) {
         if ($res['error'] === 'BAY_ALREADY_TAKEN') {
             http_response_code(409); // Conflict
+        } elseif ($res['error'] === 'RECEIPT_REQUIRED') {
+            http_response_code(422); // Unprocessable Entity
         } else {
             http_response_code(400);
         }
@@ -4345,12 +4421,28 @@ if ($action === 'start_tech_task') {
         exit;
     }
 
+    $managerPin = trim((string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? ''));
+    $overrideReason = trim((string)($inputData['reason'] ?? $_POST['reason'] ?? ($inputData['override_reason'] ?? $_POST['override_reason'] ?? '')));
+    $managerUsername = trim((string)($inputData['manager_username'] ?? $_POST['manager_username'] ?? ''));
+
     try {
-        $res = TechnicalManager::startTask($pdo, $taskId, $stfUser['id'], $stfUser['full_name']);
+        $res = TechnicalManager::startTask(
+            $pdo,
+            $taskId,
+            $stfUser['id'],
+            $stfUser['full_name'],
+            $managerPin !== '' ? $managerPin : null,
+            $overrideReason !== '' ? $overrideReason : null,
+            $managerUsername !== '' ? $managerUsername : null
+        );
         echo json_encode($res);
+    } catch (ReceiptRequiredException $re) {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'error' => 'RECEIPT_REQUIRED', 'message' => $re->getMessage()]);
     } catch (Throwable $e) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+        $isReceiptReq = (strpos($e->getMessage(), 'RECEIPT_REQUIRED') !== false);
+        http_response_code($isReceiptReq ? 422 : 400);
+        echo json_encode(['success' => false, 'error' => $isReceiptReq ? 'RECEIPT_REQUIRED' : $e->getMessage()]);
     }
     exit;
 }
