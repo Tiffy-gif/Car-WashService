@@ -19,8 +19,8 @@ $syncCounts = CloudSyncManager::getUnsyncedCounts($pdo);
 $totalPending = $syncCounts['total'];
 
 // Fetch last sync times
-$lastUpload = $pdo->query("SELECT created_at, status, message FROM sync_logs WHERE direction = 'upload' ORDER BY id DESC LIMIT 1")->fetch();
-$lastDownload = $pdo->query("SELECT created_at, status, message FROM sync_logs WHERE direction = 'download' ORDER BY id DESC LIMIT 1")->fetch();
+$lastUpload = $pdo->query("SELECT created_at, status, error_message AS message FROM sync_logs WHERE sync_type = 'push' ORDER BY id DESC LIMIT 1")->fetch();
+$lastDownload = $pdo->query("SELECT created_at, status, error_message AS message FROM sync_logs WHERE sync_type = 'pull' ORDER BY id DESC LIMIT 1")->fetch();
 $lastSuccess = $pdo->query("SELECT created_at FROM sync_logs WHERE status = 'success' ORDER BY id DESC LIMIT 1")->fetchColumn();
 
 // Fetch unresolved conflicts
@@ -29,7 +29,7 @@ $conflictCount = count($conflicts);
 
 // Fetch recent sync logs
 $logs = $pdo->query("SELECT * FROM sync_logs ORDER BY id DESC LIMIT 25")->fetchAll();
-$failureLogs = $pdo->query("SELECT * FROM sync_logs WHERE status = 'error' ORDER BY id DESC LIMIT 5")->fetchAll();
+$failureLogs = $pdo->query("SELECT * FROM sync_logs WHERE status IN ('failed','error') ORDER BY id DESC LIMIT 5")->fetchAll();
 
 // Cloud settings
 $syncEnabled = (get_setting('cloud_sync_enabled', '1') === '1');
@@ -108,7 +108,7 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
     <div class="card" style="padding: 18px;">
         <div style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Last Successful Sync</div>
         <div style="font-size: 18px; font-weight: 700; color: var(--text-main); margin: 8px 0 4px 0;">
-            <?= $lastSuccess ? htmlspecialchars(date('H:i:s', strtotime($lastSuccess))) : 'None yet' ?>
+            <?= $lastSuccess ? htmlspecialchars(date('H:i:s', strtotime($lastSuccess))) : 'No sync yet' ?>
         </div>
         <div style="font-size: 12px; color: var(--text-muted);">
             <?= $lastSuccess ? htmlspecialchars(date('M d, Y', strtotime($lastSuccess))) : 'Awaiting first push' ?>
@@ -267,8 +267,8 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
         <?php foreach ($failureLogs as $fl): ?>
             <div style="background: rgba(245, 158, 11, 0.08); border-radius: 6px; padding: 10px 14px; font-size: 13px; display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <span class="badge badge-warning"><?= htmlspecialchars(strtoupper($fl['direction'])) ?></span>
-                    <strong style="margin-left: 8px;"><?= htmlspecialchars($fl['message'] ?? 'Network or verification error') ?></strong>
+                    <span class="badge badge-warning"><?= htmlspecialchars(($fl['sync_type'] === 'push' || $fl['sync_type'] === 'upload') ? 'UPLOAD' : 'DOWNLOAD') ?></span>
+                    <strong style="margin-left: 8px;"><?= htmlspecialchars($fl['error_message'] ?? 'Network or verification error') ?></strong>
                 </div>
                 <span style="color: var(--text-muted); font-size: 12px;"><?= htmlspecialchars($fl['created_at']) ?></span>
             </div>
@@ -290,17 +290,17 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
             <thead>
                 <tr>
                     <th style="width: 160px;">Timestamp</th>
-                    <th style="width: 110px;">Direction</th>
+                    <th style="width: 110px;">Type / Direction</th>
                     <th style="width: 100px;">Status</th>
                     <th style="width: 100px; text-align: center;">Records</th>
-                    <th>Details / Message</th>
+                    <th>Details / Error Message</th>
                 </tr>
             </thead>
             <tbody>
                 <?php if (empty($logs)): ?>
                     <tr>
                         <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 24px;">
-                            No sync activity recorded yet.
+                            No sync yet
                         </td>
                     </tr>
                 <?php else: ?>
@@ -308,7 +308,7 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
                         <tr>
                             <td style="font-family: monospace; font-size: 12px;"><?= htmlspecialchars($l['created_at']) ?></td>
                             <td>
-                                <?php if ($l['direction'] === 'upload'): ?>
+                                <?php if (($l['sync_type'] ?? '') === 'push' || ($l['sync_type'] ?? '') === 'upload'): ?>
                                     <span class="badge badge-purple"><i class="fa-solid fa-arrow-up mr-1"></i> Upload</span>
                                 <?php else: ?>
                                     <span class="badge badge-info"><i class="fa-solid fa-arrow-down mr-1"></i> Download</span>
@@ -323,8 +323,10 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
                                     <span class="badge badge-danger"><i class="fa-solid fa-xmark mr-1"></i> Error</span>
                                 <?php endif; ?>
                             </td>
-                            <td style="text-align: center; font-weight: 600;"><?= (int)$l['records_count'] ?></td>
-                            <td style="color: var(--text-main);"><?= htmlspecialchars($l['message'] ?? '') ?></td>
+                            <td style="text-align: center; font-weight: 600;">
+                                <?= (int)(($l['records_sent'] ?? 0) > 0 ? $l['records_sent'] : ($l['records_received'] ?? 0)) ?>
+                            </td>
+                            <td style="color: var(--text-main);"><?= htmlspecialchars($l['error_message'] ?? '') ?></td>
                         </tr>
                     <?php endforeach; ?>
                 <?php endif; ?>
