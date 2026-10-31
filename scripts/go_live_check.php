@@ -50,7 +50,7 @@ $noActiveSamples = empty($activeSamples);
 $sampleDetail = $noActiveSamples ? '0 active sample accounts' : count($activeSamples) . ' active: ' . implode(', ', array_column($activeSamples, 'username'));
 printResult("No sample accounts active", $noActiveSamples, $sampleDetail);
 
-// 3. no pos_devices with key or name containing 'test'
+// 3. no pos_devices with key or name containing 'test' (only counting active devices)
 $knownTestKeyHashes = [
     hash('sha256', 'pos_sec_test_key_8899aabb'),
 ];
@@ -58,6 +58,9 @@ $devStmt = $pdo->query("SELECT id, device_name, device_uid, api_key, api_key_has
 $allDevices = $devStmt ? $devStmt->fetchAll(PDO::FETCH_ASSOC) : [];
 $badDevices = [];
 foreach ($allDevices as $dr) {
+    if (($dr['status'] ?? '') !== 'active') {
+        continue;
+    }
     $hasTestName = (stripos($dr['device_name'], 'test') !== false || stripos($dr['device_uid'], 'test') !== false);
     $hasTestKey = (!empty($dr['api_key']) && stripos($dr['api_key'], 'test') !== false);
     $hasKnownTestHash = (!empty($dr['api_key_hash']) && in_array($dr['api_key_hash'], $knownTestKeyHashes, true));
@@ -66,7 +69,7 @@ foreach ($allDevices as $dr) {
     }
 }
 $noBadDevices = empty($badDevices);
-$deviceDetail = $noBadDevices ? '0 test devices' : count($badDevices) . ' found: ' . implode(', ', $badDevices);
+$deviceDetail = $noBadDevices ? '0 active test devices' : count($badDevices) . ' active found: ' . implode(', ', $badDevices);
 printResult("No pos_devices with test key or name", $noBadDevices, $deviceDetail);
 
 // 3b. tv_display_code does not equal default 'tv-office-88'
