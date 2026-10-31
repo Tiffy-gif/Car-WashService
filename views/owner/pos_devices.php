@@ -157,9 +157,9 @@ if ($detailDevice):
 
     // Closings history for this device
     $dClosingsStmt = $pdo->prepare("
-        SELECT c.*, u.full_name as cashier_name
-        FROM pos_closings c
-        LEFT JOIN users u ON c.cashier_id = u.id
+        SELECT c.*, COALESCE(c.closed_by_name, u.full_name, 'Staff') as cashier_name
+        FROM pos_daily_closes c
+        LEFT JOIN users u ON c.closed_by_user_id = u.id
         WHERE c.pos_device_id = ?
         ORDER BY c.close_date DESC, c.id DESC
         LIMIT 30
@@ -329,7 +329,7 @@ if ($detailDevice):
                 <tr>
                     <th>Close Date</th>
                     <th>Cashier</th>
-                    <th style="text-align: right;">Opening Cash</th>
+                    <th>Opening Time</th>
                     <th style="text-align: right;">Cash Sales</th>
                     <th style="text-align: right;">Expected Cash</th>
                     <th style="text-align: right;">Counted Cash</th>
@@ -347,15 +347,15 @@ if ($detailDevice):
                     </tr>
                 <?php else: ?>
                     <?php foreach ($deviceClosings as $dc): 
-                        $diff = (float)$dc['difference'];
+                        $diff = (float)($dc['difference_usd'] ?? $dc['difference'] ?? 0);
                     ?>
                     <tr>
                         <td><strong><?= htmlspecialchars($dc['close_date']) ?></strong></td>
-                        <td><?= htmlspecialchars($dc['cashier_name'] ?? 'Staff') ?></td>
-                        <td style="text-align: right; font-variant-numeric: tabular-nums;"><?= formatUSD((float)$dc['opening_cash']) ?></td>
-                        <td style="text-align: right; font-variant-numeric: tabular-nums;"><?= formatUSD((float)$dc['cash_sales']) ?></td>
-                        <td style="text-align: right; font-variant-numeric: tabular-nums; font-weight: 600;"><?= formatUSD((float)$dc['expected_cash']) ?></td>
-                        <td style="text-align: right; font-variant-numeric: tabular-nums; font-weight: 700;"><?= formatUSD((float)$dc['counted_cash']) ?></td>
+                        <td><?= htmlspecialchars($dc['cashier_name'] ?? $dc['closed_by_name'] ?? 'Staff') ?></td>
+                        <td><?= !empty($dc['opening_time']) ? htmlspecialchars(date('H:i', strtotime($dc['opening_time']))) : '-' ?></td>
+                        <td style="text-align: right; font-variant-numeric: tabular-nums;"><?= formatUSD((float)($dc['cash_sales_usd'] ?? $dc['cash_sales'] ?? 0)) ?></td>
+                        <td style="text-align: right; font-variant-numeric: tabular-nums; font-weight: 600;"><?= formatUSD((float)($dc['expected_cash_usd'] ?? $dc['expected_cash'] ?? 0)) ?></td>
+                        <td style="text-align: right; font-variant-numeric: tabular-nums; font-weight: 700;"><?= formatUSD((float)($dc['counted_cash_usd'] ?? $dc['counted_cash'] ?? 0)) ?></td>
                         <td style="text-align: right; font-variant-numeric: tabular-nums;">
                             <?php if (abs($diff) < 0.01): ?>
                                 <span class="badge badge-success" style="font-weight: 700;">$0.00</span>
@@ -365,8 +365,8 @@ if ($detailDevice):
                                 <span class="badge badge-warning" style="font-weight: 700;">+$<?= number_format($diff, 2) ?> (Over)</span>
                             <?php endif; ?>
                         </td>
-                        <td class="text-xs text-muted"><?= htmlspecialchars((string)($dc['note'] ?? '-')) ?></td>
-                        <td class="text-xs text-muted"><?= date('d/m H:i', strtotime($dc['closed_at'] ?? $dc['created_at'])) ?></td>
+                        <td class="text-xs text-muted"><?= htmlspecialchars((string)($dc['notes'] ?? $dc['note'] ?? '-')) ?></td>
+                        <td class="text-xs text-muted"><?= !empty($dc['closed_at']) ? date('d/m H:i', strtotime($dc['closed_at'])) : (!empty($dc['created_at']) ? date('d/m H:i', strtotime($dc['created_at'])) : '-') ?></td>
                     </tr>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -597,10 +597,13 @@ for ($i = 6; $i >= 0; $i--) {
 
 // Fetch recent POS Daily Closings across all devices
 $allClosingsStmt = $pdo->query("
-    SELECT c.*, pd.device_name, pd.device_uid, u.full_name as cashier_name
-    FROM pos_closings c
+    SELECT c.*, 
+           COALESCE(c.device_name, pd.device_name) AS device_name, 
+           pd.device_uid, 
+           COALESCE(c.closed_by_name, u.full_name, 'Staff') AS cashier_name
+    FROM pos_daily_closes c
     LEFT JOIN pos_devices pd ON c.pos_device_id = pd.id
-    LEFT JOIN users u ON c.cashier_id = u.id
+    LEFT JOIN users u ON c.closed_by_user_id = u.id
     ORDER BY c.close_date DESC, c.id DESC
     LIMIT 20
 ");
@@ -989,7 +992,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                     <th>Close Date</th>
                     <th>Terminal / Device</th>
                     <th>Cashier</th>
-                    <th style="text-align: right;">Opening Cash</th>
+                    <th>Opening Time</th>
                     <th style="text-align: right;">Cash Sales</th>
                     <th style="text-align: right;">Expected Cash</th>
                     <th style="text-align: right;">Counted Cash</th>
@@ -1007,7 +1010,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                     </tr>
                 <?php else: ?>
                     <?php foreach ($allClosings as $ac): 
-                        $diff = (float)$ac['difference'];
+                        $diff = (float)($ac['difference_usd'] ?? $ac['difference'] ?? 0);
                     ?>
                     <tr>
                         <td><strong><?= htmlspecialchars($ac['close_date']) ?></strong></td>
@@ -1015,11 +1018,11 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <strong><?= htmlspecialchars($ac['device_name'] ?? ('Device #' . $ac['pos_device_id'])) ?></strong>
                             <div class="text-xs text-muted"><?= htmlspecialchars($ac['device_uid'] ?? '') ?></div>
                         </td>
-                        <td><?= htmlspecialchars($ac['cashier_name'] ?? 'Staff') ?></td>
-                        <td style="text-align: right; font-variant-numeric: tabular-nums;"><?= formatUSD((float)$ac['opening_cash']) ?></td>
-                        <td style="text-align: right; font-variant-numeric: tabular-nums;"><?= formatUSD((float)$ac['cash_sales']) ?></td>
-                        <td style="text-align: right; font-variant-numeric: tabular-nums; font-weight: 600;"><?= formatUSD((float)$ac['expected_cash']) ?></td>
-                        <td style="text-align: right; font-variant-numeric: tabular-nums; font-weight: 700;"><?= formatUSD((float)$ac['counted_cash']) ?></td>
+                        <td><?= htmlspecialchars($ac['cashier_name'] ?? $ac['closed_by_name'] ?? 'Staff') ?></td>
+                        <td><?= !empty($ac['opening_time']) ? htmlspecialchars(date('H:i', strtotime($ac['opening_time']))) : '-' ?></td>
+                        <td style="text-align: right; font-variant-numeric: tabular-nums;"><?= formatUSD((float)($ac['cash_sales_usd'] ?? $ac['cash_sales'] ?? 0)) ?></td>
+                        <td style="text-align: right; font-variant-numeric: tabular-nums; font-weight: 600;"><?= formatUSD((float)($ac['expected_cash_usd'] ?? $ac['expected_cash'] ?? 0)) ?></td>
+                        <td style="text-align: right; font-variant-numeric: tabular-nums; font-weight: 700;"><?= formatUSD((float)($ac['counted_cash_usd'] ?? $ac['counted_cash'] ?? 0)) ?></td>
                         <td style="text-align: right; font-variant-numeric: tabular-nums;">
                             <?php if (abs($diff) < 0.01): ?>
                                 <span class="badge badge-success" style="font-weight: 700;">$0.00 (Balanced)</span>
@@ -1029,8 +1032,8 @@ include dirname(__DIR__) . '/layouts/header.php';
                                 <span class="badge badge-warning" style="font-weight: 700;">+$<?= number_format($diff, 2) ?> (Over)</span>
                             <?php endif; ?>
                         </td>
-                        <td class="text-xs text-muted"><?= htmlspecialchars((string)($ac['note'] ?? '-')) ?></td>
-                        <td class="text-xs text-muted"><?= date('d/m/Y H:i', strtotime($ac['closed_at'] ?? $ac['created_at'])) ?></td>
+                        <td class="text-xs text-muted"><?= htmlspecialchars((string)($ac['notes'] ?? $ac['note'] ?? '-')) ?></td>
+                        <td class="text-xs text-muted"><?= !empty($ac['closed_at']) ? date('d/m/Y H:i', strtotime($ac['closed_at'])) : (!empty($ac['created_at']) ? date('d/m/Y H:i', strtotime($ac['created_at'])) : '-') ?></td>
                     </tr>
                     <?php endforeach; ?>
                 <?php endif; ?>
