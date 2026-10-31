@@ -156,7 +156,7 @@ if ($isManagerOrOwner) {
     $dailyCloses = $closesStmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Active cashiers list for spot audit
-    $cashiersList = $pdo->query("SELECT id, username, full_name FROM users WHERE (role = 'cashier' OR role_id IN (SELECT id FROM roles WHERE role_code = 'cashier')) AND status = 'active'")->fetchAll(PDO::FETCH_ASSOC);
+    $cashiersList = $pdo->query("SELECT id, username, full_name FROM users WHERE (role = 'cashier' OR role_id IN (SELECT id FROM roles WHERE code = 'cashier')) AND status = 'active'")->fetchAll(PDO::FETCH_ASSOC);
 } else {
     $shiftsStmt = $pdo->prepare("SELECT id, shift_uid, started_at, ended_at, opening_cash_usd, opening_cash_khr, status, notes FROM cashier_shifts WHERE cashier_id = ? ORDER BY id DESC LIMIT 30");
     $shiftsStmt->execute([$currentUserId]);
