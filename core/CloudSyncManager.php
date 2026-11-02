@@ -420,11 +420,7 @@ class CloudSyncManager {
         }
 
         $resJson = $reqRes['data'] ?? [];
-        $isCloudSuccess = (
-            (!isset($resJson['status']) && !isset($resJson['success'])) ||
-            (isset($resJson['status']) && $resJson['status'] === 'success') ||
-            (!empty($resJson['success']))
-        );
+        $isCloudSuccess = (isset($resJson['success']) && $resJson['success'] === true);
 
         if (!$isCloudSuccess) {
             $err = $resJson['message'] ?? 'Cloud reported failure or rejected push payload.';
@@ -609,11 +605,7 @@ class CloudSyncManager {
         }
 
         $cloudData = $reqRes['data'] ?? [];
-        $isCloudSuccess = (
-            (!isset($cloudData['status']) && !isset($cloudData['success'])) ||
-            (isset($cloudData['status']) && $cloudData['status'] === 'success') ||
-            (!empty($cloudData['success']))
-        );
+        $isCloudSuccess = (isset($cloudData['success']) && $cloudData['success'] === true);
 
         if (!$isCloudSuccess) {
             $err = $cloudData['message'] ?? 'Cloud returned invalid pull response.';
@@ -621,7 +613,12 @@ class CloudSyncManager {
             return ['success' => false, 'error' => 'invalid_cloud_response', 'message' => $err];
         }
 
-        $masterData = $cloudData['master_data'] ?? $cloudData;
+        $masterData = $cloudData['master_data'] ?? null;
+        if (!is_array($masterData)) {
+            $err = 'Cloud response missing master_data envelope.';
+            self::logSync($pdo, 'pull', 'failed', 0, 0, 0, $durationMs, $err);
+            return ['success' => false, 'error' => 'missing_master_data', 'message' => $err];
+        }
 
         $recordsReceived = 0;
         $conflictsCount = 0;
