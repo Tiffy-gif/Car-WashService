@@ -289,7 +289,7 @@ if ($action === 'pull') {
             'username' => $u['username'],
             'full_name' => $u['full_name'],
             'role' => $u['role'],
-            'local_pin_hash' => password_hash('1234', PASSWORD_DEFAULT),
+            'local_pin_hash' => array_key_exists('local_pin_hash', $u) ? $u['local_pin_hash'] : password_hash('1234', PASSWORD_DEFAULT),
             'is_active' => $uActive,
             'version' => 1,
             'updated_at' => date('Y-m-d H:i:s')
@@ -447,11 +447,15 @@ if ($action === 'set_cloud_price') {
 if ($action === 'set_cloud_user_status') {
     $uname = trim((string)($_POST['username'] ?? $_GET['username'] ?? ''));
     $isActive = (int)($_POST['is_active'] ?? $_GET['is_active'] ?? 0);
+    $pinHash = $_POST['local_pin_hash'] ?? $_GET['local_pin_hash'] ?? null;
     $found = false;
     foreach ($state['users'] as &$u) {
         if ($u['username'] === $uname) {
             $u['is_active'] = $isActive;
             $u['status'] = $isActive ? 'active' : 'inactive';
+            if ($pinHash !== null) {
+                $u['local_pin_hash'] = $pinHash;
+            }
             $found = true;
             break;
         }
@@ -463,7 +467,8 @@ if ($action === 'set_cloud_user_status') {
             'full_name' => $uname,
             'role' => $_POST['role'] ?? $_GET['role'] ?? 'cashier',
             'is_active' => $isActive,
-            'status' => $isActive ? 'active' : 'inactive'
+            'status' => $isActive ? 'active' : 'inactive',
+            'local_pin_hash' => $pinHash
         ];
     }
     saveCloudState($storageFile, $state);

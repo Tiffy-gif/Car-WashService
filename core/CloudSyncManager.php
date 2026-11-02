@@ -261,7 +261,7 @@ class CloudSyncManager {
             LIMIT 100
         ");
         $tcRows = $tcStmt->fetchAll(PDO::FETCH_ASSOC);
-        $hourlyRateSetting = (float)get_setting('labor_hourly_rate_usd', 0.0);
+        $hourlyRateSetting = (float)get_setting('labor_hourly_rate_usd', '0.0');
         $tcData = [];
         foreach ($tcRows as $tc) {
             $tcData[] = [

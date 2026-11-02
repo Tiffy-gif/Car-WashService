@@ -31,6 +31,21 @@ if (!defined('APP_ENV') || APP_ENV !== 'development') {
     exit(1);
 }
 
+// 4. Strict Environment Variables Check (No fake default credentials)
+$envUrl = getenv('CLOUD_API_URL') ?: '';
+$envToken = getenv('CLOUD_API_TOKEN') ?: '';
+$envSecret = getenv('CLOUD_API_SECRET') ?: '';
+$envShopId = getenv('CLOUD_SHOP_ID') ?: 'SHOP-DEV-001';
+
+if (trim($envUrl) === '' || trim($envToken) === '' || trim($envSecret) === '') {
+    echo "=================================================================\n";
+    echo " [REFUSED] Cloud Sync Contract Test Suite                       \n";
+    echo " Execution refused: Required cloud environment variables missing.\n";
+    echo " CLOUD_API_URL, CLOUD_API_TOKEN, and CLOUD_API_SECRET must all be set.\n";
+    echo "=================================================================\n";
+    exit(1);
+}
+
 $pdo = Database::getInstance();
 
 $totalPassed = 0;
@@ -102,10 +117,8 @@ assertCheck(
 // CHECK 3: Configure Dev Mock Endpoint
 // -------------------------------------------------------------
 echo "\n--- 3. CONFIGURE DEVELOPMENT TEST ENDPOINT ---\n";
-$envUrl = getenv('CLOUD_API_URL') ?: 'http://localhost/Car-WashService/api/cloud/index.php';
-$envToken = getenv('CLOUD_API_TOKEN') ?: 'token_test_contract_dev_2026';
-$envSecret = getenv('CLOUD_API_SECRET') ?: 'sec_test_hmac_contract_dev_998877';
-$envShopId = getenv('CLOUD_SHOP_ID') ?: 'SHOP-DEV-001';
+// Environment credentials already verified at suite start
+assertCheck(!empty($envUrl) && !empty($envToken) && !empty($envSecret), 'Real environment credentials present (no fake defaults)');
 
 update_setting($pdo, 'cloud_sync_enabled', '1', 1, 'Contract Test');
 update_setting($pdo, 'cloud_api_url', $envUrl, 1, 'Contract Test');
@@ -199,53 +212,53 @@ assertCheck($critRes['success'] === true, 'checkCriticalUpdates runs signed requ
 // -------------------------------------------------------------
 echo "\n--- 10. DEACTIVATED USER SYNC, SESSION TERMINATION & SAFETY RULES ---\n";
 
-// 1. Create a test cashier user who is currently active
-$testCashierUname = 'test_deact_cashier_' . uniqid();
+// 1. Create a test manager user (managed role) who is currently active
+$testMgrUname = 'test_deact_mgr_' . uniqid();
 $pdo->prepare("
     INSERT INTO users (username, password_hash, local_pin_hash, full_name, role, role_id, status, created_at)
-    VALUES (?, 'hash123', 'pin123', 'Test Deactivate Cashier', 'cashier', 2, 'active', NOW())
-")->execute([$testCashierUname]);
-$testCashierId = (int)$pdo->lastInsertId();
+    VALUES (?, 'hash123', 'pin123', 'Test Deactivate Manager', 'manager', 10, 'active', NOW())
+")->execute([$testMgrUname]);
+$testMgrId = (int)$pdo->lastInsertId();
 
-// Create an active POS session for this cashier
+// Create an active POS session for this manager
 $pdo->prepare("
     INSERT INTO pos_sessions (token_hash, user_id, device_id, expires_at)
     VALUES (?, ?, 1, DATE_ADD(NOW(), INTERVAL 8 HOUR))
-")->execute([hash('sha256', 'token_' . $testCashierUname), $testCashierId]);
+")->execute([hash('sha256', 'token_' . $testMgrUname), $testMgrId]);
 
-// Tell mock cloud that this cashier has is_active = 0
-@file_get_contents($envUrl . '?action=set_cloud_user_status&username=' . urlencode($testCashierUname) . '&is_active=0&role=cashier');
+// Tell mock cloud that this manager has is_active = 0
+@file_get_contents($envUrl . '?action=set_cloud_user_status&username=' . urlencode($testMgrUname) . '&is_active=0&role=manager');
 
 // Pull updates from cloud
 $pullDeactRes = CloudSyncManager::receiveFromCloud($pdo);
 assertCheck($pullDeactRes['success'] === true, 'receiveFromCloud processed user updates');
 
 // Verify staff user status changed to 'inactive'
-$cashierStatus = (string)$pdo->query("SELECT status FROM users WHERE id = {$testCashierId}")->fetchColumn();
-assertCheck($cashierStatus === 'inactive', 'Pulled user with is_active = 0 is soft-deactivated to status "inactive"');
+$mgrStatus = (string)$pdo->query("SELECT status FROM users WHERE id = {$testMgrId}")->fetchColumn();
+assertCheck($mgrStatus === 'inactive', 'Pulled managed user (manager) with is_active = 0 is soft-deactivated to status "inactive"');
 
 // Verify active POS sessions were terminated (expires_at <= NOW())
-$activeSessions = (int)$pdo->query("SELECT COUNT(*) FROM pos_sessions WHERE user_id = {$testCashierId} AND expires_at > NOW()")->fetchColumn();
+$activeSessions = (int)$pdo->query("SELECT COUNT(*) FROM pos_sessions WHERE user_id = {$testMgrId} AND expires_at > NOW()")->fetchColumn();
 assertCheck($activeSessions === 0, 'Active POS sessions terminated for deactivated user');
 
 // Verify audit log entry exists
-$auditLogged = (int)$pdo->query("SELECT COUNT(*) FROM audit_logs WHERE action = 'USER_DEACTIVATED' AND entity_type = 'users' AND entity_id = '{$testCashierId}'")->fetchColumn();
+$auditLogged = (int)$pdo->query("SELECT COUNT(*) FROM audit_logs WHERE action = 'USER_DEACTIVATED' AND entity_type = 'users' AND entity_id = '{$testMgrId}'")->fetchColumn();
 assertCheck($auditLogged > 0, 'Audit log entry USER_DEACTIVATED written for user deactivation');
 
-// 2. Safety Rule Check: Unmanaged role user cannot be deactivated by cloud sync
-$testCrmUname = 'test_unmanaged_crm_' . uniqid();
+// 2. Safety Rule Check: Unmanaged role user (e.g. washer) cannot be deactivated by cloud sync
+$testWasherUname = 'test_unmanaged_washer_' . uniqid();
 $pdo->prepare("
     INSERT INTO users (username, password_hash, local_pin_hash, full_name, role, role_id, status, created_at)
-    VALUES (?, 'hash123', 'pin123', 'Test CRM User', 'crm', 15, 'active', NOW())
-")->execute([$testCrmUname]);
-$testCrmId = (int)$pdo->lastInsertId();
+    VALUES (?, 'hash123', 'pin123', 'Test Washer User', 'washer', 3, 'active', NOW())
+")->execute([$testWasherUname]);
+$testWasherId = (int)$pdo->lastInsertId();
 
-// Tell mock cloud that this CRM user has is_active = 0
-@file_get_contents($envUrl . '?action=set_cloud_user_status&username=' . urlencode($testCrmUname) . '&is_active=0&role=crm');
+// Tell mock cloud that this washer has is_active = 0
+@file_get_contents($envUrl . '?action=set_cloud_user_status&username=' . urlencode($testWasherUname) . '&is_active=0&role=washer');
 
 CloudSyncManager::receiveFromCloud($pdo);
-$crmStatus = (string)$pdo->query("SELECT status FROM users WHERE id = {$testCrmId}")->fetchColumn();
-assertCheck($crmStatus === 'active', 'Safety rule: unmanaged role (crm) user is NOT deactivated by cloud sync');
+$washerStatus = (string)$pdo->query("SELECT status FROM users WHERE id = {$testWasherId}")->fetchColumn();
+assertCheck($washerStatus === 'active', 'Safety rule: unmanaged role (washer) user is NOT deactivated by cloud sync');
 
 // 3. Safety Rule Check: Last active owner cannot be deactivated by cloud sync
 $ownerRow = $pdo->query("SELECT id, username FROM users WHERE role = 'owner' AND status = 'active' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
@@ -258,8 +271,8 @@ if ($ownerRow) {
 }
 
 // Clean up test users
-$pdo->prepare("DELETE FROM pos_sessions WHERE user_id = ?")->execute([$testCashierId]);
-$pdo->prepare("DELETE FROM users WHERE id IN (?, ?)")->execute([$testCashierId, $testCrmId]);
+$pdo->prepare("DELETE FROM pos_sessions WHERE user_id = ?")->execute([$testMgrId]);
+$pdo->prepare("DELETE FROM users WHERE id IN (?, ?)")->execute([$testMgrId, $testWasherId]);
 
 // -------------------------------------------------------------
 // CHECK 11: Per-Vehicle-Type Prices Preservation & Multipliers
@@ -335,6 +348,72 @@ assertCheck((float)$newPrices['motorbike'] < (float)$newPrices['small_car'] && (
 // Clean up test services
 $pdo->prepare("DELETE FROM service_prices WHERE service_id IN (?, ?)")->execute([$testSvcId, $testNewSvcId]);
 $pdo->prepare("DELETE FROM services WHERE id IN (?, ?)")->execute([$testSvcId, $testNewSvcId]);
+
+// -------------------------------------------------------------
+// CHECK 12: Staff Timecards Push & Confirmation
+// -------------------------------------------------------------
+echo "\n--- 12. STAFF TIMECARDS PUSH & CONFIRMATION ---\n";
+$testTcUid = 'CONTRACT-TC-' . uniqid();
+$pdo->prepare("
+    INSERT INTO staff_timecards (timecard_uid, user_id, clock_in, clock_out, total_hours, status, notes, is_synced)
+    VALUES (?, 1, '2026-11-02 08:00:00', '2026-11-02 17:00:00', 9.00, 'completed', 'Contract test shift notes', 0)
+")->execute([$testTcUid]);
+$insertedTcId = (int)$pdo->lastInsertId();
+
+$tcPushRes = CloudSyncManager::sendToCloud($pdo, true);
+assertCheck($tcPushRes['success'] === true, 'sendToCloud pushes timecards to cloud with HTTP 200');
+
+$tcSynced = (int)$pdo->query("SELECT is_synced FROM staff_timecards WHERE id = {$insertedTcId}")->fetchColumn();
+assertCheck($tcSynced === 1, 'staff_timecards record marked is_synced = 1 upon cloud confirmation');
+
+$pdo->prepare("DELETE FROM staff_timecards WHERE id = ?")->execute([$insertedTcId]);
+
+// -------------------------------------------------------------
+// CHECK 13: Upsell Logs Push & Confirmation
+// -------------------------------------------------------------
+echo "\n--- 13. UPSELL LOGS PUSH & CONFIRMATION ---\n";
+$testUpUid = 'CONTRACT-UP-' . uniqid();
+$pdo->prepare("
+    INSERT INTO upsell_logs (log_uid, rule_name, cashier_name, status, reason_declined, offered_at, action_at, is_synced)
+    VALUES (?, 'Hydrophobic Windshield Treatment', 'Contract Staff', 'accepted', 'Customer accepted add-on during checkout.', NOW(), NOW(), 0)
+")->execute([$testUpUid]);
+$insertedUpId = (int)$pdo->lastInsertId();
+
+$upPushRes = CloudSyncManager::sendToCloud($pdo, true);
+assertCheck($upPushRes['success'] === true, 'sendToCloud pushes upsell_logs to cloud with HTTP 200');
+
+$upSynced = (int)$pdo->query("SELECT is_synced FROM upsell_logs WHERE id = {$insertedUpId}")->fetchColumn();
+assertCheck($upSynced === 1, 'upsell_logs record marked is_synced = 1 upon cloud confirmation');
+
+$pdo->prepare("DELETE FROM upsell_logs WHERE id = ?")->execute([$insertedUpId]);
+
+// -------------------------------------------------------------
+// CHECK 14: New User Without Local PIN Hash
+// -------------------------------------------------------------
+echo "\n--- 14. NEW USER WITHOUT LOCAL PIN HASH ---\n";
+$testPendingUname = 'test_pending_pin_' . uniqid();
+// Add to mock cloud without local_pin_hash (null)
+@file_get_contents($envUrl . '?action=set_cloud_user_status&username=' . urlencode($testPendingUname) . '&is_active=1&role=manager');
+
+$pullNewUserRes = CloudSyncManager::receiveFromCloud($pdo);
+assertCheck($pullNewUserRes['success'] === true, 'receiveFromCloud processed user without pin hash');
+
+$newUserRow = $pdo->query("SELECT id, status, password_hash, local_pin_hash FROM users WHERE username = '{$testPendingUname}'")->fetch(PDO::FETCH_ASSOC);
+assertCheck(!empty($newUserRow), 'New staff user inserted in local database');
+assertCheck(($newUserRow['status'] ?? '') === 'inactive', 'New user without local_pin_hash inserted with status "inactive"');
+assertCheck($newUserRow['local_pin_hash'] === null, 'New user without local_pin_hash has local_pin_hash NULL');
+assertCheck(
+    !empty($newUserRow['password_hash']) && !password_verify('123456', (string)$newUserRow['password_hash']),
+    'New user has unusable random password_hash (not default 123456)'
+);
+
+// Verify audit log USER_CREATED_PENDING_PIN
+$newUserId = (int)($newUserRow['id'] ?? 0);
+$auditPendingCount = (int)$pdo->query("SELECT COUNT(*) FROM audit_logs WHERE action = 'USER_CREATED_PENDING_PIN' AND entity_id = '{$newUserId}'")->fetchColumn();
+assertCheck($auditPendingCount > 0, 'Audit log USER_CREATED_PENDING_PIN recorded for staff user awaiting PIN');
+
+// Clean up test user
+$pdo->prepare("DELETE FROM users WHERE id = ?")->execute([$newUserId]);
 
 // -------------------------------------------------------------
 // RESTORE ORIGINAL SETTINGS & CLEANUP
