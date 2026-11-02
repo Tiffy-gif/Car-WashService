@@ -60,7 +60,7 @@ if (empty($cloudSecret)) {
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
 // Test helpers can bypass signature if called internally with test parameter
-$isTestHelper = in_array($action, ['set_cloud_price', 'set_cloud_conflict', 'reset_cloud_state', 'dump_cloud_state'], true);
+$isTestHelper = in_array($action, ['set_cloud_price', 'set_cloud_conflict', 'reset_cloud_state', 'dump_cloud_state', 'set_cloud_user_status'], true);
 
 if (!$isTestHelper) {
     $headers = getallheaders();
@@ -283,13 +283,14 @@ if ($action === 'pull') {
     // Construct master_data matching the real cloud schema
     $masterUsers = [];
     foreach ($state['users'] as $u) {
+        $uActive = isset($u['is_active']) ? (int)$u['is_active'] : (isset($u['status']) && $u['status'] === 'inactive' ? 0 : 1);
         $masterUsers[] = [
             'id' => (int)$u['id'],
             'username' => $u['username'],
             'full_name' => $u['full_name'],
             'role' => $u['role'],
             'local_pin_hash' => password_hash('1234', PASSWORD_DEFAULT),
-            'is_active' => 1,
+            'is_active' => $uActive,
             'version' => 1,
             'updated_at' => date('Y-m-d H:i:s')
         ];
@@ -440,6 +441,33 @@ if ($action === 'set_cloud_price') {
         'new_price' => $newPrice,
         'message' => "Cloud price for service #{$serviceId} updated to \${$newPrice}."
     ]);
+    exit;
+}
+
+if ($action === 'set_cloud_user_status') {
+    $uname = trim((string)($_POST['username'] ?? $_GET['username'] ?? ''));
+    $isActive = (int)($_POST['is_active'] ?? $_GET['is_active'] ?? 0);
+    $found = false;
+    foreach ($state['users'] as &$u) {
+        if ($u['username'] === $uname) {
+            $u['is_active'] = $isActive;
+            $u['status'] = $isActive ? 'active' : 'inactive';
+            $found = true;
+            break;
+        }
+    }
+    if (!$found && $uname !== '') {
+        $state['users'][] = [
+            'id' => count($state['users']) + 1,
+            'username' => $uname,
+            'full_name' => $uname,
+            'role' => $_POST['role'] ?? $_GET['role'] ?? 'cashier',
+            'is_active' => $isActive,
+            'status' => $isActive ? 'active' : 'inactive'
+        ];
+    }
+    saveCloudState($storageFile, $state);
+    echo json_encode(['success' => true, 'username' => $uname, 'is_active' => $isActive]);
     exit;
 }
 

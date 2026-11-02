@@ -195,6 +195,148 @@ $critRes = CloudSyncManager::checkCriticalUpdates($pdo);
 assertCheck($critRes['success'] === true, 'checkCriticalUpdates runs signed request with settings & queue_rules');
 
 // -------------------------------------------------------------
+// CHECK 10: Deactivated Staff User Coverage & Safety Rules
+// -------------------------------------------------------------
+echo "\n--- 10. DEACTIVATED USER SYNC, SESSION TERMINATION & SAFETY RULES ---\n";
+
+// 1. Create a test cashier user who is currently active
+$testCashierUname = 'test_deact_cashier_' . uniqid();
+$pdo->prepare("
+    INSERT INTO users (username, password_hash, local_pin_hash, full_name, role, role_id, status, created_at)
+    VALUES (?, 'hash123', 'pin123', 'Test Deactivate Cashier', 'cashier', 2, 'active', NOW())
+")->execute([$testCashierUname]);
+$testCashierId = (int)$pdo->lastInsertId();
+
+// Create an active POS session for this cashier
+$pdo->prepare("
+    INSERT INTO pos_sessions (token_hash, user_id, device_id, expires_at)
+    VALUES (?, ?, 1, DATE_ADD(NOW(), INTERVAL 8 HOUR))
+")->execute([hash('sha256', 'token_' . $testCashierUname), $testCashierId]);
+
+// Tell mock cloud that this cashier has is_active = 0
+@file_get_contents($envUrl . '?action=set_cloud_user_status&username=' . urlencode($testCashierUname) . '&is_active=0&role=cashier');
+
+// Pull updates from cloud
+$pullDeactRes = CloudSyncManager::receiveFromCloud($pdo);
+assertCheck($pullDeactRes['success'] === true, 'receiveFromCloud processed user updates');
+
+// Verify staff user status changed to 'inactive'
+$cashierStatus = (string)$pdo->query("SELECT status FROM users WHERE id = {$testCashierId}")->fetchColumn();
+assertCheck($cashierStatus === 'inactive', 'Pulled user with is_active = 0 is soft-deactivated to status "inactive"');
+
+// Verify active POS sessions were terminated (expires_at <= NOW())
+$activeSessions = (int)$pdo->query("SELECT COUNT(*) FROM pos_sessions WHERE user_id = {$testCashierId} AND expires_at > NOW()")->fetchColumn();
+assertCheck($activeSessions === 0, 'Active POS sessions terminated for deactivated user');
+
+// Verify audit log entry exists
+$auditLogged = (int)$pdo->query("SELECT COUNT(*) FROM audit_logs WHERE action = 'USER_DEACTIVATED' AND entity_type = 'users' AND entity_id = '{$testCashierId}'")->fetchColumn();
+assertCheck($auditLogged > 0, 'Audit log entry USER_DEACTIVATED written for user deactivation');
+
+// 2. Safety Rule Check: Unmanaged role user cannot be deactivated by cloud sync
+$testCrmUname = 'test_unmanaged_crm_' . uniqid();
+$pdo->prepare("
+    INSERT INTO users (username, password_hash, local_pin_hash, full_name, role, role_id, status, created_at)
+    VALUES (?, 'hash123', 'pin123', 'Test CRM User', 'crm', 15, 'active', NOW())
+")->execute([$testCrmUname]);
+$testCrmId = (int)$pdo->lastInsertId();
+
+// Tell mock cloud that this CRM user has is_active = 0
+@file_get_contents($envUrl . '?action=set_cloud_user_status&username=' . urlencode($testCrmUname) . '&is_active=0&role=crm');
+
+CloudSyncManager::receiveFromCloud($pdo);
+$crmStatus = (string)$pdo->query("SELECT status FROM users WHERE id = {$testCrmId}")->fetchColumn();
+assertCheck($crmStatus === 'active', 'Safety rule: unmanaged role (crm) user is NOT deactivated by cloud sync');
+
+// 3. Safety Rule Check: Last active owner cannot be deactivated by cloud sync
+$ownerRow = $pdo->query("SELECT id, username FROM users WHERE role = 'owner' AND status = 'active' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+if ($ownerRow) {
+    $ownerUname = $ownerRow['username'];
+    @file_get_contents($envUrl . '?action=set_cloud_user_status&username=' . urlencode($ownerUname) . '&is_active=0&role=owner');
+    CloudSyncManager::receiveFromCloud($pdo);
+    $ownerStatus = (string)$pdo->query("SELECT status FROM users WHERE id = {$ownerRow['id']}")->fetchColumn();
+    assertCheck($ownerStatus === 'active', 'Safety rule: last active owner is NEVER deactivated by cloud sync');
+}
+
+// Clean up test users
+$pdo->prepare("DELETE FROM pos_sessions WHERE user_id = ?")->execute([$testCashierId]);
+$pdo->prepare("DELETE FROM users WHERE id IN (?, ?)")->execute([$testCashierId, $testCrmId]);
+
+// -------------------------------------------------------------
+// CHECK 11: Per-Vehicle-Type Prices Preservation & Multipliers
+// -------------------------------------------------------------
+echo "\n--- 11. PER-VEHICLE-TYPE PRICES PRESERVATION & MULTIPLIERS ---\n";
+
+// 1. Existing service with distinct vehicle-type prices: single cloud price must NOT overwrite all vehicle types
+$testSvcName = 'Test Tiered Wash ' . uniqid();
+$pdo->prepare("
+    INSERT INTO services (name_en, name_km, category, base_duration_minutes, is_active, created_at)
+    VALUES (?, 'សាកល្បង', 'wash', 30, 1, NOW())
+")->execute([$testSvcName]);
+$testSvcId = (int)$pdo->lastInsertId();
+
+// Set distinct per-vehicle prices locally
+$pdo->prepare("INSERT INTO service_prices (service_id, vehicle_type, price_usd, price_khr, estimated_minutes) VALUES (?, 'motorbike', 3.00, 12300, 20)")->execute([$testSvcId]);
+$pdo->prepare("INSERT INTO service_prices (service_id, vehicle_type, price_usd, price_khr, estimated_minutes) VALUES (?, 'small_car', 6.00, 24600, 30)")->execute([$testSvcId]);
+$pdo->prepare("INSERT INTO service_prices (service_id, vehicle_type, price_usd, price_khr, estimated_minutes) VALUES (?, 'suv_pickup', 8.50, 34850, 40)")->execute([$testSvcId]);
+$pdo->prepare("INSERT INTO service_prices (service_id, vehicle_type, price_usd, price_khr, estimated_minutes) VALUES (?, 'van_truck', 11.00, 45100, 50)")->execute([$testSvcId]);
+
+// Simulate incoming cloud catalog item with a single base price_usd = 7.00
+$mockCloudItem = [
+    'id' => $testSvcId,
+    'client_id' => 'srv-' . $testSvcId,
+    'sku' => 'SRV-TEST-' . $testSvcId,
+    'name_en' => $testSvcName,
+    'name_km' => 'សាកល្បង',
+    'item_type' => 'service',
+    'price_usd' => 7.00,
+    'price_khr' => 28700,
+    'service_duration_min' => 30,
+    'is_active' => 1
+];
+
+// Call syncServicePricing via reflection
+$refSyncMethod = new ReflectionMethod('CloudSyncManager', 'syncServicePricing');
+$refSyncMethod->setAccessible(true);
+$refSyncMethod->invoke(null, $pdo, $testSvcId, 7.00, 30, $mockCloudItem);
+
+// Fetch updated prices
+$pricesAfter = $pdo->query("SELECT vehicle_type, price_usd FROM service_prices WHERE service_id = {$testSvcId}")->fetchAll(PDO::FETCH_KEY_PAIR);
+
+// small_car should be updated to $7.00
+assertCheck(abs((float)$pricesAfter['small_car'] - 7.00) < 0.01, 'small_car price updated to base cloud price ($7.00)');
+
+// motorbike, suv_pickup, van_truck must NOT be overwritten by $7.00!
+assertCheck(abs((float)$pricesAfter['motorbike'] - 3.00) < 0.01, 'motorbike price preserved locally at $3.00 (not overwritten by $7.00)');
+assertCheck(abs((float)$pricesAfter['suv_pickup'] - 8.50) < 0.01, 'suv_pickup price preserved locally at $8.50 (not overwritten by $7.00)');
+assertCheck(abs((float)$pricesAfter['van_truck'] - 11.00) < 0.01, 'van_truck price preserved locally at $11.00 (not overwritten by $7.00)');
+
+// Verify that all 4 vehicle types do NOT get the exact same price
+$uniquePrices = array_unique(array_values($pricesAfter));
+assertCheck(count($uniquePrices) === 4, 'All 4 vehicle types retain distinct prices (never flattened to a single price)');
+
+// 2. New service without prior local rows: verify tiered derivation using multipliers
+$testNewSvcName = 'Test Brand New Wash ' . uniqid();
+$pdo->prepare("
+    INSERT INTO services (name_en, name_km, category, base_duration_minutes, is_active, created_at)
+    VALUES (?, 'សាកល្បងថ្មី', 'wash', 30, 1, NOW())
+")->execute([$testNewSvcName]);
+$testNewSvcId = (int)$pdo->lastInsertId();
+
+$refSyncMethod->invoke(null, $pdo, $testNewSvcId, 10.00, 30, [
+    'name_en' => $testNewSvcName,
+    'item_type' => 'service',
+    'price_usd' => 10.00
+]);
+
+$newPrices = $pdo->query("SELECT vehicle_type, price_usd FROM service_prices WHERE service_id = {$testNewSvcId}")->fetchAll(PDO::FETCH_KEY_PAIR);
+assertCheck(isset($newPrices['motorbike'], $newPrices['small_car'], $newPrices['suv_pickup'], $newPrices['van_truck']), 'New service created prices for all 4 vehicle types');
+assertCheck((float)$newPrices['motorbike'] < (float)$newPrices['small_car'] && (float)$newPrices['small_car'] < (float)$newPrices['suv_pickup'] && (float)$newPrices['suv_pickup'] < (float)$newPrices['van_truck'], 'New service prices tiered properly by multipliers (0.6x < 1.0x < 1.25x < 1.4x)');
+
+// Clean up test services
+$pdo->prepare("DELETE FROM service_prices WHERE service_id IN (?, ?)")->execute([$testSvcId, $testNewSvcId]);
+$pdo->prepare("DELETE FROM services WHERE id IN (?, ?)")->execute([$testSvcId, $testNewSvcId]);
+
+// -------------------------------------------------------------
 // RESTORE ORIGINAL SETTINGS & CLEANUP
 // -------------------------------------------------------------
 update_setting($pdo, 'cloud_api_url', $origUrl, 1, 'Contract Test Clean');
