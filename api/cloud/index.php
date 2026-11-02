@@ -96,18 +96,28 @@ if (!$isTestHelper) {
 
 $state = getCloudState($storageFile);
 
+$rawBody = file_get_contents('php://input');
+$decompressedBody = $rawBody;
+$encoding = $_SERVER['HTTP_CONTENT_ENCODING'] ?? '';
+if (stripos($encoding, 'gzip') !== false || substr($rawBody, 0, 2) === "\x1f\x8b") {
+    $decomp = @gzdecode($rawBody);
+    if ($decomp !== false) {
+        $decompressedBody = $decomp;
+    }
+}
+$payload = json_decode($decompressedBody, true);
+if (is_array($payload) && empty($action)) {
+    if (!empty($payload['action'])) {
+        $action = $payload['action'];
+    } elseif (!empty($payload['push_data'])) {
+        $action = 'push';
+    } elseif (!empty($payload['pull_request'])) {
+        $action = 'pull';
+    }
+}
+
 // 2. Action: PUSH from Shop Server
 if ($action === 'push') {
-    $rawBody = file_get_contents('php://input');
-    $encoding = $_SERVER['HTTP_CONTENT_ENCODING'] ?? '';
-    if (stripos($encoding, 'gzip') !== false || substr($rawBody, 0, 2) === "\x1f\x8b") {
-        $decompressed = @gzdecode($rawBody);
-        if ($decompressed !== false) {
-            $rawBody = $decompressed;
-        }
-    }
-
-    $payload = json_decode($rawBody, true);
     if (!is_array($payload)) {
         http_response_code(400);
         echo json_encode(['success' => false, 'error' => 'invalid_payload', 'message' => 'JSON payload could not be parsed.']);
@@ -270,10 +280,87 @@ if ($action === 'pull') {
         }
     }
 
+    // Construct master_data matching the real cloud schema
+    $masterUsers = [];
+    foreach ($state['users'] as $u) {
+        $masterUsers[] = [
+            'id' => (int)$u['id'],
+            'username' => $u['username'],
+            'full_name' => $u['full_name'],
+            'role' => $u['role'],
+            'local_pin_hash' => password_hash('1234', PASSWORD_DEFAULT),
+            'is_active' => 1,
+            'version' => 1,
+            'updated_at' => date('Y-m-d H:i:s')
+        ];
+    }
+
+    $masterCatalog = [];
+    foreach ($outServices as $s) {
+        $masterCatalog[] = [
+            'id' => (int)$s['id'],
+            'client_id' => 'srv-' . $s['id'],
+            'sku' => 'SRV-' . str_pad((string)$s['id'], 3, '0', STR_PAD_LEFT),
+            'name_en' => $s['name_en'],
+            'name_km' => $s['name_km'] ?? null,
+            'category_id' => 1,
+            'category_name' => $s['category'] ?? 'Wash',
+            'item_type' => 'service',
+            'price_usd' => (float)($s['price_usd'] ?? 5.00),
+            'price_khr' => (float)(($s['price_usd'] ?? 5.00) * 4100),
+            'cost_usd' => 0.00,
+            'service_duration_min' => (int)($s['base_duration_minutes'] ?? 30),
+            'is_active' => (int)($s['is_active'] ?? 1),
+            'version' => 1,
+            'updated_at' => date('Y-m-d H:i:s')
+        ];
+    }
+    foreach ($outProducts as $p) {
+        $masterCatalog[] = [
+            'id' => (int)$p['id'],
+            'client_id' => 'prd-' . $p['id'],
+            'sku' => 'PRD-' . str_pad((string)$p['id'], 3, '0', STR_PAD_LEFT),
+            'name_en' => $p['name_en'],
+            'name_km' => $p['name_km'] ?? null,
+            'category_id' => 2,
+            'category_name' => $p['category'] ?? 'Parts',
+            'item_type' => 'product',
+            'price_usd' => (float)($p['price_usd'] ?? 10.00),
+            'price_khr' => (float)(($p['price_usd'] ?? 10.00) * 4100),
+            'cost_usd' => (float)($p['cost_price_usd'] ?? 5.00),
+            'service_duration_min' => 0,
+            'is_active' => (int)($p['is_active'] ?? 1),
+            'version' => 1,
+            'updated_at' => date('Y-m-d H:i:s')
+        ];
+    }
+
+    $masterSettings = [
+        'shop_name_en' => ['value' => 'AquaGleam Car Wash & Detailing', 'version' => 1, 'updated_at' => date('Y-m-d H:i:s')],
+        'multiplier_small_car' => ['value' => '1.0', 'version' => 1, 'updated_at' => date('Y-m-d H:i:s')],
+        'multiplier_suv_pickup' => ['value' => '1.25', 'version' => 1, 'updated_at' => date('Y-m-d H:i:s')],
+        'multiplier_van_truck' => ['value' => '1.4', 'version' => 1, 'updated_at' => date('Y-m-d H:i:s')]
+    ];
+
+    $masterData = [
+        'users' => $masterUsers,
+        'catalog_items' => $masterCatalog,
+        'categories' => [
+            ['id' => 1, 'code' => 'wash', 'name_en' => 'Washing Services', 'is_active' => 1],
+            ['id' => 2, 'code' => 'parts', 'name_en' => 'Oils & Parts', 'is_active' => 1]
+        ],
+        'settings' => $masterSettings,
+        'membership_tiers' => $state['membership_tiers'],
+        'vehicle_specs' => [],
+        'reminder_rules' => []
+    ];
+
     echo json_encode([
+        'status' => 'success',
         'success' => true,
         'catalog_version' => $state['catalog_version'],
         'last_updated_at' => $state['last_updated_at'],
+        'master_data' => $masterData,
         'services' => $outServices,
         'products' => $outProducts,
         'users' => $state['users'],

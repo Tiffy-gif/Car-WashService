@@ -514,8 +514,14 @@ class CloudSyncManager {
     }
 
     /**
-     * Pull updates from Cloud (users, products & prices, settings, queue rules, membership tiers).
-     * Detects conflicts and stores both versions for manager resolution.
+     * Pull updates from Cloud (users, catalog items, categories, settings, queue rules, membership tiers, vehicle specs, reminder rules).
+     * Replaces legacy GET with signed POST request using self::request().
+     * Entire ingestion runs within a database transaction.
+     * Rules:
+     * - Never delete (deactivate only)
+     * - Never overwrite a local record that changed after the last pull; flag a sync_conflicts row instead
+     * - Only sync whitelisted settings keys and NEVER overwrite cloud_api_*, telegram, device key, demo_mode or other secrets
+     * - Users: store local_pin_hash, never a plain PIN, and map role string to local role_id
      */
     public static function receiveFromCloud(PDO $pdo): array {
         $startTime = microtime(true);
@@ -536,282 +542,534 @@ class CloudSyncManager {
             return ['success' => false, 'offline' => true, 'message' => 'Offline mode active.'];
         }
 
-        $timestamp = time();
-        $nonce = bin2hex(random_bytes(16));
-        $signature = hash_hmac('sha256', "{$timestamp}.{$nonce}.", $cloudSecret);
+        $shopId = get_setting('cloud_shop_id', '');
+        $shopCode = get_setting('shop_code', $shopId);
 
-        $url = rtrim($cloudUrl, '/') . (strpos($cloudUrl, '?') === false ? '?' : '&') . 'action=pull';
+        $payload = [
+            'shop_code' => $shopCode,
+            'pull_request' => [
+                'entities' => [
+                    'users',
+                    'catalog_items',
+                    'categories',
+                    'settings',
+                    'queue_rules',
+                    'membership_tiers',
+                    'vehicle_specs',
+                    'reminder_rules'
+                ],
+                'local_versions' => [
+                    'catalog_version' => (int)get_setting('catalog_price_version', '0'),
+                    'settings_version' => (int)get_setting('settings_version', '1')
+                ]
+            ]
+        ];
 
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'X-Shop-Token: ' . $cloudToken,
-            'X-Shop-Timestamp: ' . $timestamp,
-            'X-Shop-Nonce: ' . $nonce,
-            'X-Shop-Signature: ' . $signature
-        ]);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
+        // Send signed POST request using request() helper
+        $reqRes = self::request($payload);
         $durationMs = (int)round((microtime(true) - $startTime) * 1000);
 
-        if ($httpCode !== 200 || !$response) {
-            self::logSync($pdo, 'pull', 'failed', 0, 0, 0, $durationMs, 'Failed to connect to cloud during pull.');
-            return ['success' => false, 'error' => 'pull_failed'];
+        if (!$reqRes['success']) {
+            $err = $reqRes['message'] ?? ($reqRes['error'] ?? 'Failed to connect to cloud during pull.');
+            self::logSync($pdo, 'pull', 'failed', 0, 0, 0, $durationMs, $err);
+            return ['success' => false, 'error' => $reqRes['error'] ?? 'pull_failed', 'message' => $err];
         }
 
-        $cloudData = json_decode($response, true);
-        if (!is_array($cloudData) || empty($cloudData['success'])) {
-            return ['success' => false, 'error' => 'invalid_cloud_response'];
+        $cloudData = $reqRes['data'] ?? [];
+        $isCloudSuccess = (
+            (!isset($cloudData['status']) && !isset($cloudData['success'])) ||
+            (isset($cloudData['status']) && $cloudData['status'] === 'success') ||
+            (!empty($cloudData['success']))
+        );
+
+        if (!$isCloudSuccess) {
+            $err = $cloudData['message'] ?? 'Cloud returned invalid pull response.';
+            self::logSync($pdo, 'pull', 'failed', 0, 0, 0, $durationMs, $err);
+            return ['success' => false, 'error' => 'invalid_cloud_response', 'message' => $err];
         }
+
+        $masterData = $cloudData['master_data'] ?? $cloudData;
 
         $recordsReceived = 0;
         $conflictsCount = 0;
         $priceChanged = false;
 
-        // Process Services & Prices
-        if (!empty($cloudData['services'])) {
-            foreach ($cloudData['services'] as $cs) {
-                $svcId = (int)($cs['id'] ?? 0);
-                if ($svcId <= 0) continue;
+        $lastPullAt = get_setting('cloud_last_pull_at', '2000-01-01 00:00:00');
+        $now = date('Y-m-d H:i:s');
 
-                $locStmt = $pdo->prepare("SELECT * FROM services WHERE id = ?");
-                $locStmt->execute([$svcId]);
-                $localSvc = $locStmt->fetch(PDO::FETCH_ASSOC);
+        // Execute all updates inside an ACID database transaction
+        $pdo->beginTransaction();
+        try {
+            // -------------------------------------------------------------
+            // 1. Ingest Categories
+            // -------------------------------------------------------------
+            $catList = $masterData['categories'] ?? [];
+            if (!empty($catList) && is_array($catList)) {
+                $checkCat = $pdo->prepare("SELECT id, name_en, updated_at FROM categories WHERE code = ? OR name_en = ? LIMIT 1");
+                $updCat = $pdo->prepare("
+                    UPDATE categories SET 
+                        name_en = ?, name_km = ?, icon = COALESCE(?, icon), color = COALESCE(?, color),
+                        sort_order = ?, is_active = ?, updated_at = NOW()
+                    WHERE id = ?
+                ");
+                $insCat = $pdo->prepare("
+                    INSERT INTO categories (type, code, name_en, name_km, icon, color, sort_order, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                ");
 
-                if ($localSvc) {
-                    $cloudPrice = isset($cs['price_usd']) ? (float)$cs['price_usd'] : null;
-                    
-                    // Check if service prices table has entries
-                    $spStmt = $pdo->prepare("SELECT price_usd FROM service_prices WHERE service_id = ? AND vehicle_type = 'small_car'");
-                    $spStmt->execute([$svcId]);
-                    $localPrice = $spStmt->fetchColumn();
-                    $localPriceVal = ($localPrice !== false) ? (float)$localPrice : 0.0;
+                foreach ($catList as $c) {
+                    $cCode = trim((string)($c['code'] ?? ($c['sku'] ?? '')));
+                    $cNameEn = trim((string)($c['name_en'] ?? ''));
+                    if ($cNameEn === '') continue;
+                    if ($cCode === '') $cCode = strtolower(preg_replace('/[^a-zA-Z0-9_]+/', '_', $cNameEn));
 
-                    // Detect Conflict: If local record was modified recently and differs from cloud
-                    if ($cloudPrice !== null && abs($cloudPrice - $localPriceVal) > 0.01) {
-                        // Check if conflict simulation is flagged or local was changed
-                        $isConflict = !empty($cs['is_conflict']);
+                    $cNameKm = trim((string)($c['name_km'] ?? $cNameEn));
+                    $cIcon = !empty($c['icon']) ? (string)$c['icon'] : null;
+                    $cColor = !empty($c['color']) ? (string)$c['color'] : null;
+                    $cSort = (int)($c['sort_order'] ?? 0);
+                    $cActive = isset($c['is_active']) ? (int)$c['is_active'] : 1;
+                    $cType = $c['type'] ?? 'service';
 
-                        if ($isConflict) {
-                            // Do NOT overwrite! Log conflict
-                            $confUid = 'CONF-SVC-' . $svcId . '-' . time();
-                            $insConf = $pdo->prepare("INSERT INTO sync_conflicts (conflict_uid, record_type, record_uid, local_data, cloud_data, local_updated_at, cloud_updated_at, status) VALUES (?, 'service', ?, ?, ?, NOW(), NOW(), 'pending')");
-                            $insConf->execute([
-                                $confUid,
-                                (string)$svcId,
-                                json_encode(['id' => $svcId, 'name_en' => $localSvc['name_en'], 'price_usd' => $localPriceVal]),
-                                json_encode($cs)
-                            ]);
+                    $checkCat->execute([$cCode, $cNameEn]);
+                    $existingCat = $checkCat->fetch(PDO::FETCH_ASSOC);
+
+                    if ($existingCat) {
+                        $updCat->execute([$cNameEn, $cNameKm, $cIcon, $cColor, $cSort, $cActive, $existingCat['id']]);
+                    } else {
+                        $insCat->execute([$cType, $cCode, $cNameEn, $cNameKm, $cIcon, $cColor, $cSort, $cActive]);
+                    }
+                    $recordsReceived++;
+                }
+            }
+
+            // -------------------------------------------------------------
+            // 2. Ingest Catalog Items (Services, Products, Prices)
+            // -------------------------------------------------------------
+            $catalogItems = $masterData['catalog_items'] ?? [];
+            if (!empty($catalogItems) && is_array($catalogItems)) {
+                $svcCheck = $pdo->prepare("SELECT * FROM services WHERE name_en = ? LIMIT 1");
+                $svcIns = $pdo->prepare("
+                    INSERT INTO services (name_en, name_km, description, category, category_id, base_duration_minutes, is_active, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+                ");
+                $svcUpd = $pdo->prepare("
+                    UPDATE services SET 
+                        name_km = ?, category = ?, category_id = ?, base_duration_minutes = ?, is_active = ?
+                    WHERE id = ?
+                ");
+
+                $prodCheck = $pdo->prepare("SELECT * FROM products WHERE name_en = ? LIMIT 1");
+                $prodIns = $pdo->prepare("
+                    INSERT INTO products (name_en, name_km, category, category_id, brand, cost_price_usd, price_usd, price_khr, stock_qty, is_active, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NOW())
+                ");
+                $prodUpd = $pdo->prepare("
+                    UPDATE products SET 
+                        name_km = ?, category = ?, category_id = ?, cost_price_usd = ?, price_usd = ?, price_khr = ?, is_active = ?
+                    WHERE id = ?
+                ");
+
+                $priceUpsert = $pdo->prepare("
+                    INSERT INTO service_prices (service_id, vehicle_type, price_usd, price_khr, estimated_minutes)
+                    VALUES (?, 'small_car', ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE 
+                        price_usd = VALUES(price_usd), price_khr = VALUES(price_khr), estimated_minutes = VALUES(estimated_minutes)
+                ");
+
+                $findCat = $pdo->prepare("SELECT id FROM categories WHERE name_en = ? OR code = ? LIMIT 1");
+
+                foreach ($catalogItems as $item) {
+                    $nameEn = trim((string)($item['name_en'] ?? ''));
+                    if ($nameEn === '') continue;
+                    $nameKm = trim((string)($item['name_km'] ?? $nameEn));
+                    $itemType = trim((string)($item['item_type'] ?? 'service'));
+                    $categoryName = trim((string)($item['category_name'] ?? 'wash'));
+                    $isActive = isset($item['is_active']) ? (int)$item['is_active'] : 1;
+                    $priceUsd = (float)($item['price_usd'] ?? 0);
+                    $priceKhr = (int)($item['price_khr'] ?? round($priceUsd * 4100));
+                    $costUsd = (float)($item['cost_usd'] ?? 0);
+                    $durationMin = (int)($item['service_duration_min'] ?? 25);
+
+                    // Resolve category_id
+                    $catId = null;
+                    if (!empty($item['category_id']) && is_numeric($item['category_id'])) {
+                        $catId = (int)$item['category_id'];
+                    } elseif ($categoryName !== '') {
+                        $findCat->execute([$categoryName, strtolower($categoryName)]);
+                        $cRow = $findCat->fetch(PDO::FETCH_ASSOC);
+                        if ($cRow) $catId = (int)$cRow['id'];
+                    }
+
+                    if ($itemType === 'service') {
+                        $svcCheck->execute([$nameEn]);
+                        $localSvc = $svcCheck->fetch(PDO::FETCH_ASSOC);
+
+                        if ($localSvc) {
+                            $svcId = (int)$localSvc['id'];
+                            // Conflict detection: If local service was modified after last pull and price differs
+                            $curPrice = (float)$pdo->query("SELECT price_usd FROM service_prices WHERE service_id = {$svcId} AND vehicle_type = 'small_car'")->fetchColumn();
+                            $localChanged = !empty($localSvc['updated_at']) && ($localSvc['updated_at'] > $lastPullAt);
+
+                            if ($localChanged && abs($priceUsd - $curPrice) > 0.01) {
+                                $confUid = 'CONF-SVC-' . $svcId . '-' . time();
+                                $insConf = $pdo->prepare("INSERT INTO sync_conflicts (conflict_uid, record_type, record_uid, local_data, cloud_data, local_updated_at, cloud_updated_at, status, created_at) VALUES (?, 'service', ?, ?, ?, NOW(), NOW(), 'pending', NOW())");
+                                $insConf->execute([
+                                    $confUid,
+                                    (string)$svcId,
+                                    json_encode(['id' => $svcId, 'name_en' => $nameEn, 'price_usd' => $curPrice]),
+                                    json_encode($item)
+                                ]);
+                                $conflictsCount++;
+                                continue; // Never overwrite local edit
+                            }
+
+                            $svcUpd->execute([$nameKm, $categoryName, $catId, $durationMin, $isActive, $svcId]);
+                            $priceUpsert->execute([$svcId, $priceUsd, $priceKhr, $durationMin]);
+                            $priceChanged = true;
+                        } else {
+                            $svcIns->execute([$nameEn, $nameKm, $item['description'] ?? '', $categoryName, $catId, $durationMin, $isActive]);
+                            $newSvcId = (int)$pdo->lastInsertId();
+                            $priceUpsert->execute([$newSvcId, $priceUsd, $priceKhr, $durationMin]);
+                            $priceChanged = true;
+                        }
+                    } else {
+                        // Product or spare part
+                        $prodCheck->execute([$nameEn]);
+                        $localProd = $prodCheck->fetch(PDO::FETCH_ASSOC);
+
+                        if ($localProd) {
+                            $prodId = (int)$localProd['id'];
+                            $localChanged = !empty($localProd['updated_at']) && ($localProd['updated_at'] > $lastPullAt);
+
+                            if ($localChanged && abs($priceUsd - (float)$localProd['price_usd']) > 0.01) {
+                                $confUid = 'CONF-PROD-' . $prodId . '-' . time();
+                                $insConf = $pdo->prepare("INSERT INTO sync_conflicts (conflict_uid, record_type, record_uid, local_data, cloud_data, local_updated_at, cloud_updated_at, status, created_at) VALUES (?, 'product', ?, ?, ?, NOW(), NOW(), 'pending', NOW())");
+                                $insConf->execute([$confUid, (string)$prodId, json_encode($localProd), json_encode($item)]);
+                                $conflictsCount++;
+                                continue;
+                            }
+
+                            // Update price and details without overwriting local stock_qty
+                            $prodUpd->execute([$nameKm, $categoryName, $catId, $costUsd, $priceUsd, $priceKhr, $isActive, $prodId]);
+                            $priceChanged = true;
+                        } else {
+                            $prodIns->execute([$nameEn, $nameKm, $categoryName, $catId, $item['sku'] ?? '', $costUsd, $priceUsd, $priceKhr, $isActive]);
+                            $priceChanged = true;
+                        }
+                    }
+                    $recordsReceived++;
+                }
+            }
+
+            // Also support legacy top-level services & products if cloud sent them
+            if (empty($catalogItems) && (!empty($masterData['services']) || !empty($masterData['products']))) {
+                if (!empty($masterData['services']) && is_array($masterData['services'])) {
+                    foreach ($masterData['services'] as $cs) {
+                        $svcId = (int)($cs['id'] ?? 0);
+                        if ($svcId <= 0) continue;
+                        $cloudPrice = isset($cs['price_usd']) ? (float)$cs['price_usd'] : null;
+                        if ($cloudPrice !== null) {
+                            $pdo->prepare("INSERT INTO service_prices (service_id, vehicle_type, price_usd, price_khr) VALUES (?, 'small_car', ?, ?) ON DUPLICATE KEY UPDATE price_usd = VALUES(price_usd), price_khr = VALUES(price_khr)")
+                                ->execute([$svcId, $cloudPrice, (int)round($cloudPrice * 4100)]);
+                            $recordsReceived++;
+                        }
+                    }
+                }
+                if (!empty($masterData['products']) && is_array($masterData['products'])) {
+                    foreach ($masterData['products'] as $cp) {
+                        $pId = (int)($cp['id'] ?? 0);
+                        if ($pId <= 0) continue;
+                        $cloudPPrice = isset($cp['price_usd']) ? (float)$cp['price_usd'] : null;
+                        if ($cloudPPrice !== null) {
+                            $pdo->prepare("UPDATE products SET price_usd = ?, price_khr = ? WHERE id = ?")
+                                ->execute([$cloudPPrice, (int)round($cloudPPrice * 4100), $pId]);
+                            $recordsReceived++;
+                        }
+                    }
+                }
+            }
+
+            // -------------------------------------------------------------
+            // 3. Ingest Users (with role mapping and local_pin_hash only)
+            // -------------------------------------------------------------
+            $usersList = $masterData['users'] ?? [];
+            if (!empty($usersList) && is_array($usersList)) {
+                $hasLocalPinHash = false;
+                try {
+                    $cols = $pdo->query("SHOW COLUMNS FROM users")->fetchAll(PDO::FETCH_COLUMN);
+                    $hasLocalPinHash = in_array('local_pin_hash', $cols, true);
+                } catch (Throwable $t) {}
+
+                $roleStmt = $pdo->prepare("SELECT id, code FROM roles WHERE LOWER(code) = LOWER(?) OR LOWER(name_en) = LOWER(?) LIMIT 1");
+                $userCheck = $pdo->prepare("SELECT * FROM users WHERE username = ? LIMIT 1");
+
+                foreach ($usersList as $u) {
+                    $uname = trim((string)($u['username'] ?? ''));
+                    if ($uname === '') continue;
+
+                    $fullName = trim((string)($u['full_name'] ?? $uname));
+                    $rawRole = trim((string)($u['role'] ?? 'cashier'));
+                    $isActive = isset($u['is_active']) ? (int)$u['is_active'] : 1;
+                    $status = ($isActive === 1) ? 'active' : 'inactive'; // Deactivate only, never delete
+
+                    // Resolve role to local role_id and code
+                    $roleStmt->execute([$rawRole, $rawRole]);
+                    $roleRow = $roleStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$roleRow) {
+                        // Standard alias fallbacks
+                        $mappedCode = match (strtolower($rawRole)) {
+                            'system admin', 'sysadmin' => 'admin',
+                            'manager'                  => 'manager',
+                            'cashier'                  => 'cashier',
+                            'technician', 'lead tech'  => 'mechanic',
+                            'washer'                   => 'washer',
+                            default                    => 'cashier'
+                        };
+                        $roleStmt->execute([$mappedCode, $mappedCode]);
+                        $roleRow = $roleStmt->fetch(PDO::FETCH_ASSOC);
+                    }
+                    $roleCode = $roleRow['code'] ?? 'cashier';
+                    $roleId = $roleRow ? (int)$roleRow['id'] : null;
+
+                    // PIN hash: store local_pin_hash, NEVER a plain PIN
+                    $pinHash = null;
+                    if (!empty($u['local_pin_hash'])) {
+                        $pinHash = (string)$u['local_pin_hash'];
+                    }
+
+                    $userCheck->execute([$uname]);
+                    $localUser = $userCheck->fetch(PDO::FETCH_ASSOC);
+
+                    if ($localUser) {
+                        $uId = (int)$localUser['id'];
+                        $localChanged = !empty($localUser['updated_at']) && ($localUser['updated_at'] > $lastPullAt);
+
+                        if ($localChanged && ($localUser['role'] !== $roleCode || $localUser['status'] !== $status)) {
+                            $confUid = 'CONF-USR-' . $uId . '-' . time();
+                            $pdo->prepare("INSERT INTO sync_conflicts (conflict_uid, record_type, record_uid, local_data, cloud_data, local_updated_at, cloud_updated_at, status, created_at) VALUES (?, 'user', ?, ?, ?, NOW(), NOW(), 'pending', NOW())")
+                                ->execute([$confUid, (string)$uId, json_encode($localUser), json_encode($u)]);
                             $conflictsCount++;
                             continue;
                         }
 
-                        // Apply Cloud Price update to service_prices
-                        $pdo->prepare("INSERT INTO service_prices (service_id, vehicle_type, price_usd, price_khr) VALUES (?, 'small_car', ?, ?) ON DUPLICATE KEY UPDATE price_usd = VALUES(price_usd), price_khr = VALUES(price_khr)")
-                            ->execute([$svcId, $cloudPrice, (int)round($cloudPrice * 4100)]);
-                        $priceChanged = true;
-                        $recordsReceived++;
+                        $updSql = "UPDATE users SET full_name = ?, role = ?, role_id = ?, status = ?";
+                        $params = [$fullName, $roleCode, $roleId, $status];
+                        if ($pinHash !== null) {
+                            $updSql .= ", password_hash = ?";
+                            $params[] = $pinHash;
+                            if ($hasLocalPinHash) {
+                                $updSql .= ", local_pin_hash = ?";
+                                $params[] = $pinHash;
+                            }
+                        }
+                        $updSql .= " WHERE id = ?";
+                        $params[] = $uId;
+                        $pdo->prepare($updSql)->execute($params);
+                    } else {
+                        // New user insert
+                        $defaultHash = $pinHash ?? password_hash('123456', PASSWORD_BCRYPT);
+                        if ($hasLocalPinHash) {
+                            $pdo->prepare("INSERT INTO users (username, password_hash, local_pin_hash, full_name, role, role_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())")
+                                ->execute([$uname, $defaultHash, $defaultHash, $fullName, $roleCode, $roleId, $status]);
+                        } else {
+                            $pdo->prepare("INSERT INTO users (username, password_hash, full_name, role, role_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())")
+                                ->execute([$uname, $defaultHash, $fullName, $roleCode, $roleId, $status]);
+                        }
                     }
+                    $recordsReceived++;
                 }
             }
-        }
 
-        // Process Products & Prices
-        if (!empty($cloudData['products'])) {
-            foreach ($cloudData['products'] as $cp) {
-                $pId = (int)($cp['id'] ?? 0);
-                if ($pId <= 0) continue;
+            // -------------------------------------------------------------
+            // 4. Ingest Whitelisted Settings & Queue Rules (NEVER secrets)
+            // -------------------------------------------------------------
+            $settingsMap = $masterData['settings'] ?? [];
+            if (!empty($settingsMap) && is_array($settingsMap)) {
+                $whitelistedSettings = [
+                    'shop_name_en'            => 'shop_name_en',
+                    'shop_name_km'            => 'shop_name_km',
+                    'shop_name'               => 'shop_name_en',
+                    'shop_phone'              => 'shop_phone',
+                    'shop_address'            => 'shop_address',
+                    'shop_email'              => 'shop_email',
+                    'tax_pct'                 => 'tax_pct',
+                    'tax_rate_percent'        => 'tax_pct',
+                    'exchange_rate'           => 'exchange_rate',
+                    'exchange_rate_usd_khr'   => 'exchange_rate',
+                    'receipt_header_en'       => 'receipt_header_en',
+                    'receipt_header_km'       => 'receipt_header_km',
+                    'receipt_footer_en'       => 'receipt_footer_en',
+                    'receipt_footer_km'       => 'receipt_footer_km',
+                    'default_oil_mileage'     => 'default_oil_mileage',
+                    'default_oil_months'      => 'default_oil_months',
+                    'labor_hourly_rate_usd'   => 'labor_hourly_rate_usd',
+                    'queue_rules'             => 'queue_rules',
+                    'multiplier_small_car'    => 'multiplier_small_car',
+                    'multiplier_suv_pickup'   => 'multiplier_suv_pickup',
+                    'multiplier_van_truck'    => 'multiplier_van_truck',
+                    'multiplier_motorbike'    => 'multiplier_motorbike'
+                ];
 
-                $locP = $pdo->query("SELECT * FROM products WHERE id = {$pId}")->fetch(PDO::FETCH_ASSOC);
-                if ($locP) {
-                    $isConflict = !empty($cp['is_conflict']);
-                    if ($isConflict) {
-                        $confUid = 'CONF-PROD-' . $pId . '-' . time();
-                        $insConf = $pdo->prepare("INSERT INTO sync_conflicts (conflict_uid, record_type, record_uid, local_data, cloud_data, local_updated_at, cloud_updated_at, status) VALUES (?, 'product', ?, ?, ?, NOW(), NOW(), 'pending')");
-                        $insConf->execute([
-                            $confUid,
-                            (string)$pId,
-                            json_encode($locP),
-                            json_encode($cp)
-                        ]);
-                        $conflictsCount++;
+                foreach ($settingsMap as $sKey => $sData) {
+                    $keyStr = (string)$sKey;
+                    // Security guard: NEVER overwrite cloud_api_*, telegram, device key, demo_mode or other secrets
+                    if (
+                        str_starts_with($keyStr, 'cloud_api_') ||
+                        str_starts_with($keyStr, 'telegram_') ||
+                        str_starts_with($keyStr, 'pos_device_') ||
+                        in_array($keyStr, ['cloud_shop_id', 'cloud_allow_insecure_tls', 'cloud_offline_mode', 'cloud_sync_enabled', 'device_key', 'tv_display_code', 'demo_mode', 'jwt_secret'], true)
+                    ) {
                         continue;
                     }
 
-                    $cloudPPrice = (float)($cp['price_usd'] ?? $locP['price_usd']);
-                    if (abs($cloudPPrice - (float)$locP['price_usd']) > 0.01) {
-                        $pdo->prepare("UPDATE products SET price_usd = ?, price_khr = ? WHERE id = ?")
-                            ->execute([$cloudPPrice, (int)round($cloudPPrice * 4100), $pId]);
-                        $priceChanged = true;
-                        $recordsReceived++;
+                    if (!isset($whitelistedSettings[$keyStr])) {
+                        continue; // Skip non-whitelisted settings
                     }
+
+                    $targetKey = $whitelistedSettings[$keyStr];
+                    $val = is_array($sData) ? ($sData['value'] ?? '') : (string)$sData;
+                    if (is_array($val)) $val = json_encode($val);
+
+                    update_setting($pdo, $targetKey, (string)$val, 0, 'CloudSyncPull');
+                    $recordsReceived++;
                 }
             }
-        }
 
-        // Process Membership Tiers from Cloud
-        if (!empty($cloudData['membership_tiers']) && is_array($cloudData['membership_tiers'])) {
-            $tStmt = $pdo->prepare("
-                INSERT INTO membership_tiers (tier_code, name_en, name_km, monthly_fee_usd, included_services, discount_percent, priority_level, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    name_en = VALUES(name_en),
-                    name_km = VALUES(name_km),
-                    monthly_fee_usd = VALUES(monthly_fee_usd),
-                    included_services = VALUES(included_services),
-                    discount_percent = VALUES(discount_percent),
-                    priority_level = VALUES(priority_level),
-                    is_active = VALUES(is_active)
-            ");
-            foreach ($cloudData['membership_tiers'] as $t) {
-                $inc = is_array($t['included_services'] ?? null) ? json_encode($t['included_services']) : ($t['included_services'] ?? json_encode([]));
-                $tStmt->execute([
-                    $t['tier_code'], $t['name_en'], $t['name_km'],
-                    (float)($t['monthly_fee_usd'] ?? 0.00), $inc,
-                    (int)($t['discount_percent'] ?? 0), $t['priority_level'] ?? 'P0',
-                    (int)($t['is_active'] ?? 1)
-                ]);
+            // Direct queue_rules entity if provided
+            if (!empty($masterData['queue_rules'])) {
+                $qrVal = is_array($masterData['queue_rules']) ? json_encode($masterData['queue_rules']) : (string)$masterData['queue_rules'];
+                update_setting($pdo, 'queue_rules', $qrVal, 0, 'CloudSyncPull');
                 $recordsReceived++;
             }
-        }
 
-        // Process Loyalty Reward Rules from Cloud
-        if (!empty($cloudData['loyalty_reward_rules']) && is_array($cloudData['loyalty_reward_rules'])) {
-            $rStmt = $pdo->prepare("
-                INSERT INTO loyalty_reward_rules (rule_uid, name_en, name_km, trigger_type, trigger_threshold, trigger_period, reward_type, reward_item_id, reward_item_name, reward_value_usd, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    name_en = VALUES(name_en),
-                    name_km = VALUES(name_km),
-                    trigger_type = VALUES(trigger_type),
-                    trigger_threshold = VALUES(trigger_threshold),
-                    reward_type = VALUES(reward_type),
-                    reward_item_id = VALUES(reward_item_id),
-                    reward_item_name = VALUES(reward_item_name),
-                    reward_value_usd = VALUES(reward_value_usd),
-                    is_active = VALUES(is_active)
-            ");
-            foreach ($cloudData['loyalty_reward_rules'] as $rr) {
-                $rStmt->execute([
-                    $rr['rule_uid'], $rr['name_en'], $rr['name_km'],
-                    $rr['trigger_type'], (int)$rr['trigger_threshold'],
-                    $rr['trigger_period'] ?? 'month', $rr['reward_type'],
-                    !empty($rr['reward_item_id']) ? (int)$rr['reward_item_id'] : null,
-                    $rr['reward_item_name'], (float)($rr['reward_value_usd'] ?? 0.00),
-                    (int)($rr['is_active'] ?? 1)
-                ]);
-                $recordsReceived++;
-            }
-        }
+            // -------------------------------------------------------------
+            // 5. Ingest Membership Tiers
+            // -------------------------------------------------------------
+            $tiers = $masterData['membership_tiers'] ?? [];
+            if (!empty($tiers) && is_array($tiers)) {
+                $tStmt = $pdo->prepare("
+                    INSERT INTO membership_tiers (tier_code, name_en, name_km, monthly_fee_usd, included_services, discount_percent, priority_level, is_active, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                    ON DUPLICATE KEY UPDATE
+                        name_en = VALUES(name_en),
+                        monthly_fee_usd = VALUES(monthly_fee_usd),
+                        discount_percent = VALUES(discount_percent),
+                        is_active = VALUES(is_active),
+                        updated_at = NOW()
+                ");
 
-        // Process Upsell Rules from Cloud
-        if (!empty($cloudData['upsell_rules']) && is_array($cloudData['upsell_rules'])) {
-            $uStmt = $pdo->prepare("
-                INSERT INTO upsell_rules (rule_uid, name, trigger_service_id, trigger_category, trigger_vehicle_type, trigger_min_mileage, offer_service_id, offer_product_id, offer_price_usd, offer_headline_en, offer_headline_km, offer_description_en, offer_description_km, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    name = VALUES(name),
-                    trigger_service_id = VALUES(trigger_service_id),
-                    trigger_category = VALUES(trigger_category),
-                    trigger_vehicle_type = VALUES(trigger_vehicle_type),
-                    trigger_min_mileage = VALUES(trigger_min_mileage),
-                    offer_service_id = VALUES(offer_service_id),
-                    offer_product_id = VALUES(offer_product_id),
-                    offer_price_usd = VALUES(offer_price_usd),
-                    offer_headline_en = VALUES(offer_headline_en),
-                    offer_headline_km = VALUES(offer_headline_km),
-                    offer_description_en = VALUES(offer_description_en),
-                    offer_description_km = VALUES(offer_description_km),
-                    is_active = VALUES(is_active)
-            ");
-            foreach ($cloudData['upsell_rules'] as $ur) {
-                $uStmt->execute([
-                    $ur['rule_uid'], $ur['name'],
-                    !empty($ur['trigger_service_id']) ? (int)$ur['trigger_service_id'] : null,
-                    $ur['trigger_category'] ?? null,
-                    $ur['trigger_vehicle_type'] ?? null,
-                    !empty($ur['trigger_min_mileage']) ? (int)$ur['trigger_min_mileage'] : null,
-                    !empty($ur['offer_service_id']) ? (int)$ur['offer_service_id'] : null,
-                    !empty($ur['offer_product_id']) ? (int)$ur['offer_product_id'] : null,
-                    isset($ur['offer_price_usd']) && $ur['offer_price_usd'] !== null ? (float)$ur['offer_price_usd'] : null,
-                    $ur['offer_headline_en'], $ur['offer_headline_km'] ?? null,
-                    $ur['offer_description_en'] ?? null, $ur['offer_description_km'] ?? null,
-                    (int)($ur['is_active'] ?? 1)
-                ]);
-                $recordsReceived++;
-            }
-        }
+                foreach ($tiers as $t) {
+                    $code = !empty($t['tier_code']) ? $t['tier_code'] : ('tier_' . ($t['id'] ?? uniqid()));
+                    $nameEn = $t['name_en'] ?? 'Tier';
+                    $nameKm = $t['name_km'] ?? $nameEn;
+                    $fee = (float)($t['monthly_fee_usd'] ?? 0.0);
+                    $disc = (int)($t['discount_pct'] ?? $t['discount_percent'] ?? 0);
+                    $inc = is_array($t['included_wash_package'] ?? null) ? json_encode($t['included_wash_package']) : ($t['included_wash_package'] ?? json_encode([]));
+                    $prio = $t['priority_level'] ?? 'P0';
+                    $active = isset($t['is_active']) ? (int)$t['is_active'] : 1;
 
-        // Process Staff Users from Cloud (PIN hash handling)
-        $cloudUsers = $cloudData['users'] ?? ($cloudData['master_data']['users'] ?? ($cloudData['data']['users'] ?? []));
-        if (!empty($cloudUsers) && is_array($cloudUsers)) {
-            $hasLocalPinHash = false;
-            try {
-                $cols = $pdo->query("SHOW COLUMNS FROM users")->fetchAll(PDO::FETCH_COLUMN);
-                $hasLocalPinHash = in_array('local_pin_hash', $cols, true);
-            } catch (Throwable $t) {
-                try {
-                    $tInfo = $pdo->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_ASSOC);
-                    $hasLocalPinHash = in_array('local_pin_hash', array_column($tInfo, 'name'), true);
-                } catch (Throwable $t2) {}
-            }
-
-            foreach ($cloudUsers as $cu) {
-                $username = trim((string)($cu['username'] ?? ''));
-                if ($username === '') continue;
-
-                $fullName = trim((string)($cu['full_name'] ?? $username));
-                $role = strtolower(trim((string)($cu['role'] ?? 'cashier')));
-                $isActive = isset($cu['is_active']) ? (int)$cu['is_active'] : 1;
-                $status = ($isActive === 1) ? 'active' : 'inactive';
-
-                // If the pulled row contains local_pin_hash, store/use that bcrypt hash and ignore local_pin;
-                // fall back to local_pin only when the hash is absent (legacy). Never log or display a PIN.
-                $pinHash = null;
-                if (!empty($cu['local_pin_hash'])) {
-                    $pinHash = (string)$cu['local_pin_hash'];
-                } elseif (isset($cu['local_pin']) && $cu['local_pin'] !== null && trim((string)$cu['local_pin']) !== '') {
-                    $pinHash = password_hash(trim((string)$cu['local_pin']), PASSWORD_BCRYPT);
+                    $tStmt->execute([$code, $nameEn, $nameKm, $fee, $inc, $disc, $prio, $active]);
+                    $recordsReceived++;
                 }
+            }
 
-                $existStmt = $pdo->prepare("SELECT id, password_hash, role, status FROM users WHERE username = ? LIMIT 1");
-                $existStmt->execute([$username]);
-                $existingUser = $existStmt->fetch(PDO::FETCH_ASSOC);
+            // -------------------------------------------------------------
+            // 6. Ingest Vehicle Technical Specs
+            // -------------------------------------------------------------
+            $vSpecs = $masterData['vehicle_specs'] ?? [];
+            if (!empty($vSpecs) && is_array($vSpecs)) {
+                $vsStmt = $pdo->prepare("
+                    INSERT INTO vehicle_specs (make, model, engine_type, oil_viscosity, oil_type, oil_capacity_liters, oil_filter_code, other_fluids, is_active, version, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                    ON DUPLICATE KEY UPDATE
+                        engine_type = VALUES(engine_type),
+                        oil_viscosity = VALUES(oil_viscosity),
+                        oil_type = VALUES(oil_type),
+                        oil_capacity_liters = VALUES(oil_capacity_liters),
+                        oil_filter_code = VALUES(oil_filter_code),
+                        other_fluids = VALUES(other_fluids),
+                        is_active = VALUES(is_active),
+                        version = VALUES(version),
+                        updated_at = NOW()
+                ");
 
-                if ($existingUser) {
-                    $updateSql = "UPDATE users SET full_name = ?, role = ?, status = ?";
-                    $params = [$fullName, $role, $status];
-                    if ($pinHash !== null) {
-                        $updateSql .= ", password_hash = ?";
-                        $params[] = $pinHash;
-                        if ($hasLocalPinHash) {
-                            $updateSql .= ", local_pin_hash = ?";
-                            $params[] = $pinHash;
-                        }
-                    }
-                    $updateSql .= " WHERE id = ?";
-                    $params[] = $existingUser['id'];
-                    $pdo->prepare($updateSql)->execute($params);
-                } else {
-                    $finalHash = $pinHash ?? password_hash('123456', PASSWORD_BCRYPT);
-                    if ($hasLocalPinHash) {
-                        $ins = $pdo->prepare("INSERT INTO users (username, password_hash, local_pin_hash, full_name, role, status) VALUES (?, ?, ?, ?, ?, ?)");
-                        $ins->execute([$username, $finalHash, $finalHash, $fullName, $role, $status]);
+                foreach ($vSpecs as $vs) {
+                    $make = trim((string)($vs['make'] ?? ''));
+                    $model = trim((string)($vs['model'] ?? ''));
+                    if ($make === '' || $model === '') continue;
+
+                    $vsStmt->execute([
+                        $make,
+                        $model,
+                        $vs['engine_type'] ?? '',
+                        $vs['oil_viscosity'] ?? '5W-30',
+                        $vs['oil_type'] ?? 'Synthetic',
+                        (float)($vs['oil_capacity_liters'] ?? 4.0),
+                        $vs['oil_filter_code'] ?? 'OEM',
+                        $vs['other_fluids'] ?? null,
+                        (int)($vs['is_active'] ?? 1),
+                        (int)($vs['version'] ?? 1)
+                    ]);
+                    $recordsReceived++;
+                }
+            }
+
+            // -------------------------------------------------------------
+            // 7. Ingest Reminder Rules
+            // -------------------------------------------------------------
+            $reminderRules = $masterData['reminder_rules'] ?? [];
+            if (!empty($reminderRules) && is_array($reminderRules)) {
+                $remCheck = $pdo->prepare("SELECT id FROM reminder_rules WHERE rule_type = ? LIMIT 1");
+                $remIns = $pdo->prepare("
+                    INSERT INTO reminder_rules (rule_type, trigger_mileage_before, trigger_days_before, trigger_days_inactive, message_template_en, message_template_km, is_active, version, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                ");
+                $remUpd = $pdo->prepare("
+                    UPDATE reminder_rules SET
+                        trigger_mileage_before = ?, trigger_days_before = ?, trigger_days_inactive = ?,
+                        message_template_en = ?, message_template_km = ?, is_active = ?, version = ?, updated_at = NOW()
+                    WHERE id = ?
+                ");
+
+                foreach ($reminderRules as $rr) {
+                    $rType = trim((string)($rr['rule_type'] ?? ''));
+                    if ($rType === '') continue;
+
+                    $tMil = (int)($rr['trigger_mileage_before'] ?? 0);
+                    $tDays = (int)($rr['trigger_days_before'] ?? 0);
+                    $tInact = (int)($rr['trigger_days_inactive'] ?? 0);
+                    $mEn = $rr['message_template_en'] ?? null;
+                    $mKm = $rr['message_template_km'] ?? null;
+                    $rActive = (int)($rr['is_active'] ?? 1);
+                    $rVer = (int)($rr['version'] ?? 1);
+
+                    $remCheck->execute([$rType]);
+                    $existRem = $remCheck->fetch(PDO::FETCH_ASSOC);
+
+                    if ($existRem) {
+                        $remUpd->execute([$tMil, $tDays, $tInact, $mEn, $mKm, $rActive, $rVer, $existRem['id']]);
                     } else {
-                        $ins = $pdo->prepare("INSERT INTO users (username, password_hash, full_name, role, status) VALUES (?, ?, ?, ?, ?)");
-                        $ins->execute([$username, $finalHash, $fullName, $role, $status]);
+                        $remIns->execute([$rType, $tMil, $tDays, $tInact, $mEn, $mKm, $rActive, $rVer]);
                     }
+                    $recordsReceived++;
                 }
-                $recordsReceived++;
             }
-        }
 
-        // Update version cache timestamp
-        $newVer = (string)($cloudData['catalog_version'] ?? time());
-        update_setting($pdo, 'catalog_price_version', $newVer, 0, 'CloudSync');
+            // Record pull completion and version timestamp
+            $newVer = (string)($cloudData['catalog_version'] ?? time());
+            update_setting($pdo, 'catalog_price_version', $newVer, 0, 'CloudSync');
+            update_setting($pdo, 'cloud_last_pull_at', $now, 0, 'CloudSync');
+
+            // Commit transaction
+            $pdo->commit();
+
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            self::logSync($pdo, 'pull', 'failed', 0, 0, 0, $durationMs, 'Database transaction failed: ' . $e->getMessage());
+            return ['success' => false, 'error' => 'pull_processing_failed', 'message' => $e->getMessage()];
+        }
 
         self::logSync($pdo, 'pull', 'success', 0, $recordsReceived, $conflictsCount, $durationMs, null);
 
@@ -821,7 +1079,8 @@ class CloudSyncManager {
             'conflicts_count' => $conflictsCount,
             'conflicts' => $conflictsCount,
             'price_changed' => $priceChanged,
-            'catalog_version' => $newVer
+            'catalog_version' => $newVer,
+            'last_pull_at' => $now
         ];
     }
 

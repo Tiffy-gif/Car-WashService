@@ -86,6 +86,42 @@ function migrateCloudSync(bool $force = false): bool {
     ) {$charsetEngine}");
     migrateLog("Table 'sync_logs' verified.");
 
+    // 3b. Vehicle Technical Specs Reference Table
+    $pdo->exec("CREATE TABLE IF NOT EXISTS vehicle_specs (
+        id {$autoInc},
+        cloud_id INT DEFAULT NULL,
+        make VARCHAR(50) NOT NULL,
+        model VARCHAR(50) NOT NULL,
+        engine_type VARCHAR(50) DEFAULT '',
+        oil_viscosity VARCHAR(30) NOT NULL,
+        oil_type VARCHAR(50) DEFAULT NULL,
+        oil_capacity_liters DECIMAL(4,2) NOT NULL,
+        oil_filter_code VARCHAR(50) NOT NULL,
+        other_fluids TEXT DEFAULT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        version INT NOT NULL DEFAULT 1,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) {$charsetEngine}");
+    migrateLog("Table 'vehicle_specs' verified.");
+
+    // 3c. Reminder Rules Table
+    $pdo->exec("CREATE TABLE IF NOT EXISTS reminder_rules (
+        id {$autoInc},
+        cloud_id INT DEFAULT NULL,
+        rule_type VARCHAR(50) NOT NULL,
+        trigger_mileage_before INT DEFAULT 0,
+        trigger_days_before INT DEFAULT 0,
+        trigger_days_inactive INT DEFAULT 0,
+        message_template_en TEXT DEFAULT NULL,
+        message_template_km TEXT DEFAULT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        version INT NOT NULL DEFAULT 1,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) {$charsetEngine}");
+    migrateLog("Table 'reminder_rules' verified.");
+
     // 4. Add is_synced columns to local tables
     $tableColumns = [
         'orders' => ['is_synced' => 'TINYINT(1) DEFAULT 0', 'synced_at' => 'DATETIME DEFAULT NULL'],
