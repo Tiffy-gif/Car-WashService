@@ -74,6 +74,20 @@ class CloudSyncManager {
     public static function sendToCloud(PDO $pdo, bool $force = false, int $retryDelaySeconds = 10, int $maxRetries = 3): array {
         $startTime = microtime(true);
 
+        $cloudUrl = get_setting('cloud_api_url', '');
+        $cloudToken = get_setting('cloud_api_token', '');
+        $cloudSecret = get_setting('cloud_api_secret', '');
+        $shopId = get_setting('cloud_shop_id', '');
+        $shopCode = get_setting('shop_code', $shopId);
+
+        if (empty($cloudUrl) || empty($cloudToken) || empty($cloudSecret)) {
+            return [
+                'success' => false,
+                'error' => 'not_configured',
+                'message' => 'Cloud Sync API URL, Token, or Secret is not configured in Settings.'
+            ];
+        }
+
         if (self::isOfflineMode($pdo)) {
             self::logSync($pdo, 'push', 'offline', 0, 0, 0, 0, 'Shop is configured in offline mode. Records preserved locally.');
             return [
@@ -82,20 +96,6 @@ class CloudSyncManager {
                 'sent_count' => 0,
                 'records_sent' => 0,
                 'message' => 'Shop is operating in offline mode. Changes are safely saved locally with original timestamps.'
-            ];
-        }
-
-        $cloudUrl = get_setting('cloud_api_url', 'http://localhost/Car-WashService/api/cloud/index.php');
-        $cloudToken = get_setting('cloud_api_token', 'cloud_tok_live_778899aabbcc');
-        $cloudSecret = get_setting('cloud_api_secret', 'cloud_sec_live_x99y88z77w66v55');
-        $shopId = get_setting('cloud_shop_id', 'SHOP-PP-001');
-        $shopCode = get_setting('shop_code', $shopId);
-
-        if (empty($cloudUrl) || empty($cloudSecret)) {
-            return [
-                'success' => false,
-                'error' => 'not_configured',
-                'message' => 'Cloud Sync API URL or Secret is not configured in Settings.'
             ];
         }
 
@@ -340,13 +340,21 @@ class CloudSyncManager {
     public static function receiveFromCloud(PDO $pdo): array {
         $startTime = microtime(true);
 
+        $cloudUrl = get_setting('cloud_api_url', '');
+        $cloudToken = get_setting('cloud_api_token', '');
+        $cloudSecret = get_setting('cloud_api_secret', '');
+
+        if (empty($cloudUrl) || empty($cloudToken) || empty($cloudSecret)) {
+            return [
+                'success' => false,
+                'error' => 'not_configured',
+                'message' => 'Cloud Sync API URL, Token, or Secret is not configured in Settings.'
+            ];
+        }
+
         if (self::isOfflineMode($pdo)) {
             return ['success' => false, 'offline' => true, 'message' => 'Offline mode active.'];
         }
-
-        $cloudUrl = get_setting('cloud_api_url', 'http://localhost/Car-WashService/api/cloud/index.php');
-        $cloudToken = get_setting('cloud_api_token', 'cloud_tok_live_778899aabbcc');
-        $cloudSecret = get_setting('cloud_api_secret', 'cloud_sec_live_x99y88z77w66v55');
 
         $timestamp = time();
         $nonce = bin2hex(random_bytes(16));
@@ -641,13 +649,18 @@ class CloudSyncManager {
      * Fast 30-second critical settings check (prices, user roles, active/inactive).
      */
     public static function checkCriticalUpdates(PDO $pdo): array {
+        $cloudUrl = get_setting('cloud_api_url', '');
+        $cloudToken = get_setting('cloud_api_token', '');
+        $cloudSecret = get_setting('cloud_api_secret', '');
+
+        if (empty($cloudUrl) || empty($cloudToken) || empty($cloudSecret)) {
+            return ['success' => false, 'error' => 'not_configured', 'has_update' => false, 'has_critical_update' => false];
+        }
+
         if (self::isOfflineMode($pdo)) {
             return ['success' => true, 'has_update' => false, 'has_critical_update' => false, 'offline' => true];
         }
 
-        $cloudUrl = get_setting('cloud_api_url', 'http://localhost/Car-WashService/api/cloud/index.php');
-        $cloudToken = get_setting('cloud_api_token', 'cloud_tok_live_778899aabbcc');
-        $cloudSecret = get_setting('cloud_api_secret', 'cloud_sec_live_x99y88z77w66v55');
         $localVersion = (int)get_setting('catalog_price_version', '0');
 
         $timestamp = time();

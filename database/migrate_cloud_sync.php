@@ -153,10 +153,10 @@ function migrateCloudSync(bool $force = false): bool {
     // 6. Default settings
     $defaultSettings = [
         'cloud_sync_enabled' => '1',
-        'cloud_api_url' => 'http://localhost/Car-WashService/api/cloud/index.php',
-        'cloud_shop_id' => 'SHOP-PP-001',
-        'cloud_api_token' => 'cloud_tok_live_778899aabbcc',
-        'cloud_api_secret' => 'cloud_sec_live_x99y88z77w66v55',
+        'cloud_api_url' => '',
+        'cloud_shop_id' => '',
+        'cloud_api_token' => '',
+        'cloud_api_secret' => '',
         'cloud_sync_interval_mins' => '3',
         'cloud_offline_mode' => '0',
         'catalog_price_version' => (string)time()

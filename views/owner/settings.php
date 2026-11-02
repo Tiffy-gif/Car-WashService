@@ -420,17 +420,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
     elseif ($action === 'save_cloud_sync') {
         $syncEnabled = (isset($_POST['cloud_sync_enabled']) && $_POST['cloud_sync_enabled'] === '1') ? '1' : '0';
         $apiUrl = trim((string)($_POST['cloud_api_url'] ?? ''));
-        $shopId = trim((string)($_POST['cloud_shop_id'] ?? 'shop_phnom_penh_01'));
+        $shopId = trim((string)($_POST['cloud_shop_id'] ?? ''));
         $apiToken = trim((string)($_POST['cloud_api_token'] ?? ''));
         $apiSecret = trim((string)($_POST['cloud_api_secret'] ?? ''));
         $offlineMode = (isset($_POST['cloud_offline_mode']) && $_POST['cloud_offline_mode'] === '1') ? '1' : '0';
 
         $changed = 0;
         if (update_setting($pdo, 'cloud_sync_enabled', $syncEnabled, $userId, $userName)) $changed++;
-        if ($apiUrl !== '' && update_setting($pdo, 'cloud_api_url', $apiUrl, $userId, $userName)) $changed++;
-        if ($shopId !== '' && update_setting($pdo, 'cloud_shop_id', $shopId, $userId, $userName)) $changed++;
-        if ($apiToken !== '' && update_setting($pdo, 'cloud_api_token', $apiToken, $userId, $userName)) $changed++;
-        if ($apiSecret !== '' && update_setting($pdo, 'cloud_api_secret', $apiSecret, $userId, $userName)) $changed++;
+        if (update_setting($pdo, 'cloud_api_url', $apiUrl, $userId, $userName)) $changed++;
+        if (update_setting($pdo, 'cloud_shop_id', $shopId, $userId, $userName)) $changed++;
+        if (update_setting($pdo, 'cloud_api_token', $apiToken, $userId, $userName)) $changed++;
+        if (update_setting($pdo, 'cloud_api_secret', $apiSecret, $userId, $userName)) $changed++;
         if (update_setting($pdo, 'cloud_offline_mode', $offlineMode, $userId, $userName)) $changed++;
 
         $message = $changed > 0 ? "Cloud Sync configuration saved! ({$changed} items updated)" : "No changes made to Cloud Sync settings.";
@@ -596,6 +596,9 @@ require_once dirname(__DIR__) . '/layouts/header.php';
     </button>
     <button type="button" class="btn btn-sm <?= ($activeTab === 'sync') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('sync')">
         <i class="fa-solid fa-cloud-arrow-up mr-1" style="color: #6366f1;"></i> 9. Cloud Sync
+        <?php if (empty($settings['cloud_api_url']) || empty($settings['cloud_api_token']) || empty($settings['cloud_api_secret'])): ?>
+            <span class="badge badge-warning" style="margin-left: 4px; padding: 2px 6px; font-size: 10px;" title="Not configured">!</span>
+        <?php endif; ?>
     </button>
     <button type="button" class="btn btn-sm <?= ($activeTab === 'system') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('system')">
         <i class="fa-solid fa-sliders mr-1"></i> 10. System
@@ -1634,6 +1637,17 @@ $baysList = BayManager::getAllBays($pdo);
             <input type="hidden" name="action" value="save_cloud_sync">
             <input type="hidden" name="tab" value="sync">
 
+            <?php if (empty($settings['cloud_api_url']) || empty($settings['cloud_api_token']) || empty($settings['cloud_api_secret'])): ?>
+            <div class="alert alert-warning" style="background: rgba(245, 158, 11, 0.12); border-left: 4px solid #f59e0b; border-radius: 6px; padding: 14px 18px; margin-bottom: 20px; font-size: 13px; color: #b45309;">
+                <strong style="display: flex; align-items: center; gap: 6px; font-size: 14px;">
+                    <i class="fa-solid fa-triangle-exclamation" style="font-size: 16px;"></i> Cloud Sync Not Configured
+                </strong>
+                <p style="margin: 6px 0 0 0; color: #92400e; line-height: 1.5;">
+                    The Cloud API Endpoint URL, Token, and HMAC Secret Key are required to connect with the cloud master server. Data synchronization is currently paused until these credentials are saved.
+                </p>
+            </div>
+            <?php endif; ?>
+
             <div style="background: rgba(99, 102, 241, 0.08); border-left: 4px solid #6366f1; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: var(--text-main);">
                 <strong><i class="fa-solid fa-shield-halved mr-1"></i> Enterprise Cloud Security &amp; Offline Resiliency:</strong>
                 <p style="margin: 4px 0 0 0; color: var(--text-muted);">
@@ -1655,7 +1669,7 @@ $baysList = BayManager::getAllBays($pdo);
                 <label style="font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px;">
                     Cloud API Endpoint URL <span style="color: red;">*</span>
                 </label>
-                <input type="url" name="cloud_api_url" class="form-control" value="<?= htmlspecialchars($settings['cloud_api_url'] ?? 'http://localhost/Car-WashService/api/cloud/index.php') ?>" placeholder="https://api.carwash-cloud.com/v1/sync" required style="font-family: monospace;">
+                <input type="url" name="cloud_api_url" class="form-control" value="<?= htmlspecialchars($settings['cloud_api_url'] ?? '') ?>" placeholder="https://api.carwash-cloud.com/v1/sync" style="font-family: monospace;">
                 <small style="color: var(--text-muted); display: block; margin-top: 4px;">
                     The remote cloud hub URL supporting the SYNC_API push, pull, and critical check endpoints.
                 </small>
@@ -1666,14 +1680,14 @@ $baysList = BayManager::getAllBays($pdo);
                     <label style="font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px;">
                         Shop ID Identifier <span style="color: red;">*</span>
                     </label>
-                    <input type="text" name="cloud_shop_id" class="form-control" value="<?= htmlspecialchars($settings['cloud_shop_id'] ?? 'shop_phnom_penh_01') ?>" placeholder="shop_phnom_penh_01" required style="font-family: monospace;">
+                    <input type="text" name="cloud_shop_id" class="form-control" value="<?= htmlspecialchars($settings['cloud_shop_id'] ?? '') ?>" placeholder="SHOP-PP-001" style="font-family: monospace;">
                 </div>
 
                 <div class="form-group">
                     <label style="font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px;">
                         Cloud API Token <span style="color: red;">*</span>
                     </label>
-                    <input type="text" name="cloud_api_token" class="form-control" value="<?= htmlspecialchars($settings['cloud_api_token'] ?? 'token_carwash_secret_sync_2026') ?>" placeholder="token_..." required style="font-family: monospace;">
+                    <input type="text" name="cloud_api_token" class="form-control" value="<?= htmlspecialchars($settings['cloud_api_token'] ?? '') ?>" placeholder="token_..." style="font-family: monospace;">
                 </div>
             </div>
 
@@ -1682,7 +1696,7 @@ $baysList = BayManager::getAllBays($pdo);
                     HMAC API Secret Key <span style="color: red;">*</span>
                 </label>
                 <div style="display: flex; gap: 8px;">
-                    <input type="password" id="cloud_api_secret_input" name="cloud_api_secret" class="form-control" value="<?= htmlspecialchars($settings['cloud_api_secret'] ?? 'sec_demo_signature_key_998877') ?>" placeholder="sec_..." required style="font-family: monospace; flex: 1;">
+                    <input type="password" id="cloud_api_secret_input" name="cloud_api_secret" class="form-control" value="<?= htmlspecialchars($settings['cloud_api_secret'] ?? '') ?>" placeholder="sec_..." style="font-family: monospace; flex: 1;">
                     <button type="button" class="btn btn-secondary" onclick="const f=document.getElementById('cloud_api_secret_input'); f.type=(f.type==='password'?'text':'password');">
                         <i class="fa-solid fa-eye"></i>
                     </button>

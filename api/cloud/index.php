@@ -4,6 +4,13 @@ declare(strict_types=1);
 require_once dirname(__DIR__, 2) . '/config/app.php';
 require_once dirname(__DIR__, 2) . '/core/Database.php';
 
+if (!defined('APP_ENV') || APP_ENV !== 'development') {
+    http_response_code(404);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "404 Not Found\n";
+    exit;
+}
+
 header('Content-Type: application/json; charset=utf-8');
 
 $storageFile = dirname(__DIR__, 2) . '/storage/cloud_site_state.json';
@@ -47,7 +54,7 @@ try {
 } catch (Exception $e) {}
 
 if (empty($cloudSecret)) {
-    $cloudSecret = 'cloud_sec_live_x99y88z77w66v55';
+    $cloudSecret = '';
 }
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
