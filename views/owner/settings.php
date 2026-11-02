@@ -424,6 +424,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         $apiToken = trim((string)($_POST['cloud_api_token'] ?? ''));
         $apiSecret = trim((string)($_POST['cloud_api_secret'] ?? ''));
         $offlineMode = (isset($_POST['cloud_offline_mode']) && $_POST['cloud_offline_mode'] === '1') ? '1' : '0';
+        $allowInsecureTls = (isset($_POST['cloud_allow_insecure_tls']) && $_POST['cloud_allow_insecure_tls'] === '1') ? '1' : '0';
 
         $changed = 0;
         if (update_setting($pdo, 'cloud_sync_enabled', $syncEnabled, $userId, $userName)) $changed++;
@@ -432,6 +433,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         if (update_setting($pdo, 'cloud_api_token', $apiToken, $userId, $userName)) $changed++;
         if (update_setting($pdo, 'cloud_api_secret', $apiSecret, $userId, $userName)) $changed++;
         if (update_setting($pdo, 'cloud_offline_mode', $offlineMode, $userId, $userName)) $changed++;
+        if (update_setting($pdo, 'cloud_allow_insecure_tls', $allowInsecureTls, $userId, $userName)) $changed++;
 
         $message = $changed > 0 ? "Cloud Sync configuration saved! ({$changed} items updated)" : "No changes made to Cloud Sync settings.";
         $messageType = $changed > 0 ? 'success' : 'info';
@@ -1715,6 +1717,18 @@ $baysList = BayManager::getAllBays($pdo);
                     When checked, network calls to the cloud are paused to simulate an internet outage. All POS sales, job orders, and stock adjustments continue working 100% offline and will auto-sync upon reconnection.
                 </small>
             </div>
+
+            <?php if (defined('APP_ENV') && APP_ENV === 'development'): ?>
+            <div class="form-group" style="margin-bottom: 24px; padding: 12px; background: rgba(245, 158, 11, 0.05); border: 1px dashed rgba(245, 158, 11, 0.3); border-radius: 6px;">
+                <label style="font-weight: 600; display: flex; align-items: center; justify-content: space-between; cursor: pointer; color: #b45309;">
+                    <span><i class="fa-solid fa-lock-open mr-2"></i>Allow Insecure TLS (Development Only)</span>
+                    <input type="checkbox" name="cloud_allow_insecure_tls" value="1" <?= (($settings['cloud_allow_insecure_tls'] ?? '0') === '1') ? 'checked' : '' ?> style="width: 18px; height: 18px;">
+                </label>
+                <small style="color: var(--text-muted); display: block; margin-top: 6px;">
+                    Honoured only when APP_ENV is 'development'. Disables cURL certificate verification for local HTTPS self-signed test environments.
+                </small>
+            </div>
+            <?php endif; ?>
 
             <div style="display: flex; justify-content: flex-end; gap: 10px;">
                 <button type="submit" class="btn btn-primary">

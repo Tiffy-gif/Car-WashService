@@ -761,6 +761,133 @@ class CloudSyncManager {
     }
 
     /**
+     * Private helper to perform signed, gzipped HTTP POST requests to the Cloud Master.
+     * Retries up to 3 times, 10s apart, with fresh timestamp, nonce, and signature per attempt.
+     * TLS verification is ON by default; setting cloud_allow_insecure_tls is honoured ONLY when APP_ENV === 'development'.
+     */
+    private static function request(array $body, int $maxRetries = 3, int $retryDelaySeconds = 10): array {
+        $cloudUrl = get_setting('cloud_api_url', '');
+        $cloudToken = get_setting('cloud_api_token', '');
+        $cloudSecret = get_setting('cloud_api_secret', '');
+
+        if (empty($cloudUrl) || empty($cloudToken) || empty($cloudSecret)) {
+            return [
+                'success' => false,
+                'error' => 'not_configured',
+                'message' => 'Cloud Sync API URL, Token, or Secret is not configured in Settings.'
+            ];
+        }
+
+        $jsonPayload = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($jsonPayload === false) {
+            return [
+                'success' => false,
+                'error' => 'json_encode_failed',
+                'message' => 'Failed to JSON encode request payload.'
+            ];
+        }
+
+        $compressedPayload = gzencode($jsonPayload, 9);
+        if ($compressedPayload === false) {
+            return [
+                'success' => false,
+                'error' => 'gzip_failed',
+                'message' => 'Failed to compress request payload with gzip.'
+            ];
+        }
+
+        // TLS verification: ON by default, allow setting cloud_allow_insecure_tls = 1 ONLY in development
+        $allowInsecureTls = (defined('APP_ENV') && APP_ENV === 'development' && get_setting('cloud_allow_insecure_tls', '0') === '1');
+        $sslVerifyPeer = !$allowInsecureTls;
+        $sslVerifyHost = $allowInsecureTls ? 0 : 2;
+
+        $attempt = 0;
+        $response = null;
+        $httpCode = 0;
+        $lastError = '';
+
+        while ($attempt < $maxRetries) {
+            $attempt++;
+
+            // Fresh timestamp and nonce for every attempt (prevents replay detection on delayed retries)
+            $timestamp = (string)time();
+            $nonce = bin2hex(random_bytes(16));
+            $messageToSign = $timestamp . '.' . $nonce . '.' . $compressedPayload;
+            $signature = hash_hmac('sha256', $messageToSign, $cloudSecret);
+
+            $headers = [
+                'Content-Type: application/json',
+                'Content-Encoding: gzip',
+                'X-Shop-Token: ' . $cloudToken,
+                'X-Shop-Timestamp: ' . $timestamp,
+                'X-Shop-Nonce: ' . $nonce,
+                'X-Shop-Signature: ' . $signature
+            ];
+
+            $ch = curl_init($cloudUrl);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $compressedPayload);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, $sslVerifyPeer);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, $sslVerifyHost);
+
+            $response = curl_exec($ch);
+            $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
+            curl_close($ch);
+
+            if ($httpCode >= 200 && $httpCode < 300 && $response !== false) {
+                break;
+            }
+
+            $lastError = $curlError ?: ("HTTP " . $httpCode . ($response ? (': ' . substr((string)$response, 0, 200)) : ''));
+            if ($attempt < $maxRetries && $retryDelaySeconds > 0) {
+                sleep($retryDelaySeconds);
+            }
+        }
+
+        if ($httpCode < 200 || $httpCode >= 300 || !$response) {
+            return [
+                'success' => false,
+                'error' => 'cloud_communication_failed',
+                'http_code' => $httpCode,
+                'attempts' => $attempt,
+                'message' => "Failed to reach cloud server after {$attempt} attempts: {$lastError}"
+            ];
+        }
+
+        // Decompress response if gzip encoded
+        $bodyStr = (string)$response;
+        if (substr($bodyStr, 0, 2) === "\x1f\x8b") {
+            $decompressed = @gzdecode($bodyStr);
+            if ($decompressed !== false) {
+                $bodyStr = $decompressed;
+            }
+        }
+
+        $decodedJson = json_decode($bodyStr, true);
+        if (!is_array($decodedJson)) {
+            return [
+                'success' => false,
+                'error' => 'invalid_cloud_response',
+                'http_code' => $httpCode,
+                'message' => 'Malformed or non-JSON response from cloud server.',
+                'raw_body' => substr($bodyStr, 0, 300)
+            ];
+        }
+
+        return [
+            'success' => true,
+            'http_code' => $httpCode,
+            'attempts' => $attempt,
+            'data' => $decodedJson
+        ];
+    }
+
+    /**
      * Internal logging helper for sync events.
      */
     private static function logSync(PDO $pdo, string $type, string $status, int $sent, int $received, int $conflicts, int $durationMs, ?string $error = null): void {

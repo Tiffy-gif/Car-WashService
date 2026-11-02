@@ -159,6 +159,7 @@ function migrateCloudSync(bool $force = false): bool {
         'cloud_api_secret' => '',
         'cloud_sync_interval_mins' => '3',
         'cloud_offline_mode' => '0',
+        'cloud_allow_insecure_tls' => '0',
         'catalog_price_version' => (string)time()
     ];
 
