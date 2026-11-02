@@ -30,14 +30,32 @@ $conflictCount = count($conflicts);
 // Fetch recent sync logs
 $logs = $pdo->query("SELECT * FROM sync_logs ORDER BY id DESC LIMIT 25")->fetchAll();
 $failureLogs = $pdo->query("SELECT * FROM sync_logs WHERE status IN ('failed','error') ORDER BY id DESC LIMIT 5")->fetchAll();
+$failedAttemptsCount = (int)$pdo->query("SELECT COUNT(*) FROM sync_logs WHERE status IN ('failed','error')")->fetchColumn();
 
 // Cloud settings
 $syncEnabled = (get_setting('cloud_sync_enabled', '1') === '1');
-$cloudUrl = get_setting('cloud_api_url', 'http://localhost/Car-WashService/api/cloud/index.php');
-$shopId = get_setting('cloud_shop_id', 'shop_phnom_penh_01');
+$cloudUrl = get_setting('cloud_api_url', '');
+$cloudToken = get_setting('cloud_api_token', '');
+$cloudSecret = get_setting('cloud_api_secret', '');
+$shopId = get_setting('cloud_shop_id', '');
+$isNotConfigured = empty($cloudUrl) || empty($cloudToken) || empty($cloudSecret);
 
 require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
 ?>
+
+<?php if ($isNotConfigured): ?>
+    <div class="alert alert-warning" style="margin-bottom: 20px; border-left: 4px solid #f59e0b; padding: 16px; background: rgba(245, 158, 11, 0.08);">
+        <div style="font-weight: 700; font-size: 15px; margin-bottom: 4px; color: #b45309;">
+            <i class="fa-solid fa-triangle-exclamation mr-2"></i> Cloud Sync Not Configured
+        </div>
+        <p style="margin: 0 0 10px 0; font-size: 13px; color: var(--text-main);">
+            Cloud API URL, Token, or HMAC Secret is not set. The local server is operating in standalone mode and will not attempt cloud sync calls.
+        </p>
+        <a href="index.php?view=settings&tab=sync" class="btn btn-sm btn-primary">
+            <i class="fa-solid fa-gear mr-1"></i> Configure Cloud Credentials
+        </a>
+    </div>
+<?php endif; ?>
 
 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 14px;">
     <div>
@@ -45,7 +63,11 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
             <h1 style="font-size: 24px; font-weight: 700; color: var(--text-main); margin: 0;">
                 <i class="fa-solid fa-cloud-arrow-up mr-2" style="color: #6366f1;"></i>Cloud Sync Monitor
             </h1>
-            <?php if ($isOffline): ?>
+            <?php if ($isNotConfigured): ?>
+                <span class="badge badge-warning" style="font-size: 13px; padding: 6px 12px;">
+                    <i class="fa-solid fa-triangle-exclamation mr-1"></i> Not Configured
+                </span>
+            <?php elseif ($isOffline): ?>
                 <span class="badge badge-danger" style="font-size: 13px; padding: 6px 12px;">
                     <i class="fa-solid fa-plane-slash mr-1"></i> Shop Offline (Stand-alone)
                 </span>
@@ -56,7 +78,7 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
             <?php endif; ?>
         </div>
         <p style="font-size: 13px; color: var(--text-muted); margin: 6px 0 0 0;">
-            Shop ID: <strong><?= htmlspecialchars($shopId) ?></strong> &bull; Endpoint: <code><?= htmlspecialchars($cloudUrl) ?></code>
+            Shop ID: <strong><?= htmlspecialchars($shopId !== '' ? $shopId : '(Not Set)') ?></strong> &bull; Endpoint: <code><?= htmlspecialchars($cloudUrl !== '' ? $cloudUrl : '(Not Set)') ?></code>
         </p>
     </div>
 
@@ -73,7 +95,7 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
         <!-- Force Sync Button -->
         <form method="POST" action="index.php?action=trigger_force_sync" style="margin: 0;">
             <?= csrf_field() ?>
-            <button type="submit" class="btn btn-primary" <?= $isOffline ? 'disabled title="Cannot sync while offline"' : '' ?>>
+            <button type="submit" class="btn btn-primary" <?= ($isOffline || $isNotConfigured) ? 'disabled title="' . ($isNotConfigured ? 'Configure Cloud credentials first' : 'Cannot sync while offline') . '"' : '' ?>>
                 <i class="fa-solid fa-arrows-rotate mr-1"></i> Force Sync Now
             </button>
         </form>
@@ -92,44 +114,55 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
 <?php endif; ?>
 
 <!-- Top Metrics Cards -->
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
-    <!-- Card 1: Connection Health -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
+    <!-- Card 1: Last Push -->
     <div class="card" style="padding: 18px;">
-        <div style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Sync Status</div>
-        <div style="font-size: 22px; font-weight: 700; color: <?= $isOffline ? '#ef4444' : '#10b981' ?>; margin: 8px 0 4px 0;">
-            <?= $isOffline ? 'Offline Mode' : ($syncEnabled ? 'Active (Auto)' : 'Disabled') ?>
-        </div>
-        <div style="font-size: 12px; color: var(--text-muted);">
-            Interval: 3&ndash;5 min &bull; Fast-check: 30s
-        </div>
-    </div>
-
-    <!-- Card 2: Last Successful Sync -->
-    <div class="card" style="padding: 18px;">
-        <div style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Last Successful Sync</div>
+        <div style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Last Push (Outbound)</div>
         <div style="font-size: 18px; font-weight: 700; color: var(--text-main); margin: 8px 0 4px 0;">
-            <?= $lastSuccess ? htmlspecialchars(date('H:i:s', strtotime($lastSuccess))) : 'No sync yet' ?>
+            <?= $lastUpload ? htmlspecialchars(date('H:i:s', strtotime($lastUpload['created_at']))) : 'No push yet' ?>
         </div>
         <div style="font-size: 12px; color: var(--text-muted);">
-            <?= $lastSuccess ? htmlspecialchars(date('M d, Y', strtotime($lastSuccess))) : 'Awaiting first push' ?>
+            <?= $lastUpload ? (htmlspecialchars(date('M d, Y', strtotime($lastUpload['created_at']))) . ' &bull; <span class="badge badge-' . ($lastUpload['status'] === 'success' ? 'success' : 'danger') . '">' . ucfirst($lastUpload['status']) . '</span>') : 'Awaiting first push' ?>
         </div>
     </div>
 
-    <!-- Card 3: Waiting Queue -->
+    <!-- Card 2: Last Pull -->
     <div class="card" style="padding: 18px;">
-        <div style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Pending Records</div>
-        <div style="font-size: 24px; font-weight: 700; color: <?= $totalPending > 0 ? '#f59e0b' : '#10b981' ?>; margin: 8px 0 4px 0;">
+        <div style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Last Pull (Inbound)</div>
+        <div style="font-size: 18px; font-weight: 700; color: var(--text-main); margin: 8px 0 4px 0;">
+            <?= $lastDownload ? htmlspecialchars(date('H:i:s', strtotime($lastDownload['created_at']))) : 'No pull yet' ?>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted);">
+            <?= $lastDownload ? (htmlspecialchars(date('M d, Y', strtotime($lastDownload['created_at']))) . ' &bull; <span class="badge badge-' . ($lastDownload['status'] === 'success' ? 'success' : 'danger') . '">' . ucfirst($lastDownload['status']) . '</span>') : 'Awaiting first pull' ?>
+        </div>
+    </div>
+
+    <!-- Card 3: Failed Attempts -->
+    <div class="card" style="padding: 18px;">
+        <div style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Failed Attempts</div>
+        <div style="font-size: 22px; font-weight: 700; color: <?= $failedAttemptsCount > 0 ? '#ef4444' : '#10b981' ?>; margin: 8px 0 4px 0;">
+            <?= number_format($failedAttemptsCount) ?>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted);">
+            <?= $failedAttemptsCount > 0 ? 'Connection or verification errors' : 'Zero connection failures' ?>
+        </div>
+    </div>
+
+    <!-- Card 4: Waiting Queue -->
+    <div class="card" style="padding: 18px;">
+        <div style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Pending Unsynced</div>
+        <div style="font-size: 22px; font-weight: 700; color: <?= $totalPending > 0 ? '#f59e0b' : '#10b981' ?>; margin: 8px 0 4px 0;">
             <?= number_format($totalPending) ?>
         </div>
         <div style="font-size: 12px; color: var(--text-muted);">
-            Records waiting to upload
+            Records queued to upload
         </div>
     </div>
 
-    <!-- Card 4: Conflicts -->
+    <!-- Card 5: Conflicts -->
     <div class="card" style="padding: 18px;">
         <div style="font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Version Conflicts</div>
-        <div style="font-size: 24px; font-weight: 700; color: <?= $conflictCount > 0 ? '#ef4444' : '#10b981' ?>; margin: 8px 0 4px 0;">
+        <div style="font-size: 22px; font-weight: 700; color: <?= $conflictCount > 0 ? '#ef4444' : '#10b981' ?>; margin: 8px 0 4px 0;">
             <?= number_format($conflictCount) ?>
         </div>
         <div style="font-size: 12px; color: var(--text-muted);">
@@ -143,6 +176,51 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
     <div style="border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
         <h2 style="font-size: 16px; font-weight: 700; color: var(--text-main); margin: 0;">
             <i class="fa-solid fa-list-check mr-2" style="color: var(--primary);"></i>Pending Outbound Queue Breakdown
+        </h2>
+        <span class="badge <?= $totalPending > 0 ? 'badge-warning' : 'badge-success' ?>">
+            <?= $totalPending ?> unsynced record(s)
+        </span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
+            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-receipt mr-1"></i> Sales / Invoices</div>
+            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['sales'] ?? $syncCounts['orders'] ?></div>
+        </div>
+        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
+            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-wrench mr-1"></i> Job Orders &amp; Tasks</div>
+            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['job_orders'] ?? $syncCounts['tasks'] ?></div>
+        </div>
+        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
+            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-boxes-stacked mr-1"></i> Stock Movements</div>
+            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['stock_movements'] ?? $syncCounts['stock'] ?></div>
+        </div>
+        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
+            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-cash-register mr-1"></i> Shifts &amp; Z-Reports</div>
+            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['shifts'] ?></div>
+        </div>
+        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
+            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-business-time mr-1"></i> Staff Timecards</div>
+            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['timecards'] ?></div>
+        </div>
+        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
+            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-heart mr-1"></i> CRM Events</div>
+            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['crm'] ?? $syncCounts['loyalty'] ?></div>
+        </div>
+        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
+            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-shield-halved mr-1"></i> Audit Logs</div>
+            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['audit_logs'] ?? $syncCounts['audit'] ?></div>
+        </div>
+        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
+            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-tags mr-1"></i> Upsell Logs</div>
+            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['upsells'] ?? 0 ?></div>
+        </div>
+        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
+            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-chart-line mr-1"></i> Performance Metrics</div>
+            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['performance_metrics'] ?? 0 ?></div>
+        </div>
+    </div>
+</div>
         </h2>
         <span class="badge <?= $totalPending > 0 ? 'badge-warning' : 'badge-success' ?>">
             <?= $totalPending ?> unsynced record(s)
