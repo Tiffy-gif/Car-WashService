@@ -899,14 +899,32 @@ class CloudSyncManager {
                                 ->execute([$uId]);
                         }
                     } else {
-                        // New user insert
-                        $defaultHash = $pinHash ?? password_hash('123456', PASSWORD_BCRYPT);
-                        if ($hasLocalPinHash) {
-                            $pdo->prepare("INSERT INTO users (username, password_hash, local_pin_hash, full_name, role, role_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())")
-                                ->execute([$uname, $defaultHash, $defaultHash, $fullName, $roleCode, $roleId, $status]);
+                        // New user insert: NEVER create a user with a default PIN
+                        if ($pinHash === null || trim($pinHash) === '') {
+                            // If no local_pin_hash arrives, insert user with status 'inactive', unusable random password_hash and local_pin_hash NULL
+                            $unusableHash = '$2y$10$' . bin2hex(random_bytes(26));
+                            $insertStatus = 'inactive';
+                            $insertLocalPin = null;
+
+                            if ($hasLocalPinHash) {
+                                $pdo->prepare("INSERT INTO users (username, password_hash, local_pin_hash, full_name, role, role_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())")
+                                    ->execute([$uname, $unusableHash, $insertLocalPin, $fullName, $roleCode, $roleId, $insertStatus]);
+                            } else {
+                                $pdo->prepare("INSERT INTO users (username, password_hash, full_name, role, role_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())")
+                                    ->execute([$uname, $unusableHash, $fullName, $roleCode, $roleId, $insertStatus]);
+                            }
+                            $newUserId = (int)$pdo->lastInsertId();
+                            AuditLogger::log('USER_CREATED_PENDING_PIN', "New staff user '{$uname}' (ID #{$newUserId}) inserted with status 'inactive' awaiting local_pin_hash from cloud", 'users', (string)$newUserId, 0, 'cloud_sync', 'system');
                         } else {
-                            $pdo->prepare("INSERT INTO users (username, password_hash, full_name, role, role_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())")
-                                ->execute([$uname, $defaultHash, $fullName, $roleCode, $roleId, $status]);
+                            if ($hasLocalPinHash) {
+                                $pdo->prepare("INSERT INTO users (username, password_hash, local_pin_hash, full_name, role, role_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())")
+                                    ->execute([$uname, $pinHash, $pinHash, $fullName, $roleCode, $roleId, $status]);
+                            } else {
+                                $pdo->prepare("INSERT INTO users (username, password_hash, full_name, role, role_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())")
+                                    ->execute([$uname, $pinHash, $fullName, $roleCode, $roleId, $status]);
+                            }
+                            $newUserId = (int)$pdo->lastInsertId();
+                            AuditLogger::log('USER_CREATED', "New staff user '{$uname}' (ID #{$newUserId}, Role: {$roleCode}) created from cloud master", 'users', (string)$newUserId, 0, 'cloud_sync', 'system');
                         }
                     }
                     $recordsReceived++;
