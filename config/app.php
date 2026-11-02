@@ -3,7 +3,11 @@ declare(strict_types=1);
 
 // Application environment: 'production' or 'development'
 if (!defined('APP_ENV')) {
-    define('APP_ENV', 'production');
+    $env = getenv('APP_ENV') ?: ($_SERVER['APP_ENV'] ?? null);
+    if (!$env && (file_exists(dirname(__DIR__) . '/storage/development.flag') || file_exists(dirname(__DIR__) . '/.env.dev'))) {
+        $env = 'development';
+    }
+    define('APP_ENV', $env ?: 'production');
 }
 
 // Application settings

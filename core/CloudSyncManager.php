@@ -145,7 +145,7 @@ class CloudSyncManager {
                    o.order_number, 
                    o.customer_name, 
                    o.plate_number AS vehicle_plate, 
-                   o.vehicle_model, 
+                   o.vehicle_type AS vehicle_model, 
                    b.bay_number, 
                    u.full_name AS technician_name
             FROM order_tasks ot
@@ -285,7 +285,7 @@ class CloudSyncManager {
 
         // CRM events (loyalty transactions + offline-queued reminder events)
         $crmStmt = $pdo->query("
-            SELECT lt.*, c.phone AS customer_phone, c.full_name AS customer_name, c.plate_number AS vehicle_plate
+            SELECT lt.*, c.phone AS customer_phone, c.name AS customer_name
             FROM loyalty_transactions lt
             LEFT JOIN customers c ON lt.customer_id = c.id
             WHERE lt.is_synced = 0 OR lt.is_synced IS NULL 
