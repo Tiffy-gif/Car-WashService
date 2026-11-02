@@ -1232,6 +1232,34 @@ class CloudSyncManager {
     }
 
     /**
+     * Get the absolute path to the sync lock file.
+     */
+    public static function getLockFile(): string {
+        return dirname(__DIR__) . '/storage/sync.lock';
+    }
+
+    /**
+     * Check if a sync runner process currently holds the lock.
+     */
+    public static function isSyncLocked(): bool {
+        $lockFile = self::getLockFile();
+        if (!file_exists($lockFile)) {
+            return false;
+        }
+        $fp = @fopen($lockFile, 'c+');
+        if (!$fp) {
+            return false;
+        }
+        if (!flock($fp, LOCK_EX | LOCK_NB)) {
+            fclose($fp);
+            return true; // Lock is currently held
+        }
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        return false;
+    }
+
+    /**
      * Private helper to perform signed, gzipped HTTP POST requests to the Cloud Master.
      * Retries up to 3 times, 10s apart, with fresh timestamp, nonce, and signature per attempt.
      * TLS verification is ON by default; setting cloud_allow_insecure_tls is honoured ONLY when APP_ENV === 'development'.

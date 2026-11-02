@@ -434,6 +434,18 @@ if ($action === 'check_critical_sync') {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-cache, no-store, must-revalidate');
     require_once __DIR__ . '/core/CloudSyncManager.php';
+
+    if (CloudSyncManager::isSyncLocked()) {
+        echo json_encode([
+            'success' => true,
+            'has_update' => false,
+            'message' => 'Sync in progress',
+            'pricing' => null,
+            'timestamp' => time()
+        ]);
+        exit;
+    }
+
     $pdo = Database::getInstance();
     $critRes = CloudSyncManager::checkCriticalUpdates($pdo);
 
@@ -492,6 +504,12 @@ if ($action === 'trigger_force_sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verify_csrf()) {
         $_SESSION['flash_sync_message'] = 'Security token invalid. Please try again.';
         $_SESSION['flash_sync_type'] = 'danger';
+        header('Location: index.php?view=sync_monitor');
+        exit;
+    }
+    if (CloudSyncManager::isSyncLocked()) {
+        $_SESSION['flash_sync_message'] = 'A background sync is already in progress. Please wait a moment.';
+        $_SESSION['flash_sync_type'] = 'info';
         header('Location: index.php?view=sync_monitor');
         exit;
     }

@@ -18,6 +18,7 @@ This step-by-step guide is written in plain language for shop managers and techn
 10. [Step 9: Disaster Mode, Paper Forms & Recovery Entry](#10-step-9-disaster-mode-paper-forms--recovery-entry)
 11. [Step 10: Queue TV Realtime Streaming (SSE) & Apache Worker Limits on XAMPP](#11-step-10-queue-tv-realtime-streaming-sse--apache-worker-limits-on-xampp)
 12. [Step 11: Install as PWA (Progressive Web App on Tablets)](#12-step-11-install-as-pwa-progressive-web-app-on-tablets)
+13. [Step 12: Configure Background Cloud Sync (Windows Task Scheduler)](#13-step-12-configure-background-cloud-sync-windows-task-scheduler)
 
 ---
 
@@ -351,6 +352,62 @@ When new code changes are deployed to `pos/` (updates to JavaScript, CSS, or tem
 5. When tablets next access or refresh the POS, the browser detects the updated `sw.js` in the background, pre-caches the updated files into the new cache bucket, and triggers an on-screen toast:
    > *"New version available - tap to reload"*
 6. Cashiers simply tap the notification or refresh the screen to switch to the new version. The service worker automatically cleans up obsolete cache versions.
+
+---
+
+## 13. Step 12: Configure Background Cloud Sync (Windows Task Scheduler)
+
+The local shop server runs offline-first and queues all operational ledgers (sales, job orders, stock deductions, shifts, and audit logs). When an internet connection is present, it transmits these records to the Cloud Master and pulls updated catalog prices, staff accounts, and rules.
+
+To keep data synced automatically without slowing down cashier tablets, configure Windows Task Scheduler to run the dedicated CLI sync runner every 3 minutes.
+
+### A. Dedicated Runner Scripts
+- **CLI Runner**: `C:\xampp\htdocs\Car-WashService\scripts\sync_runner.php`
+- **Batch Wrapper**: `C:\xampp\htdocs\Car-WashService\bin\sync_runner.bat`
+- **Process Lock**: `C:\xampp\htdocs\Car-WashService\storage\sync.lock` (prevents overlapping sync executions)
+
+### B. Option 1: Quick Setup via Command Prompt (Recommended)
+Open **Command Prompt as Administrator** and run:
+```cmd
+schtasks /create /tn "CarWashCloudSync" /tr "C:\xampp\htdocs\Car-WashService\bin\sync_runner.bat" /sc minute /mo 3 /ru "SYSTEM" /f
+```
+This registers a high-priority system task that executes `bin\sync_runner.bat` every 3 minutes in the background, even when no user is logged in.
+
+### C. Option 2: Setup via Windows Task Scheduler GUI
+1. Press `Win + R`, type `taskschd.msc`, and press **Enter**.
+2. In the right-hand panel, click **Create Task...** (not *Create Basic Task*).
+3. **General** tab:
+   - Name: `CarWashCloudSync`
+   - Description: `Periodic background synchronization between Car Wash Mini-PC and Cloud Master`
+   - Security options: Select **Run whether user is logged on or not** and check **Run with highest privileges**.
+4. **Triggers** tab &rarr; click **New...**:
+   - Begin the task: **At startup** (or *On a schedule* &rarr; Daily).
+   - Advanced settings: Check **Repeat task every: 3 minutes** for a duration of: **Indefinitely**.
+   - Check **Enabled** &rarr; click **OK**.
+5. **Actions** tab &rarr; click **New...**:
+   - Action: **Start a program**
+   - Program/script: `C:\xampp\htdocs\Car-WashService\bin\sync_runner.bat`
+   - Start in: `C:\xampp\htdocs\Car-WashService`
+   - Click **OK**.
+6. **Settings** tab:
+   - Check **Allow task to be run on demand**.
+   - If the running task does not end when requested: select **Stop the existing instance**.
+   - Click **OK** to save the task.
+
+### D. Manual Verification & Test
+To verify the sync runner is functioning correctly from the command line:
+```cmd
+cd C:\xampp\htdocs\Car-WashService
+php scripts\sync_runner.php
+```
+Expected output:
+```
+[2026-11-02 14:00:00] Push: 0 sent (ok), Pull: 0 received (ok, conflicts: 0), Duration: 45 ms
+```
+If another sync is currently running, the script will output:
+```
+[2026-11-02 14:00:00] Sync runner already active or lock held. Execution skipped.
+```
 
 ---
 *End of Mini-PC Installation & Hardening Guide. Keep this document printed in the shop office.*
