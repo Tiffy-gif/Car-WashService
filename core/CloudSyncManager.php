@@ -865,6 +865,12 @@ class CloudSyncManager {
                         $updSql .= " WHERE id = ?";
                         $params[] = $uId;
                         $pdo->prepare($updSql)->execute($params);
+
+                        // If user is deactivated, immediately terminate active POS sessions so they are logged out
+                        if ($status === 'inactive') {
+                            $pdo->prepare("UPDATE pos_sessions SET expires_at = NOW() WHERE user_id = ? AND expires_at > NOW()")
+                                ->execute([$uId]);
+                        }
                     } else {
                         // New user insert
                         $defaultHash = $pinHash ?? password_hash('123456', PASSWORD_BCRYPT);
