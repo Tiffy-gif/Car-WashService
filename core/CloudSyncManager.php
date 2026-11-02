@@ -605,7 +605,7 @@ class CloudSyncManager {
             // -------------------------------------------------------------
             $catList = $masterData['categories'] ?? [];
             if (!empty($catList) && is_array($catList)) {
-                $checkCat = $pdo->prepare("SELECT id, name_en, updated_at FROM categories WHERE code = ? OR name_en = ? LIMIT 1");
+                $checkCat = $pdo->prepare("SELECT id, name_en, is_active, updated_at FROM categories WHERE code = ? OR name_en = ? LIMIT 1");
                 $updCat = $pdo->prepare("
                     UPDATE categories SET 
                         name_en = ?, name_km = ?, icon = COALESCE(?, icon), color = COALESCE(?, color),
@@ -634,6 +634,9 @@ class CloudSyncManager {
                     $existingCat = $checkCat->fetch(PDO::FETCH_ASSOC);
 
                     if ($existingCat) {
+                        if ((int)$existingCat['is_active'] === 1 && $cActive === 0) {
+                            AuditLogger::log('CATEGORY_DEACTIVATED', "Category '{$cNameEn}' (ID #{$existingCat['id']}) deactivated via Cloud Sync", 'categories', (string)$existingCat['id'], 0, 'cloud_sync', 'system');
+                        }
                         $updCat->execute([$cNameEn, $cNameKm, $cIcon, $cColor, $cSort, $cActive, $existingCat['id']]);
                     } else {
                         $insCat->execute([$cType, $cCode, $cNameEn, $cNameKm, $cIcon, $cColor, $cSort, $cActive]);
@@ -723,6 +726,9 @@ class CloudSyncManager {
                                 continue; // Never overwrite local edit
                             }
 
+                            if ((int)$localSvc['is_active'] === 1 && $isActive === 0) {
+                                AuditLogger::log('SERVICE_DEACTIVATED', "Service '{$nameEn}' (ID #{$svcId}) deactivated via Cloud Sync", 'services', (string)$svcId, 0, 'cloud_sync', 'system');
+                            }
                             $svcUpd->execute([$nameKm, $categoryName, $catId, $durationMin, $isActive, $svcId]);
                             $priceUpsert->execute([$svcId, $priceUsd, $priceKhr, $durationMin]);
                             $priceChanged = true;
@@ -749,6 +755,9 @@ class CloudSyncManager {
                                 continue;
                             }
 
+                            if ((int)$localProd['is_active'] === 1 && $isActive === 0) {
+                                AuditLogger::log('PRODUCT_DEACTIVATED', "Product '{$nameEn}' (ID #{$prodId}) deactivated via Cloud Sync", 'products', (string)$prodId, 0, 'cloud_sync', 'system');
+                            }
                             // Update price and details without overwriting local stock_qty
                             $prodUpd->execute([$nameKm, $categoryName, $catId, $costUsd, $priceUsd, $priceKhr, $isActive, $prodId]);
                             $priceChanged = true;
@@ -802,6 +811,8 @@ class CloudSyncManager {
 
                 $roleStmt = $pdo->prepare("SELECT id, code FROM roles WHERE LOWER(code) = LOWER(?) OR LOWER(name_en) = LOWER(?) LIMIT 1");
                 $userCheck = $pdo->prepare("SELECT * FROM users WHERE username = ? LIMIT 1");
+                // Cloud-managed staff roles that can be synchronized/deactivated by cloud
+                $cloudManagedRoles = ['cashier', 'washer', 'mechanic', 'manager', 'admin', 'system_admin'];
 
                 foreach ($usersList as $u) {
                     $uname = trim((string)($u['username'] ?? ''));
@@ -842,6 +853,25 @@ class CloudSyncManager {
 
                     if ($localUser) {
                         $uId = (int)$localUser['id'];
+                        $localRole = strtolower(trim((string)($localUser['role'] ?? '')));
+                        $isCurrentlyActive = ($localUser['status'] === 'active');
+
+                        // Safety checks on user deactivation
+                        if ($status === 'inactive' && $isCurrentlyActive) {
+                            // 1. Never deactivate users the cloud does not manage
+                            if (!in_array($localRole, $cloudManagedRoles, true)) {
+                                $status = 'active'; // retain local active status
+                                AuditLogger::log('USER_DEACTIVATE_BLOCKED', "Blocked deactivation of unmanaged role user '{$uname}' (ID #{$uId}, Role: {$localRole}) via Cloud Sync", 'users', (string)$uId, 0, 'cloud_sync', 'system');
+                            } elseif ($localRole === 'owner') {
+                                // 2. Never deactivate the last active owner
+                                $activeOwners = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role = 'owner' AND status = 'active'")->fetchColumn();
+                                if ($activeOwners <= 1) {
+                                    $status = 'active'; // retain active status
+                                    AuditLogger::log('USER_DEACTIVATE_BLOCKED', "Blocked deactivation of last active owner '{$uname}' (ID #{$uId}) via Cloud Sync", 'users', (string)$uId, 0, 'cloud_sync', 'system');
+                                }
+                            }
+                        }
+
                         $localChanged = !empty($localUser['updated_at']) && ($localUser['updated_at'] > $lastPullAt);
 
                         if ($localChanged && ($localUser['role'] !== $roleCode || $localUser['status'] !== $status)) {
@@ -851,6 +881,8 @@ class CloudSyncManager {
                             $conflictsCount++;
                             continue;
                         }
+
+                        $wasDeactivated = ($isCurrentlyActive && $status === 'inactive');
 
                         $updSql = "UPDATE users SET full_name = ?, role = ?, role_id = ?, status = ?";
                         $params = [$fullName, $roleCode, $roleId, $status];
@@ -866,8 +898,9 @@ class CloudSyncManager {
                         $params[] = $uId;
                         $pdo->prepare($updSql)->execute($params);
 
-                        // If user is deactivated, immediately terminate active POS sessions so they are logged out
-                        if ($status === 'inactive') {
+                        // If user was deactivated: write audit log and terminate active POS sessions
+                        if ($wasDeactivated) {
+                            AuditLogger::log('USER_DEACTIVATED', "Staff user '{$uname}' (ID #{$uId}, Role: {$localRole}) deactivated via Cloud Sync", 'users', (string)$uId, 0, 'cloud_sync', 'system');
                             $pdo->prepare("UPDATE pos_sessions SET expires_at = NOW() WHERE user_id = ? AND expires_at > NOW()")
                                 ->execute([$uId]);
                         }
@@ -974,6 +1007,14 @@ class CloudSyncManager {
                     $prio = $t['priority_level'] ?? 'P0';
                     $active = isset($t['is_active']) ? (int)$t['is_active'] : 1;
 
+                    // Audit log if tier is deactivated
+                    $checkTier = $pdo->prepare("SELECT id, is_active FROM membership_tiers WHERE tier_code = ? LIMIT 1");
+                    $checkTier->execute([$code]);
+                    $existTier = $checkTier->fetch(PDO::FETCH_ASSOC);
+                    if ($existTier && (int)$existTier['is_active'] === 1 && $active === 0) {
+                        AuditLogger::log('TIER_DEACTIVATED', "Membership tier '{$code}' deactivated via Cloud Sync", 'membership_tiers', $code, 0, 'cloud_sync', 'system');
+                    }
+
                     $tStmt->execute([$code, $nameEn, $nameKm, $fee, $inc, $disc, $prio, $active]);
                     $recordsReceived++;
                 }
@@ -1004,6 +1045,16 @@ class CloudSyncManager {
                     $model = trim((string)($vs['model'] ?? ''));
                     if ($make === '' || $model === '') continue;
 
+                    $vsActive = isset($vs['is_active']) ? (int)$vs['is_active'] : 1;
+
+                    // Audit log if vehicle spec is deactivated
+                    $checkVs = $pdo->prepare("SELECT id, is_active FROM vehicle_specs WHERE make = ? AND model = ? LIMIT 1");
+                    $checkVs->execute([$make, $model]);
+                    $existVs = $checkVs->fetch(PDO::FETCH_ASSOC);
+                    if ($existVs && (int)$existVs['is_active'] === 1 && $vsActive === 0) {
+                        AuditLogger::log('SPEC_DEACTIVATED', "Vehicle spec '{$make} {$model}' deactivated via Cloud Sync", 'vehicle_specs', "{$make} {$model}", 0, 'cloud_sync', 'system');
+                    }
+
                     $vsStmt->execute([
                         $make,
                         $model,
@@ -1013,7 +1064,7 @@ class CloudSyncManager {
                         (float)($vs['oil_capacity_liters'] ?? 4.0),
                         $vs['oil_filter_code'] ?? 'OEM',
                         $vs['other_fluids'] ?? null,
-                        (int)($vs['is_active'] ?? 1),
+                        $vsActive,
                         (int)($vs['version'] ?? 1)
                     ]);
                     $recordsReceived++;
@@ -1049,10 +1100,14 @@ class CloudSyncManager {
                     $rActive = (int)($rr['is_active'] ?? 1);
                     $rVer = (int)($rr['version'] ?? 1);
 
+                    $remCheck = $pdo->prepare("SELECT id, is_active FROM reminder_rules WHERE rule_type = ? LIMIT 1");
                     $remCheck->execute([$rType]);
                     $existRem = $remCheck->fetch(PDO::FETCH_ASSOC);
 
                     if ($existRem) {
+                        if ((int)$existRem['is_active'] === 1 && $rActive === 0) {
+                            AuditLogger::log('REMINDER_RULE_DEACTIVATED', "Reminder rule '{$rType}' (ID #{$existRem['id']}) deactivated via Cloud Sync", 'reminder_rules', (string)$existRem['id'], 0, 'cloud_sync', 'system');
+                        }
                         $remUpd->execute([$tMil, $tDays, $tInact, $mEn, $mKm, $rActive, $rVer, $existRem['id']]);
                     } else {
                         $remIns->execute([$rType, $tMil, $tDays, $tInact, $mEn, $mKm, $rActive, $rVer]);
