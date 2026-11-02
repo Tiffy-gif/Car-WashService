@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/AuditLogger.php';
+require_once __DIR__ . '/NotificationManager.php';
 require_once __DIR__ . '/Helpers.php';
 require_once __DIR__ . '/PerformanceAnalytics.php';
 
@@ -749,6 +750,8 @@ class CloudSyncManager {
                                 continue; // Never overwrite local edit
                             }
 
+                            $basePriceChanged = (abs($priceUsd - $curPrice) > 0.01);
+
                             if ((int)$localSvc['is_active'] === 1 && $isActive === 0) {
                                 AuditLogger::log('SERVICE_DEACTIVATED', "Service '{$nameEn}' (ID #{$svcId}) deactivated via Cloud Sync", 'services', (string)$svcId, 0, 'cloud_sync', 'system');
                             }
@@ -756,12 +759,60 @@ class CloudSyncManager {
                             // Synchronize tiered pricing across all vehicle types (preserves distinct local vehicle prices)
                             self::syncServicePricing($pdo, $svcId, $priceUsd, $durationMin, $item);
                             $priceChanged = true;
+
+                            if ($basePriceChanged) {
+                                $alertMsg = "Cloud changed the base price of {$nameEn}: review SUV/Van/Motorbike prices";
+                                NotificationManager::notify($pdo, [
+                                    'target_role' => 'manager',
+                                    'category' => 'pricing',
+                                    'title_en' => 'Service Base Price Updated',
+                                    'title_km' => 'តម្លៃគោលសេវាកម្មត្រូវបានផ្លាស់ប្តូរ',
+                                    'message_en' => $alertMsg,
+                                    'message_km' => "ពពកបានផ្លាស់ប្តូរតម្លៃគោលនៃ {$nameEn}៖ សូមពិនិត្យឡើងវិញនូវតម្លៃ SUV/Van/Motorbike",
+                                    'action_url' => 'views/owner/services.php',
+                                    'reference_id' => 'price-chg-' . $svcId . '-' . time()
+                                ]);
+                                NotificationManager::notify($pdo, [
+                                    'target_role' => 'owner',
+                                    'category' => 'pricing',
+                                    'title_en' => 'Service Base Price Updated',
+                                    'title_km' => 'តម្លៃគោលសេវាកម្មត្រូវបានផ្លាស់ប្តូរ',
+                                    'message_en' => $alertMsg,
+                                    'message_km' => "ពពកបានផ្លាស់ប្តូរតម្លៃគោលនៃ {$nameEn}៖ សូមពិនិត្យឡើងវិញនូវតម្លៃ SUV/Van/Motorbike",
+                                    'action_url' => 'views/owner/services.php',
+                                    'reference_id' => 'price-chg-own-' . $svcId . '-' . time()
+                                ]);
+                                AuditLogger::log('PRICE_CHANGE_ALERT', $alertMsg, 'services', (string)$svcId, 0, 'cloud_sync', 'system');
+                            }
                         } else {
                             $svcIns->execute([$nameEn, $nameKm, $item['description'] ?? '', $categoryName, $catId, $durationMin, $isActive]);
                             $newSvcId = (int)$pdo->lastInsertId();
                             // Derive and insert tiered pricing across all vehicle types using multipliers
                             self::syncServicePricing($pdo, $newSvcId, $priceUsd, $durationMin, $item);
                             $priceChanged = true;
+
+                            $alertMsg = "Cloud changed the base price of {$nameEn}: review SUV/Van/Motorbike prices";
+                            NotificationManager::notify($pdo, [
+                                'target_role' => 'manager',
+                                'category' => 'pricing',
+                                'title_en' => 'New Service Arrived',
+                                'title_km' => 'សេវាកម្មថ្មីបានមកដល់',
+                                'message_en' => $alertMsg,
+                                'message_km' => "ពពកបានបន្ថែមសេវា {$nameEn}៖ សូមពិនិត្យឡើងវិញនូវតម្លៃ SUV/Van/Motorbike",
+                                'action_url' => 'views/owner/services.php',
+                                'reference_id' => 'new-svc-' . $newSvcId . '-' . time()
+                            ]);
+                            NotificationManager::notify($pdo, [
+                                'target_role' => 'owner',
+                                'category' => 'pricing',
+                                'title_en' => 'New Service Arrived',
+                                'title_km' => 'សេវាកម្មថ្មីបានមកដល់',
+                                'message_en' => $alertMsg,
+                                'message_km' => "ពពកបានបន្ថែមសេវា {$nameEn}៖ សូមពិនិត្យឡើងវិញនូវតម្លៃ SUV/Van/Motorbike",
+                                'action_url' => 'views/owner/services.php',
+                                'reference_id' => 'new-svc-own-' . $newSvcId . '-' . time()
+                            ]);
+                            AuditLogger::log('PRICE_CHANGE_ALERT', $alertMsg, 'services', (string)$newSvcId, 0, 'cloud_sync', 'system');
                         }
                     } else {
                         // Product or spare part
