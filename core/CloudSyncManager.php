@@ -672,13 +672,6 @@ class CloudSyncManager {
                     WHERE id = ?
                 ");
 
-                $priceUpsert = $pdo->prepare("
-                    INSERT INTO service_prices (service_id, vehicle_type, price_usd, price_khr, estimated_minutes)
-                    VALUES (?, 'small_car', ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE 
-                        price_usd = VALUES(price_usd), price_khr = VALUES(price_khr), estimated_minutes = VALUES(estimated_minutes)
-                ");
-
                 $findCat = $pdo->prepare("SELECT id FROM categories WHERE name_en = ? OR code = ? LIMIT 1");
 
                 foreach ($catalogItems as $item) {
@@ -730,12 +723,14 @@ class CloudSyncManager {
                                 AuditLogger::log('SERVICE_DEACTIVATED', "Service '{$nameEn}' (ID #{$svcId}) deactivated via Cloud Sync", 'services', (string)$svcId, 0, 'cloud_sync', 'system');
                             }
                             $svcUpd->execute([$nameKm, $categoryName, $catId, $durationMin, $isActive, $svcId]);
-                            $priceUpsert->execute([$svcId, $priceUsd, $priceKhr, $durationMin]);
+                            // Synchronize tiered pricing across all vehicle types (preserves distinct local vehicle prices)
+                            self::syncServicePricing($pdo, $svcId, $priceUsd, $durationMin, $item);
                             $priceChanged = true;
                         } else {
                             $svcIns->execute([$nameEn, $nameKm, $item['description'] ?? '', $categoryName, $catId, $durationMin, $isActive]);
                             $newSvcId = (int)$pdo->lastInsertId();
-                            $priceUpsert->execute([$newSvcId, $priceUsd, $priceKhr, $durationMin]);
+                            // Derive and insert tiered pricing across all vehicle types using multipliers
+                            self::syncServicePricing($pdo, $newSvcId, $priceUsd, $durationMin, $item);
                             $priceChanged = true;
                         }
                     } else {
@@ -778,8 +773,7 @@ class CloudSyncManager {
                         if ($svcId <= 0) continue;
                         $cloudPrice = isset($cs['price_usd']) ? (float)$cs['price_usd'] : null;
                         if ($cloudPrice !== null) {
-                            $pdo->prepare("INSERT INTO service_prices (service_id, vehicle_type, price_usd, price_khr) VALUES (?, 'small_car', ?, ?) ON DUPLICATE KEY UPDATE price_usd = VALUES(price_usd), price_khr = VALUES(price_khr)")
-                                ->execute([$svcId, $cloudPrice, (int)round($cloudPrice * 4100)]);
+                            self::syncServicePricing($pdo, $svcId, $cloudPrice, 30, $cs);
                             $recordsReceived++;
                         }
                     }
@@ -1237,6 +1231,87 @@ class CloudSyncManager {
     }
 
     /**
+     * Synchronize tiered service prices for all 4 vehicle types.
+     * Guarantees that local prices per vehicle type are never overwritten by a single cloud price,
+     * and ensures new services derive tiered pricing rather than receiving a flat single price.
+     */
+    private static function syncServicePricing(PDO $pdo, int $serviceId, float $basePriceUsd, int $durationMin, array $cloudItem = []): void {
+        $vTypes = ['motorbike', 'small_car', 'suv_pickup', 'van_truck'];
+        $defaultMults = [
+            'motorbike'  => 0.6,
+            'small_car'  => 1.0,
+            'suv_pickup' => 1.25,
+            'van_truck'  => 1.4
+        ];
+        $durMults = [
+            'motorbike'  => 0.8,
+            'small_car'  => 1.0,
+            'suv_pickup' => 1.2,
+            'van_truck'  => 1.4
+        ];
+
+        $rate = (float)get_setting('exchange_rate', '4100');
+        if ($rate <= 0) $rate = 4100.0;
+
+        // Fetch existing local prices for this service
+        $stmt = $pdo->prepare("SELECT vehicle_type, price_usd, price_khr, estimated_minutes FROM service_prices WHERE service_id = ?");
+        $stmt->execute([$serviceId]);
+        $existing = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $existing[$row['vehicle_type']] = $row;
+        }
+
+        $priceStmt = $pdo->prepare("
+            INSERT INTO service_prices (service_id, vehicle_type, price_usd, price_khr, estimated_minutes)
+            VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                price_usd = VALUES(price_usd),
+                price_khr = VALUES(price_khr),
+                estimated_minutes = VALUES(estimated_minutes)
+        ");
+
+        foreach ($vTypes as $vt) {
+            // Check if cloud explicitly provided a vehicle-specific price
+            $explicitPrice = null;
+            if (!empty($cloudItem['prices'][$vt]) && is_numeric($cloudItem['prices'][$vt])) {
+                $explicitPrice = (float)$cloudItem['prices'][$vt];
+            } elseif (!empty($cloudItem['price_matrix'][$vt]['usd']) && is_numeric($cloudItem['price_matrix'][$vt]['usd'])) {
+                $explicitPrice = (float)$cloudItem['price_matrix'][$vt]['usd'];
+            } elseif (!empty($cloudItem['price_' . $vt]) && is_numeric($cloudItem['price_' . $vt])) {
+                $explicitPrice = (float)$cloudItem['price_' . $vt];
+            }
+
+            if ($vt === 'small_car') {
+                // small_car is the base vehicle type corresponding to catalog item price
+                $usd = ($explicitPrice !== null) ? $explicitPrice : $basePriceUsd;
+                $khr = (int)round($usd * $rate);
+                $min = $durationMin > 0 ? $durationMin : 25;
+                $priceStmt->execute([$serviceId, $vt, $usd, $khr, $min]);
+            } else {
+                if ($explicitPrice !== null) {
+                    // Cloud explicitly provided a price for this vehicle type
+                    $usd = $explicitPrice;
+                    $khr = (int)round($usd * $rate);
+                    $min = max(10, (int)round($durationMin * $durMults[$vt]));
+                    $priceStmt->execute([$serviceId, $vt, $usd, $khr, $min]);
+                } elseif (isset($existing[$vt])) {
+                    // SAFETY RULE: Local price for this vehicle type already exists.
+                    // NEVER overwrite local price per vehicle type with a single cloud price!
+                    continue;
+                } else {
+                    // Row does not exist yet locally: derive tiered price using multiplier
+                    $multiplier = (float)get_setting('multiplier_' . $vt, (string)$defaultMults[$vt]);
+                    if ($multiplier <= 0) $multiplier = $defaultMults[$vt];
+                    $usd = round($basePriceUsd * $multiplier, 2);
+                    $khr = (int)round($usd * $rate);
+                    $min = max(10, (int)round($durationMin * $durMults[$vt]));
+                    $priceStmt->execute([$serviceId, $vt, $usd, $khr, $min]);
+                }
+            }
+        }
+    }
+
+    /**
      * Resolve a conflict (Manager or Owner).
      */
     public static function resolveConflict(PDO $pdo, int $conflictId, string $decision, int $userId, string $userName, ?string $notes = null): array {
@@ -1257,8 +1332,7 @@ class CloudSyncManager {
                 $svcId = (int)$conflict['record_uid'];
                 $price = (float)($cloudData['price_usd'] ?? 0.0);
                 if ($price > 0) {
-                    $pdo->prepare("INSERT INTO service_prices (service_id, vehicle_type, price_usd, price_khr) VALUES (?, 'small_car', ?, ?) ON DUPLICATE KEY UPDATE price_usd = VALUES(price_usd), price_khr = VALUES(price_khr)")
-                        ->execute([$svcId, $price, (int)round($price * 4100)]);
+                    self::syncServicePricing($pdo, $svcId, $price, 30, $cloudData);
                 }
             } elseif ($conflict['record_type'] === 'product') {
                 $pId = (int)$conflict['record_uid'];
