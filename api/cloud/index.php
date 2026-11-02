@@ -355,9 +355,12 @@ if ($action === 'pull') {
         'reminder_rules' => []
     ];
 
+    $hasUpdate = !empty($state['critical_update']) || ((int)($state['catalog_version'] ?? 0) > (int)($payload['pull_request']['local_versions']['catalog_version'] ?? 0));
+
     echo json_encode([
         'status' => 'success',
         'success' => true,
+        'has_update' => $hasUpdate,
         'catalog_version' => $state['catalog_version'],
         'last_updated_at' => $state['last_updated_at'],
         'master_data' => $masterData,

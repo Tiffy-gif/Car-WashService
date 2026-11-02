@@ -1086,6 +1086,7 @@ class CloudSyncManager {
 
     /**
      * Fast 30-second critical settings check (prices, user roles, active/inactive).
+     * Uses the signed request helper with entities ['settings', 'queue_rules'].
      */
     public static function checkCriticalUpdates(PDO $pdo): array {
         $cloudUrl = get_setting('cloud_api_url', '');
@@ -1100,34 +1101,65 @@ class CloudSyncManager {
             return ['success' => true, 'has_update' => false, 'has_critical_update' => false, 'offline' => true];
         }
 
-        $localVersion = (int)get_setting('catalog_price_version', '0');
+        $shopId = get_setting('cloud_shop_id', '');
+        $shopCode = get_setting('shop_code', $shopId);
 
-        $timestamp = time();
-        $nonce = bin2hex(random_bytes(16));
-        $signature = hash_hmac('sha256', "{$timestamp}.{$nonce}.", $cloudSecret);
+        $payload = [
+            'shop_code' => $shopCode,
+            'pull_request' => [
+                'entities' => ['settings', 'queue_rules'],
+                'local_versions' => [
+                    'settings_version' => (int)get_setting('settings_version', '1'),
+                    'catalog_version' => (int)get_setting('catalog_price_version', '0')
+                ]
+            ]
+        ];
 
-        $url = rtrim($cloudUrl, '/') . (strpos($cloudUrl, '?') === false ? '?' : '&') . 'action=check_critical&version=' . $localVersion;
+        // Send signed POST request via helper
+        $reqRes = self::request($payload, 1, 0);
 
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'X-Shop-Token: ' . $cloudToken,
-            'X-Shop-Timestamp: ' . $timestamp,
-            'X-Shop-Nonce: ' . $nonce,
-            'X-Shop-Signature: ' . $signature
-        ]);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 3);
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($httpCode !== 200 || !$response) {
-            return ['success' => true, 'has_update' => false, 'has_critical_update' => false, 'error' => 'server_unreachable'];
+        if (!$reqRes['success']) {
+            return [
+                'success' => true,
+                'has_update' => false,
+                'has_critical_update' => false,
+                'error' => $reqRes['error'] ?? 'server_unreachable'
+            ];
         }
 
-        $json = json_decode($response, true);
-        if (!is_array($json) || empty($json['has_update'])) {
-            return ['success' => true, 'has_update' => false, 'has_critical_update' => false];
+        $cloudData = $reqRes['data'] ?? [];
+        $masterData = $cloudData['master_data'] ?? $cloudData;
+
+        $hasUpdate = !empty($cloudData['has_update']);
+
+        if (!$hasUpdate && !empty($masterData['settings']) && is_array($masterData['settings'])) {
+            foreach ($masterData['settings'] as $k => $info) {
+                $val = is_array($info) ? ($info['value'] ?? '') : (string)$info;
+                if ($k === 'force_sync_requested' && $val === '1') {
+                    $hasUpdate = true;
+                    break;
+                }
+                $localVal = get_setting($k, null);
+                if ($localVal !== null && (string)$localVal !== (string)$val) {
+                    $hasUpdate = true;
+                    break;
+                }
+            }
+        }
+
+        if (!$hasUpdate && !empty($cloudData['catalog_version'])) {
+            $localVersion = (int)get_setting('catalog_price_version', '0');
+            if ((int)$cloudData['catalog_version'] > $localVersion) {
+                $hasUpdate = true;
+            }
+        }
+
+        if (!$hasUpdate) {
+            return [
+                'success' => true,
+                'has_update' => false,
+                'has_critical_update' => false
+            ];
         }
 
         // Pull fresh catalog and apply price update immediately
@@ -1137,7 +1169,7 @@ class CloudSyncManager {
             'success' => true,
             'has_update' => true,
             'has_critical_update' => true,
-            'details' => $json,
+            'details' => $cloudData,
             'catalog_version' => $pullRes['catalog_version'] ?? time(),
             'message' => 'System update: prices or permissions have been updated'
         ];
