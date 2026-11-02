@@ -805,36 +805,49 @@ class CloudSyncManager {
 
                 $roleStmt = $pdo->prepare("SELECT id, code FROM roles WHERE LOWER(code) = LOWER(?) OR LOWER(name_en) = LOWER(?) LIMIT 1");
                 $userCheck = $pdo->prepare("SELECT * FROM users WHERE username = ? LIMIT 1");
-                // Cloud-managed staff roles that can be synchronized/deactivated by cloud
-                $cloudManagedRoles = ['cashier', 'washer', 'mechanic', 'manager', 'admin', 'system_admin'];
+                // Cloud-managed staff roles for cloud deactivation = local codes of the four cloud roles (admin, owner, manager, crm)
+                $cloudManagedRoles = ['system_admin', 'admin', 'owner', 'manager', 'crm'];
 
                 foreach ($usersList as $u) {
                     $uname = trim((string)($u['username'] ?? ''));
                     if ($uname === '') continue;
 
                     $fullName = trim((string)($u['full_name'] ?? $uname));
-                    $rawRole = trim((string)($u['role'] ?? 'cashier'));
+                    $rawRole = trim((string)($u['role'] ?? ''));
                     $isActive = isset($u['is_active']) ? (int)$u['is_active'] : 1;
                     $status = ($isActive === 1) ? 'active' : 'inactive'; // Deactivate only, never delete
 
                     // Resolve role to local role_id and code
-                    $roleStmt->execute([$rawRole, $rawRole]);
-                    $roleRow = $roleStmt->fetch(PDO::FETCH_ASSOC);
-                    if (!$roleRow) {
-                        // Standard alias fallbacks
-                        $mappedCode = match (strtolower($rawRole)) {
-                            'system admin', 'sysadmin' => 'admin',
-                            'manager'                  => 'manager',
-                            'cashier'                  => 'cashier',
-                            'technician', 'lead tech'  => 'mechanic',
-                            'washer'                   => 'washer',
-                            default                    => 'cashier'
-                        };
-                        $roleStmt->execute([$mappedCode, $mappedCode]);
+                    $roleRow = null;
+                    if ($rawRole !== '') {
+                        $roleStmt->execute([$rawRole, $rawRole]);
                         $roleRow = $roleStmt->fetch(PDO::FETCH_ASSOC);
+                        if (!$roleRow) {
+                            $mappedCode = match (strtolower($rawRole)) {
+                                'admin', 'system admin', 'sysadmin' => 'system_admin',
+                                'owner', 'shop owner'               => 'owner',
+                                'manager'                           => 'manager',
+                                'crm', 'crm coordinator'           => 'crm',
+                                'cashier'                           => 'cashier',
+                                'washer'                            => 'washer',
+                                'mechanic', 'technician', 'tech'    => 'mechanic',
+                                default                             => null
+                            };
+                            if ($mappedCode !== null) {
+                                $roleStmt->execute([$mappedCode, $mappedCode]);
+                                $roleRow = $roleStmt->fetch(PDO::FETCH_ASSOC);
+                            }
+                        }
                     }
-                    $roleCode = $roleRow['code'] ?? 'cashier';
-                    $roleId = $roleRow ? (int)$roleRow['id'] : null;
+
+                    // An unknown cloud role is rejected (logged, not created) instead of becoming 'cashier'
+                    if (!$roleRow) {
+                        AuditLogger::log('USER_ROLE_UNKNOWN_REJECTED', "Rejected staff user '{$uname}' from cloud sync: unknown role '{$rawRole}'", 'users', null, 0, 'cloud_sync', 'system');
+                        continue;
+                    }
+
+                    $roleCode = (string)$roleRow['code'];
+                    $roleId = (int)$roleRow['id'];
 
                     // PIN hash: store local_pin_hash, NEVER a plain PIN
                     $pinHash = null;
