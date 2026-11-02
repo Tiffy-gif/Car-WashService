@@ -114,11 +114,14 @@ if ($action === 'push') {
         exit;
     }
 
+    $pushData = $payload['push_data'] ?? $payload;
+
     $confirmed = [
         'sales' => [],
         'job_orders' => [],
         'stock_movements' => [],
         'shifts' => [],
+        'shifts_and_zreports' => [],
         'timecards' => [],
         'audit_logs' => [],
         'crm_events' => [],
@@ -126,72 +129,74 @@ if ($action === 'push') {
     ];
 
     // Store sales
-    if (!empty($payload['sales']) && is_array($payload['sales'])) {
-        foreach ($payload['sales'] as $sale) {
-            $uid = $sale['order_number'] ?? $sale['order_uid'] ?? ('ORD-' . ($sale['id'] ?? uniqid()));
+    if (!empty($pushData['sales']) && is_array($pushData['sales'])) {
+        foreach ($pushData['sales'] as $sale) {
+            $uid = $sale['client_id'] ?? $sale['order_number'] ?? $sale['order_uid'] ?? ('ORD-' . ($sale['id'] ?? uniqid()));
             $state['received_sales'][$uid] = $sale;
             $confirmed['sales'][] = $uid;
         }
     }
 
     // Store job orders
-    if (!empty($payload['job_orders']) && is_array($payload['job_orders'])) {
-        foreach ($payload['job_orders'] as $job) {
-            $uid = $job['job_order_uid'] ?? $job['task_uid'] ?? ('JOB-' . ($job['id'] ?? uniqid()));
+    if (!empty($pushData['job_orders']) && is_array($pushData['job_orders'])) {
+        foreach ($pushData['job_orders'] as $job) {
+            $uid = $job['client_id'] ?? $job['job_order_uid'] ?? $job['task_uid'] ?? ('JOB-' . ($job['id'] ?? uniqid()));
             $state['received_jobs'][$uid] = $job;
             $confirmed['job_orders'][] = $uid;
         }
     }
 
     // Store stock movements
-    if (!empty($payload['stock_movements']) && is_array($payload['stock_movements'])) {
-        foreach ($payload['stock_movements'] as $sm) {
-            $uid = $sm['movement_uid'] ?? (string)($sm['id'] ?? uniqid());
+    if (!empty($pushData['stock_movements']) && is_array($pushData['stock_movements'])) {
+        foreach ($pushData['stock_movements'] as $sm) {
+            $uid = $sm['client_id'] ?? $sm['movement_uid'] ?? (string)($sm['id'] ?? uniqid());
             $state['received_movements'][$uid] = $sm;
             $confirmed['stock_movements'][] = $uid;
         }
     }
 
-    // Store shifts
-    if (!empty($payload['shifts']) && is_array($payload['shifts'])) {
-        foreach ($payload['shifts'] as $sh) {
-            $uid = 'SHIFT-' . ($sh['id'] ?? uniqid());
+    // Store shifts & zreports
+    $shiftsRaw = $pushData['shifts_and_zreports'] ?? $pushData['shifts'] ?? [];
+    if (!empty($shiftsRaw) && is_array($shiftsRaw)) {
+        foreach ($shiftsRaw as $sh) {
+            $uid = $sh['client_id'] ?? ('SHIFT-' . ($sh['id'] ?? uniqid()));
             $state['received_shifts'][$uid] = $sh;
             $confirmed['shifts'][] = $uid;
+            $confirmed['shifts_and_zreports'][] = $uid;
         }
     }
 
     // Store timecards
-    if (!empty($payload['timecards']) && is_array($payload['timecards'])) {
-        foreach ($payload['timecards'] as $tc) {
-            $uid = $tc['timecard_uid'] ?? (string)($tc['id'] ?? uniqid());
+    if (!empty($pushData['timecards']) && is_array($pushData['timecards'])) {
+        foreach ($pushData['timecards'] as $tc) {
+            $uid = $tc['client_id'] ?? $tc['timecard_uid'] ?? (string)($tc['id'] ?? uniqid());
             $state['received_timecards'][$uid] = $tc;
             $confirmed['timecards'][] = $uid;
         }
     }
 
     // Store audit logs
-    if (!empty($payload['audit_logs']) && is_array($payload['audit_logs'])) {
-        foreach ($payload['audit_logs'] as $al) {
-            $uid = 'AUD-' . ($al['id'] ?? uniqid());
+    if (!empty($pushData['audit_logs']) && is_array($pushData['audit_logs'])) {
+        foreach ($pushData['audit_logs'] as $al) {
+            $uid = $al['client_id'] ?? ('AUD-' . ($al['id'] ?? uniqid()));
             $state['received_audit_logs'][$uid] = $al;
             $confirmed['audit_logs'][] = $uid;
         }
     }
 
     // Store CRM events (loyalty transactions + message queue events)
-    if (!empty($payload['crm_events']) && is_array($payload['crm_events'])) {
-        foreach ($payload['crm_events'] as $crm) {
-            $uid = $crm['event_uid'] ?? ('CRM-' . ($crm['id'] ?? uniqid()));
+    if (!empty($pushData['crm_events']) && is_array($pushData['crm_events'])) {
+        foreach ($pushData['crm_events'] as $crm) {
+            $uid = $crm['client_id'] ?? $crm['event_uid'] ?? ('CRM-' . ($crm['id'] ?? uniqid()));
             $state['received_crm'][$uid] = $crm;
             $confirmed['crm_events'][] = $uid;
         }
     }
 
     // Store upsell logs
-    if (!empty($payload['upsell_logs']) && is_array($payload['upsell_logs'])) {
-        foreach ($payload['upsell_logs'] as $ul) {
-            $uid = $ul['log_uid'] ?? ('UPS-' . ($ul['id'] ?? uniqid()));
+    if (!empty($pushData['upsell_logs']) && is_array($pushData['upsell_logs'])) {
+        foreach ($pushData['upsell_logs'] as $ul) {
+            $uid = $ul['client_id'] ?? $ul['log_uid'] ?? ('UPS-' . ($ul['id'] ?? uniqid()));
             $state['received_upsell_logs'][$uid] = $ul;
             $confirmed['upsell_logs'][] = $uid;
         }
@@ -201,6 +206,7 @@ if ($action === 'push') {
     saveCloudState($storageFile, $state);
 
     echo json_encode([
+        'status' => 'success',
         'success' => true,
         'message' => 'Batch records confirmed and securely stored in cloud repository.',
         'confirmed_ids' => $confirmed,

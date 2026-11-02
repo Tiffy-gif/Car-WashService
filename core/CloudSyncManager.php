@@ -109,43 +109,238 @@ class CloudSyncManager {
         foreach ($salesRows as $sr) {
             $ordId = (int)$sr['id'];
             $items = $pdo->query("SELECT * FROM order_items WHERE order_id = {$ordId}")->fetchAll(PDO::FETCH_ASSOC);
-            $sr['items'] = $items;
-            $salesData[] = $sr;
+            $cleanItems = [];
+            foreach ($items as $it) {
+                $cleanItems[] = [
+                    'item_id' => (int)($it['service_id'] ?? $it['product_id'] ?? $it['id'] ?? 0),
+                    'item_name' => $it['service_name'] ?? $it['item_name'] ?? 'Item',
+                    'item_type' => $it['item_type'] ?? 'service',
+                    'quantity' => (float)($it['qty'] ?? $it['quantity'] ?? 1),
+                    'unit_price_usd' => (float)($it['price_usd'] ?? $it['unit_price_usd'] ?? 0),
+                    'total_price_usd' => (float)($it['total_usd'] ?? $it['total_price_usd'] ?? 0),
+                ];
+            }
+
+            $salesData[] = [
+                'client_id' => $sr['order_uid'] ?: ('sale-' . $sr['id']),
+                'invoice_number' => $sr['order_number'] ?: ('INV-' . $sr['id']),
+                'customer_phone' => $sr['customer_phone'] ?? '',
+                'cashier_name' => $sr['cashier_name'] ?? 'Staff',
+                'total_amount_usd' => (float)($sr['total_usd'] ?? 0),
+                'total_amount_khr' => (float)($sr['total_khr'] ?? 0),
+                'tax_amount_usd' => (float)($sr['tax_usd'] ?? 0),
+                'discount_amount_usd' => (float)($sr['discount_usd'] ?? 0),
+                'payment_method' => $sr['payment_method'] ?? 'cash_usd',
+                'khqr_reference' => $sr['khqr_ref'] ?? $sr['payment_ref'] ?? null,
+                'khqr_status' => $sr['khqr_status'] ?? (($sr['payment_status'] ?? '') === 'paid' ? 'verified' : 'na'),
+                'status' => $sr['status'] ?? 'completed',
+                'local_created_at' => $sr['created_at'] ?? date('Y-m-d H:i:s'),
+                'items' => $cleanItems
+            ];
         }
 
         // Job orders
-        $jobsStmt = $pdo->query("SELECT * FROM order_tasks WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 100");
-        $jobsData = $jobsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $jobsStmt = $pdo->query("
+            SELECT ot.*, 
+                   o.order_number, 
+                   o.customer_name, 
+                   o.plate_number AS vehicle_plate, 
+                   o.vehicle_model, 
+                   b.bay_number, 
+                   u.full_name AS technician_name
+            FROM order_tasks ot
+            LEFT JOIN orders o ON ot.order_id = o.id
+            LEFT JOIN bays b ON ot.bay_id = b.id
+            LEFT JOIN users u ON ot.assigned_user_id = u.id
+            WHERE ot.is_synced = 0 OR ot.is_synced IS NULL
+            ORDER BY ot.id ASC
+            LIMIT 100
+        ");
+        $jobsRows = $jobsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $jobsData = [];
+        foreach ($jobsRows as $jr) {
+            $dur = (int)($jr['actual_duration_minutes'] ?: $jr['base_duration_minutes'] ?: 30);
+            $eff = !empty($jr['took_longer_than_expected']) ? 'Delayed' : 'On Time';
+            $jobsData[] = [
+                'client_id' => 'job-' . $jr['id'],
+                'order_number' => $jr['order_number'] ?: ('JOB-' . $jr['id']),
+                'customer_name' => $jr['customer_name'] ?? 'Walk-in',
+                'vehicle_plate' => $jr['vehicle_plate'] ?? 'N/A',
+                'vehicle_model' => $jr['vehicle_model'] ?? 'N/A',
+                'bay_number' => $jr['bay_number'] ? ('Bay ' . $jr['bay_number']) : 'Bay 1',
+                'technician_name' => $jr['technician_name'] ?? 'Technician',
+                'service_name' => $jr['title'] ?? 'Service',
+                'status' => $jr['status'] ?? 'completed',
+                'start_time' => $jr['started_at'],
+                'end_time' => $jr['completed_at'],
+                'duration_minutes' => $dur,
+                'efficiency_rating' => $eff,
+                'notes' => $jr['notes'],
+                'local_created_at' => $jr['created_at'] ?? date('Y-m-d H:i:s')
+            ];
+        }
 
         // Stock movements
         $stockStmt = $pdo->query("SELECT * FROM stock_movements WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 100");
-        $stockData = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
+        $stockRows = $stockStmt->fetchAll(PDO::FETCH_ASSOC);
+        $stockData = [];
+        foreach ($stockRows as $sr) {
+            $stockData[] = [
+                'client_id' => $sr['movement_uid'] ?: ('sm-' . $sr['id']),
+                'item_id' => (int)($sr['product_id'] ?? 0),
+                'movement_type' => $sr['movement_type'] ?? 'sale_deduction',
+                'quantity' => (float)($sr['quantity'] ?? 0),
+                'balance_after' => (float)($sr['new_qty'] ?? 0),
+                'unit_cost' => 0.00,
+                'reference_type' => 'sale',
+                'reference_id' => (string)($sr['reference_id'] ?? ''),
+                'notes' => $sr['notes'] ?? 'Local stock movement',
+                'created_by' => $sr['performer_name'] ?? 'local_pos'
+            ];
+        }
 
-        // Shifts & Z-reports
-        $shiftStmt = $pdo->query("SELECT * FROM pos_closings WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 50");
-        $shiftData = $shiftStmt->fetchAll(PDO::FETCH_ASSOC);
+        // Shifts & Z-reports (from both pos_closings and pos_daily_closes)
+        $shiftData = [];
+        $posClosingsStmt = $pdo->query("SELECT * FROM pos_closings WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 50");
+        $posClosings = $posClosingsStmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($posClosings as $sc) {
+            $shiftData[] = [
+                'client_id' => 'shift-' . $sc['id'],
+                'z_report_number' => $sc['z_report_number'] ?: ('Z-' . $sc['id']),
+                'register_name' => $sc['device_name'] ?: ('POS-' . ($sc['pos_device_id'] ?? 1)),
+                'cashier_name' => $sc['cashier_name'] ?? 'Cashier',
+                'shift_start' => ($sc['close_date'] ?? date('Y-m-d')) . ' 08:00:00',
+                'shift_end' => $sc['closed_at'] ?? $sc['created_at'] ?? date('Y-m-d H:i:s'),
+                'opening_cash_usd' => (float)($sc['opening_cash_usd'] ?? 0),
+                'opening_cash_khr' => 0.00,
+                'expected_cash_usd' => (float)($sc['expected_cash_usd'] ?? 0),
+                'expected_cash_khr' => 0.00,
+                'counted_cash_usd' => (float)($sc['counted_cash_usd'] ?? 0),
+                'counted_cash_khr' => (float)($sc['counted_cash_khr'] ?? 0),
+                'variance_usd' => (float)($sc['difference_usd'] ?? 0),
+                'variance_khr' => 0.00,
+                'status' => $sc['status'] ?? 'balanced',
+                'notes' => $sc['notes'] ?? 'Shift close'
+            ];
+        }
+
+        // Daily closes
+        try {
+            $dailyStmt = $pdo->query("SELECT * FROM pos_daily_closes WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 50");
+            $dailyClosings = $dailyStmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($dailyClosings as $dc) {
+                $shiftData[] = [
+                    'client_id' => 'shift-dc-' . $dc['id'],
+                    'z_report_number' => $dc['z_report_number'] ?: ('Z-DC-' . $dc['id']),
+                    'register_name' => $dc['device_name'] ?: ('POS-' . ($dc['pos_device_id'] ?? 1)),
+                    'cashier_name' => $dc['closed_by_name'] ?? 'Cashier',
+                    'shift_start' => ($dc['close_date'] ?? date('Y-m-d')) . ' ' . (!empty($dc['opening_time']) ? $dc['opening_time'] : '08:00:00'),
+                    'shift_end' => $dc['closed_at'] ?? $dc['created_at'] ?? date('Y-m-d H:i:s'),
+                    'opening_cash_usd' => 0.00,
+                    'opening_cash_khr' => 0.00,
+                    'expected_cash_usd' => (float)($dc['expected_cash_usd'] ?? 0),
+                    'expected_cash_khr' => 0.00,
+                    'counted_cash_usd' => (float)($dc['counted_cash_usd'] ?? 0),
+                    'counted_cash_khr' => (float)($dc['counted_cash_khr'] ?? 0),
+                    'variance_usd' => (float)($dc['difference_usd'] ?? 0),
+                    'variance_khr' => 0.00,
+                    'status' => $dc['status'] ?? 'balanced',
+                    'notes' => $dc['notes'] ?? 'Daily close'
+                ];
+            }
+        } catch (Exception $e) {}
 
         // Timecards
         $tcStmt = $pdo->query("SELECT * FROM staff_timecards WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 100");
-        $tcData = $tcStmt->fetchAll(PDO::FETCH_ASSOC);
+        $tcRows = $tcStmt->fetchAll(PDO::FETCH_ASSOC);
+        $tcData = [];
+        foreach ($tcRows as $tc) {
+            $tcData[] = [
+                'client_id' => $tc['timecard_uid'] ?: ('tc-' . $tc['id']),
+                'user_id' => (int)$tc['user_id'],
+                'clock_in' => $tc['clock_in'],
+                'clock_out' => $tc['clock_out'],
+                'total_hours' => (float)$tc['total_hours'],
+                'status' => $tc['status'],
+                'notes' => $tc['notes']
+            ];
+        }
 
         // Audit logs
         $alStmt = $pdo->query("SELECT * FROM audit_logs WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 100");
-        $alData = $alStmt->fetchAll(PDO::FETCH_ASSOC);
+        $alRows = $alStmt->fetchAll(PDO::FETCH_ASSOC);
+        $alData = [];
+        foreach ($alRows as $al) {
+            $alData[] = [
+                'client_id' => $al['log_uid'] ?: ('aud-' . $al['id']),
+                'username' => $al['username'] ?? 'staff',
+                'role' => $al['role'] ?? 'Staff',
+                'action' => $al['action'] ?? 'ACTION',
+                'entity_type' => $al['entity_type'] ?? 'system',
+                'entity_id' => (string)($al['entity_id'] ?? ''),
+                'details' => $al['details'],
+                'created_at' => $al['created_at']
+            ];
+        }
 
         // CRM events (loyalty transactions + offline-queued reminder events)
-        $crmStmt = $pdo->query("SELECT * FROM loyalty_transactions WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 100");
-        $crmData = $crmStmt->fetchAll(PDO::FETCH_ASSOC);
+        $crmStmt = $pdo->query("
+            SELECT lt.*, c.phone AS customer_phone, c.full_name AS customer_name, c.plate_number AS vehicle_plate
+            FROM loyalty_transactions lt
+            LEFT JOIN customers c ON lt.customer_id = c.id
+            WHERE lt.is_synced = 0 OR lt.is_synced IS NULL 
+            ORDER BY lt.id ASC 
+            LIMIT 100
+        ");
+        $crmRows = $crmStmt->fetchAll(PDO::FETCH_ASSOC);
+        $crmData = [];
+        foreach ($crmRows as $crm) {
+            $crmData[] = [
+                'client_id' => 'crm-' . $crm['id'],
+                'phone' => $crm['customer_phone'] ?? '',
+                'full_name' => $crm['customer_name'] ?? 'Customer',
+                'vehicle_plate' => $crm['vehicle_plate'] ?? '',
+                'points_added' => (int)($crm['points'] ?? 0),
+                'spend_added' => 0.00,
+                'visit_date' => date('Y-m-d', strtotime($crm['created_at']))
+            ];
+        }
 
         $msgStmt = $pdo->query("SELECT * FROM crm_message_queue WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 100");
-        $msgData = $msgStmt->fetchAll(PDO::FETCH_ASSOC);
-        foreach ($msgData as $md) {
-            $crmData[] = $md;
+        $msgRows = $msgStmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($msgRows as $md) {
+            $meta = !empty($md['metadata_json']) ? json_decode($md['metadata_json'], true) : [];
+            $crmData[] = [
+                'event_type' => $md['reminder_type'] ?? 'reminder_sms',
+                'event_uid' => $md['event_uid'] ?: ('msg-' . $md['id']),
+                'customer_phone' => $md['customer_phone'] ?? '',
+                'customer_name' => $meta['customer_name'] ?? 'Customer',
+                'token_hash' => $meta['token_hash'] ?? '',
+                'raw_token' => $meta['raw_token'] ?? '',
+                'token_expires_at' => $meta['token_expires_at'] ?? '',
+                'attempt_count' => (int)($meta['attempt_count'] ?? 1),
+                'event_timestamp' => $md['created_at'],
+                'notes' => $md['message_body'] ?? ''
+            ];
         }
 
         // Upsell logs
         $upsellStmt = $pdo->query("SELECT * FROM upsell_logs WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 100");
-        $upsellData = $upsellStmt->fetchAll(PDO::FETCH_ASSOC);
+        $upsellRows = $upsellStmt->fetchAll(PDO::FETCH_ASSOC);
+        $upsellData = [];
+        foreach ($upsellRows as $ul) {
+            $upsellData[] = [
+                'client_id' => $ul['log_uid'] ?: ('up-' . $ul['id']),
+                'rule_name' => $ul['rule_name'] ?? '',
+                'cashier_name' => $ul['cashier_name'] ?? 'Cashier',
+                'order_id' => (int)$ul['order_id'],
+                'plate_number' => $ul['plate_number'] ?? '',
+                'status' => $ul['status'] ?? 'offered',
+                'reason_declined' => $ul['reason_declined'],
+                'offered_at' => $ul['offered_at'],
+                'action_at' => $ul['action_at']
+            ];
+        }
 
         // Performance metrics (rolling 7-day snapshot)
         $perfData = PerformanceAnalytics::getDailyPerformanceMetrics($pdo, 7);
@@ -160,89 +355,46 @@ class CloudSyncManager {
             ];
         }
 
-        // 2. Pack payload
+        // 2. Pack contract payload {shop_code, push_data:{sales, job_orders, stock_movements, shifts_and_zreports, audit_logs, crm_events, upsell_logs, timecards, performance_metrics}}
         $payload = [
-            'shop_id' => $shopId,
             'shop_code' => $shopCode,
-            'timestamp' => time(),
-            'sales' => $salesData,
-            'job_orders' => $jobsData,
-            'stock_movements' => $stockData,
-            'shifts' => $shiftData,
-            'timecards' => $tcData,
-            'audit_logs' => $alData,
-            'crm_events' => $crmData,
-            'upsell_logs' => $upsellData,
-            'performance_metrics' => $perfData
+            'push_data' => [
+                'sales' => $salesData,
+                'job_orders' => $jobsData,
+                'stock_movements' => $stockData,
+                'shifts_and_zreports' => $shiftData,
+                'audit_logs' => $alData,
+                'crm_events' => $crmData,
+                'upsell_logs' => $upsellData,
+                'timecards' => $tcData,
+                'performance_metrics' => $perfData
+            ]
         ];
 
-        $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
-        // Gzip compression
-        $compressedPayload = gzencode($jsonPayload, 6);
-
-        // 3. Security Signing: Timestamp + Nonce + HMAC-SHA256
-        $timestamp = time();
-        $nonce = bin2hex(random_bytes(16));
-        $signature = hash_hmac('sha256', "{$timestamp}.{$nonce}." . $compressedPayload, $cloudSecret);
-
-        $url = rtrim($cloudUrl, '/') . (strpos($cloudUrl, '?') === false ? '?' : '&') . 'action=push';
-
-        // 4. Send with retry loop
-        $attempt = 0;
-        $response = null;
-        $httpCode = 0;
-        $lastError = '';
-
-        while ($attempt < $maxRetries) {
-            $attempt++;
-
-            $ch = curl_init($url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $compressedPayload);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Content-Type: application/json',
-                'Content-Encoding: gzip',
-                'X-Shop-Token: ' . $cloudToken,
-                'X-Shop-Timestamp: ' . $timestamp,
-                'X-Shop-Nonce: ' . $nonce,
-                'X-Shop-Signature: ' . $signature
-            ]);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $curlError = curl_error($ch);
-            curl_close($ch);
-
-            if ($httpCode === 200 && $response) {
-                break;
-            }
-
-            $lastError = $curlError ?: "HTTP Code {$httpCode}: {$response}";
-            if ($attempt < $maxRetries) {
-                // Wait before next retry
-                if ($retryDelaySeconds > 0) {
-                    sleep($retryDelaySeconds);
-                }
-            }
-        }
-
+        // 3. Send using private request helper (with retry loop, gzip, and HMAC signature)
+        $reqRes = self::request($payload, $maxRetries, $retryDelaySeconds);
         $durationMs = (int)round((microtime(true) - $startTime) * 1000);
 
-        if ($httpCode !== 200 || !$response) {
-            self::logSync($pdo, 'push', 'failed', $totalRecordsToSend, 0, 0, $durationMs, "Sync failed after {$attempt} attempts: {$lastError}");
+        if (!$reqRes['success']) {
+            $err = $reqRes['message'] ?? ($reqRes['error'] ?? 'Sync failed');
+            self::logSync($pdo, 'push', 'failed', $totalRecordsToSend, 0, 0, $durationMs, $err);
             return [
                 'success' => false,
-                'error' => 'cloud_communication_failed',
-                'attempts' => $attempt,
-                'message' => "Failed to reach cloud server after {$attempt} attempts: {$lastError}"
+                'error' => $reqRes['error'] ?? 'push_failed',
+                'attempts' => $reqRes['attempts'] ?? 1,
+                'message' => $err
             ];
         }
 
-        $resJson = json_decode($response, true);
-        if (!is_array($resJson) || empty($resJson['success'])) {
-            $err = $resJson['message'] ?? 'Cloud rejected payload';
+        $resJson = $reqRes['data'] ?? [];
+        $isCloudSuccess = (
+            (!isset($resJson['status']) && !isset($resJson['success'])) ||
+            (isset($resJson['status']) && $resJson['status'] === 'success') ||
+            (!empty($resJson['success']))
+        );
+
+        if (!$isCloudSuccess) {
+            $err = $resJson['message'] ?? 'Cloud reported failure or rejected push payload.';
             self::logSync($pdo, 'push', 'failed', $totalRecordsToSend, 0, 0, $durationMs, $err);
             return [
                 'success' => false,
@@ -251,71 +403,97 @@ class CloudSyncManager {
             ];
         }
 
-        // 5. Mark confirmed records as is_synced = 1
-        $confirmed = $resJson['confirmed_ids'] ?? [];
+        // 4. Mark rows is_synced = 1 ONLY for the ids in confirmed_ids of that entity
+        $confirmed = $resJson['confirmed_ids'] ?? $resJson['stats']['confirmed_ids'] ?? [];
         $now = date('Y-m-d H:i:s');
+        $confirmedTotal = 0;
 
         // Confirm sales
-        if (!empty($confirmed['sales'])) {
+        if (!empty($confirmed['sales']) && is_array($confirmed['sales'])) {
             $inList = implode(',', array_map([$pdo, 'quote'], $confirmed['sales']));
-            $pdo->exec("UPDATE orders SET is_synced = 1, synced_at = '{$now}' WHERE order_number IN ({$inList}) OR order_uid IN ({$inList})");
+            $pdo->exec("UPDATE orders SET is_synced = 1, synced_at = '{$now}' WHERE order_uid IN ({$inList}) OR order_number IN ({$inList}) OR CONCAT('sale-', id) IN ({$inList})");
+            $confirmedTotal += count($confirmed['sales']);
         }
 
         // Confirm job orders
-        if (!empty($confirmed['job_orders'])) {
+        if (!empty($confirmed['job_orders']) && is_array($confirmed['job_orders'])) {
             foreach ($confirmed['job_orders'] as $jUid) {
-                $id = (int)str_replace('JOB-', '', (string)$jUid);
+                $id = (int)str_replace('job-', '', str_ireplace('JOB-', '', (string)$jUid));
                 if ($id > 0) {
                     $pdo->exec("UPDATE order_tasks SET is_synced = 1, synced_at = '{$now}' WHERE id = {$id}");
+                    $confirmedTotal++;
                 }
             }
         }
 
         // Confirm stock movements
-        if (!empty($confirmed['stock_movements'])) {
+        if (!empty($confirmed['stock_movements']) && is_array($confirmed['stock_movements'])) {
             $inList = implode(',', array_map([$pdo, 'quote'], $confirmed['stock_movements']));
-            $pdo->exec("UPDATE stock_movements SET is_synced = 1, synced_at = '{$now}' WHERE movement_uid IN ({$inList}) OR id IN ({$inList})");
+            $pdo->exec("UPDATE stock_movements SET is_synced = 1, synced_at = '{$now}' WHERE movement_uid IN ({$inList}) OR CONCAT('sm-', id) IN ({$inList})");
+            $confirmedTotal += count($confirmed['stock_movements']);
         }
 
-        // Confirm shifts
-        if (!empty($confirmed['shifts'])) {
-            foreach ($confirmed['shifts'] as $shUid) {
-                $id = (int)str_replace('SHIFT-', '', $shUid);
-                if ($id > 0) $pdo->exec("UPDATE pos_closings SET is_synced = 1, synced_at = '{$now}' WHERE id = {$id}");
+        // Confirm shifts and zreports
+        $confirmedShifts = $confirmed['shifts_and_zreports'] ?? $confirmed['shifts'] ?? [];
+        if (!empty($confirmedShifts) && is_array($confirmedShifts)) {
+            foreach ($confirmedShifts as $shUid) {
+                $uidStr = (string)$shUid;
+                if (str_starts_with($uidStr, 'shift-dc-')) {
+                    $dcId = (int)substr($uidStr, 9);
+                    if ($dcId > 0) {
+                        try { $pdo->exec("UPDATE pos_daily_closes SET is_synced = 1, synced_at = '{$now}' WHERE id = {$dcId}"); } catch (Exception $e) {}
+                        $confirmedTotal++;
+                    }
+                } else {
+                    $id = (int)str_replace('shift-', '', str_ireplace('SHIFT-', '', $uidStr));
+                    if ($id > 0) {
+                        $pdo->exec("UPDATE pos_closings SET is_synced = 1, synced_at = '{$now}' WHERE id = {$id}");
+                        $confirmedTotal++;
+                    }
+                }
             }
         }
 
         // Confirm timecards
-        if (!empty($confirmed['timecards'])) {
+        if (!empty($confirmed['timecards']) && is_array($confirmed['timecards'])) {
             $inList = implode(',', array_map([$pdo, 'quote'], $confirmed['timecards']));
-            $pdo->exec("UPDATE staff_timecards SET is_synced = 1, synced_at = '{$now}' WHERE timecard_uid IN ({$inList}) OR id IN ({$inList})");
+            $pdo->exec("UPDATE staff_timecards SET is_synced = 1, synced_at = '{$now}' WHERE timecard_uid IN ({$inList}) OR CONCAT('tc-', id) IN ({$inList})");
+            $confirmedTotal += count($confirmed['timecards']);
         }
 
         // Confirm audit logs
-        if (!empty($confirmed['audit_logs'])) {
+        if (!empty($confirmed['audit_logs']) && is_array($confirmed['audit_logs'])) {
             foreach ($confirmed['audit_logs'] as $alUid) {
-                $id = (int)str_replace('AUD-', '', $alUid);
-                if ($id > 0) $pdo->exec("UPDATE audit_logs SET is_synced = 1, synced_at = '{$now}' WHERE id = {$id}");
+                $id = (int)str_replace('aud-', '', str_ireplace('AUD-', '', (string)$alUid));
+                if ($id > 0) {
+                    $pdo->exec("UPDATE audit_logs SET is_synced = 1, synced_at = '{$now}' WHERE id = {$id}");
+                    $confirmedTotal++;
+                }
             }
         }
 
-        // Confirm CRM events (loyalty transactions + crm_message_queue)
-        if (!empty($confirmed['crm_events'])) {
+        // Confirm CRM events
+        if (!empty($confirmed['crm_events']) && is_array($confirmed['crm_events'])) {
             foreach ($confirmed['crm_events'] as $crmUid) {
                 $uidStr = (string)$crmUid;
-                if (str_contains($uidStr, 'MSG-')) {
-                    $pdo->prepare("UPDATE crm_message_queue SET is_synced = 1, synced_at = '{$now}', status = 'sent', sent_at = '{$now}' WHERE event_uid = ?")->execute([$uidStr]);
+                if (str_starts_with($uidStr, 'crm-') || is_numeric($uidStr)) {
+                    $id = (int)str_replace('crm-', '', $uidStr);
+                    if ($id > 0) {
+                        $pdo->exec("UPDATE loyalty_transactions SET is_synced = 1, synced_at = '{$now}' WHERE id = {$id}");
+                        $confirmedTotal++;
+                    }
                 } else {
-                    $id = (int)str_replace('CRM-', '', $uidStr);
-                    if ($id > 0) $pdo->exec("UPDATE loyalty_transactions SET is_synced = 1, synced_at = '{$now}' WHERE id = {$id}");
+                    $pdo->prepare("UPDATE crm_message_queue SET is_synced = 1, synced_at = '{$now}', status = 'sent', sent_at = '{$now}' WHERE event_uid = ?")->execute([$uidStr]);
+                    $confirmedTotal++;
                 }
             }
         }
 
         // Confirm upsell logs
-        if (!empty($confirmed['upsell_logs'])) {
+        if (!empty($confirmed['upsell_logs']) && is_array($confirmed['upsell_logs'])) {
             $inList = implode(',', array_map([$pdo, 'quote'], $confirmed['upsell_logs']));
-            $pdo->exec("UPDATE upsell_logs SET is_synced = 1, synced_at = '{$now}' WHERE log_uid IN ({$inList})");
+            $pdo->exec("UPDATE upsell_logs SET is_synced = 1, synced_at = '{$now}' WHERE log_uid IN ({$inList}) OR CONCAT('up-', id) IN ({$inList})");
+            $confirmedTotal += count($confirmed['upsell_logs']);
         }
 
         // Record last sync timestamp
@@ -327,9 +505,11 @@ class CloudSyncManager {
             'success' => true,
             'sent_count' => $totalRecordsToSend,
             'records_sent' => $totalRecordsToSend,
+            'confirmed_count' => $confirmedTotal,
             'duration_ms' => $durationMs,
             'last_sync_at' => $now,
-            'confirmed_ids' => $confirmed
+            'confirmed_ids' => $confirmed,
+            'cloud_response' => $resJson
         ];
     }
 
