@@ -125,3 +125,49 @@ To ensure shop security and local hardware independence, settings are strictly s
 3. **Local Edit Protection**: If a local record was modified after the last pull cycle (`local_updated_at > last_pull_at`), the cloud version does **NOT** overwrite the local change. Instead:
    - A row is created in `sync_conflicts` with `status = 'pending'`, capturing `local_data` and `cloud_data`.
    - The local record remains untouched until a manager reviews the conflict on the Sync Monitor screen.
+
+---
+
+## 8. Staff Timecards Push Mapping (`staff_timecards` -> `push_data.timecards`)
+
+Pushes employee attendance and shift records to Cloud Master.
+
+| Cloud Field (`timecards`) | Local Source Table & Field | Data Type | Notes & Derivation |
+| :--- | :--- | :--- | :--- |
+| `client_id` | `staff_timecards.timecard_uid` | VARCHAR(64) | Fallback: `'tc-' . id` |
+| `username` | `users.username` (via `user_id`) | VARCHAR(50) | Staff username from joined `users` table. |
+| `role` | `users.role` (via `user_id`) | VARCHAR(50) | Role at shift time (capitalized); fallback `'Technician'`. |
+| `shop_code` | `settings.shop_code` / `cloud_shop_id` | VARCHAR(30) | Authenticated shop identifier. |
+| `clock_in` | `staff_timecards.clock_in` | DATETIME | Clock-in timestamp (`YYYY-MM-DD HH:MM:SS`). |
+| `clock_out` | `staff_timecards.clock_out` | DATETIME | Clock-out timestamp (or `NULL` if shift active). |
+| `total_hours` | `staff_timecards.total_hours` | DECIMAL(6,2) | Calculated hours duration. |
+| `hourly_rate_usd` | `settings.labor_hourly_rate_usd` | DECIMAL(10,2) | *(No direct local column in `staff_timecards`)* Derived from shop hourly labor setting fallback `0.00`. |
+| `notes` | `staff_timecards.notes` | TEXT | Shift remarks or supervisor approval. |
+
+> [!NOTE]
+> **Fields with no direct local source**:
+> - `hourly_rate_usd`: `staff_timecards` does not store per-record hourly pay; resolved dynamically from shop-level setting `labor_hourly_rate_usd` or default `0.00`.
+
+---
+
+## 9. Upsell Logs Push Mapping (`upsell_logs` -> `push_data.upsell_logs`)
+
+Pushes customer upsell offers, acceptance status, and objection feedback to Cloud Master.
+
+| Cloud Field (`upsell_logs`) | Local Source Table & Field | Data Type | Notes & Derivation |
+| :--- | :--- | :--- | :--- |
+| `client_id` | `upsell_logs.log_uid` | VARCHAR(64) | Fallback: `'up-' . id` |
+| `shop_code` | `settings.shop_code` / `cloud_shop_id` | VARCHAR(30) | Authenticated shop identifier. |
+| `username` | `users.username` (via `cashier_id`) | VARCHAR(50) | Fallback: `upsell_logs.cashier_name` or `'cashier'`. |
+| `invoice_number` | `orders.order_number` (via `order_id`)| VARCHAR(50) | Joined from `orders` table; fallback `'INV-' . order_id` or `NULL`. |
+| `customer_phone` | `orders.customer_phone` / `customers.phone` | VARCHAR(50) | Joined from `orders` or `customers` via `customer_id`. |
+| `item_name` | `upsell_rules.offer_headline_en` / `rule_name` | VARCHAR(150) | Headline from `upsell_rules` or `upsell_logs.rule_name`. |
+| `accepted` | `upsell_logs.status` | TINYINT(1) | `1` if `status === 'accepted'`, `0` if declined/rejected. |
+| `offered_price_usd`| `upsell_rules.offer_price_usd` | DECIMAL(10,2) | *(No direct local column in `upsell_logs`)* Joined from `upsell_rules.offer_price_usd` or default `0.00`. |
+| `notes` | `upsell_logs.reason_declined` | TEXT | *(No general `notes` column in `upsell_logs`)* Sourced from `reason_declined` or empty string. |
+
+> [!NOTE]
+> **Fields with no direct local source**:
+> - `offered_price_usd`: `upsell_logs` does not store the offered dollar amount; resolved from joined `upsell_rules.offer_price_usd` (or `0.00`).
+> - `notes`: `upsell_logs` stores customer decline reasons in `reason_declined`, which is mapped to cloud `notes`.
+

@@ -250,19 +250,29 @@ class CloudSyncManager {
             }
         } catch (Exception $e) {}
 
-        // Timecards
-        $tcStmt = $pdo->query("SELECT * FROM staff_timecards WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 100");
+        // Timecards (contract fields: client_id, username, role, shop_code, clock_in, clock_out, total_hours, hourly_rate_usd, notes)
+        $tcStmt = $pdo->query("
+            SELECT st.*, u.username, u.role AS user_role
+            FROM staff_timecards st
+            LEFT JOIN users u ON st.user_id = u.id
+            WHERE st.is_synced = 0 OR st.is_synced IS NULL
+            ORDER BY st.id ASC
+            LIMIT 100
+        ");
         $tcRows = $tcStmt->fetchAll(PDO::FETCH_ASSOC);
+        $hourlyRateSetting = (float)get_setting('labor_hourly_rate_usd', 0.0);
         $tcData = [];
         foreach ($tcRows as $tc) {
             $tcData[] = [
                 'client_id' => $tc['timecard_uid'] ?: ('tc-' . $tc['id']),
-                'user_id' => (int)$tc['user_id'],
+                'username' => !empty($tc['username']) ? $tc['username'] : ('user_' . $tc['user_id']),
+                'role' => !empty($tc['user_role']) ? ucfirst((string)$tc['user_role']) : 'Technician',
+                'shop_code' => $shopCode,
                 'clock_in' => $tc['clock_in'],
-                'clock_out' => $tc['clock_out'],
-                'total_hours' => (float)$tc['total_hours'],
-                'status' => $tc['status'],
-                'notes' => $tc['notes']
+                'clock_out' => $tc['clock_out'] ?: null,
+                'total_hours' => round((float)($tc['total_hours'] ?? 0.0), 2),
+                'hourly_rate_usd' => $hourlyRateSetting,
+                'notes' => (string)($tc['notes'] ?? '')
             ];
         }
 
@@ -324,21 +334,44 @@ class CloudSyncManager {
             ];
         }
 
-        // Upsell logs
-        $upsellStmt = $pdo->query("SELECT * FROM upsell_logs WHERE is_synced = 0 OR is_synced IS NULL ORDER BY id ASC LIMIT 100");
+        // Upsell logs (contract fields: client_id, shop_code, username, invoice_number, customer_phone, item_name, accepted, offered_price_usd, notes)
+        $upsellStmt = $pdo->query("
+            SELECT ul.*, 
+                   u.username AS cashier_username,
+                   o.order_number AS invoice_number,
+                   o.customer_phone AS order_customer_phone,
+                   c.phone AS customer_phone,
+                   ur.offer_price_usd,
+                   ur.offer_headline_en
+            FROM upsell_logs ul
+            LEFT JOIN users u ON ul.cashier_id = u.id
+            LEFT JOIN orders o ON ul.order_id = o.id
+            LEFT JOIN customers c ON ul.customer_id = c.id
+            LEFT JOIN upsell_rules ur ON ul.rule_id = ur.id
+            WHERE ul.is_synced = 0 OR ul.is_synced IS NULL
+            ORDER BY ul.id ASC
+            LIMIT 100
+        ");
         $upsellRows = $upsellStmt->fetchAll(PDO::FETCH_ASSOC);
         $upsellData = [];
         foreach ($upsellRows as $ul) {
+            $phone = !empty($ul['order_customer_phone']) ? $ul['order_customer_phone'] : (!empty($ul['customer_phone']) ? $ul['customer_phone'] : null);
+            $invNum = !empty($ul['invoice_number']) ? $ul['invoice_number'] : ($ul['order_id'] ? ('INV-' . $ul['order_id']) : null);
+            $staffUser = !empty($ul['cashier_username']) ? $ul['cashier_username'] : (!empty($ul['cashier_name']) ? $ul['cashier_name'] : 'cashier');
+            $itemName = !empty($ul['offer_headline_en']) ? $ul['offer_headline_en'] : (!empty($ul['rule_name']) ? $ul['rule_name'] : 'Upsell Offer');
+            $isAccepted = (strtolower(trim((string)$ul['status'])) === 'accepted') ? 1 : 0;
+            $offeredPrice = isset($ul['offer_price_usd']) ? (float)$ul['offer_price_usd'] : 0.00;
+
             $upsellData[] = [
                 'client_id' => $ul['log_uid'] ?: ('up-' . $ul['id']),
-                'rule_name' => $ul['rule_name'] ?? '',
-                'cashier_name' => $ul['cashier_name'] ?? 'Cashier',
-                'order_id' => (int)$ul['order_id'],
-                'plate_number' => $ul['plate_number'] ?? '',
-                'status' => $ul['status'] ?? 'offered',
-                'reason_declined' => $ul['reason_declined'],
-                'offered_at' => $ul['offered_at'],
-                'action_at' => $ul['action_at']
+                'shop_code' => $shopCode,
+                'username' => $staffUser,
+                'invoice_number' => $invNum,
+                'customer_phone' => $phone,
+                'item_name' => $itemName,
+                'accepted' => $isAccepted,
+                'offered_price_usd' => round($offeredPrice, 2),
+                'notes' => (string)($ul['reason_declined'] ?? '')
             ];
         }
 
