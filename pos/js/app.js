@@ -694,8 +694,11 @@ class PosApp {
                 this.loadSettingsForm();
                 this.showAlert(
                     'settingsAlert',
-                    '<strong>សូមស្វាគមន៍ (Welcome)!</strong> សូមពិនិត្យអាសយដ្ឋាន Back Office, Device ID, និង Device Key រួចចុច <strong>"Test Link"</strong> ដើម្បីភ្ជាប់ទំនាក់ទំនងដំបូង។',
-                    'info'
+                    {
+                        type: 'info',
+                        title: 'សូមស្វាគមន៍ (Welcome)!',
+                        message: 'សូមពិនិត្យអាសយដ្ឋាន Back Office, Device ID, និង Device Key រួចចុច "Test Link" ដើម្បីភ្ជាប់ទំនាក់ទំនងដំបូង។'
+                    }
                 );
                 document.getElementById('modalSettings')?.classList.add('open');
             }, 350);
@@ -9347,8 +9350,11 @@ class PosApp {
             btn.innerHTML = `<i class="fa-solid fa-tower-broadcast"></i> Test Link`;
             this.showAlert(
                 'settingsAlert',
-                '<strong>Connection Failed:</strong> Please enter both the Back Office Address (URL) and Device API Key before testing.',
-                'danger'
+                {
+                    type: 'danger',
+                    title: 'Connection Failed:',
+                    message: 'Please enter both the Back Office Address (URL) and Device API Key before testing.'
+                }
             );
             return;
         }
@@ -9368,24 +9374,33 @@ class PosApp {
                 const devName = res.device?.name || testUid || 'POS Terminal';
                 this.showAlert(
                     'settingsAlert',
-                    `<i class="fa-solid fa-circle-check" style="font-size: 1.2rem; margin-right: 6px;"></i> <div><strong>Connection Successful!</strong><br>Successfully linked to Back Office at <code>${testUrl}</code>.<br>Approved Device: <strong>${devName}</strong> (Status: Active).</div>`,
-                    'success'
+                    {
+                        type: 'success',
+                        title: 'Connection Successful!',
+                        message: `Successfully linked to Back Office at ${testUrl}. Approved Device: ${devName} (Status: Active).`
+                    }
                 );
             } else {
                 // Connection failed! Clear red message with reason
                 this.setOnlineStatus(false);
                 this.showAlert(
                     'settingsAlert',
-                    `<i class="fa-solid fa-circle-xmark" style="font-size: 1.2rem; margin-right: 6px;"></i> <div><strong>Connection Failed:</strong><br>${res.error}</div>`,
-                    'danger'
+                    {
+                        type: 'danger',
+                        title: 'Connection Failed:',
+                        message: res.error || 'Server rejected connection.'
+                    }
                 );
             }
         } catch (e) {
             this.setOnlineStatus(false);
             this.showAlert(
                 'settingsAlert',
-                `<i class="fa-solid fa-circle-xmark" style="font-size: 1.2rem; margin-right: 6px;"></i> <div><strong>Connection Failed:</strong><br>${e.message || 'Unable to connect to server.'}</div>`,
-                'danger'
+                {
+                    type: 'danger',
+                    title: 'Connection Failed:',
+                    message: e.message || 'Unable to connect to server.'
+                }
             );
         } finally {
             btn.disabled = false;
@@ -9420,35 +9435,68 @@ class PosApp {
         try {
             const res = await PosThermalPrinter.testPrint();
             resultBox.style.display = 'flex';
+            resultBox.style.alignItems = 'flex-start';
+            resultBox.style.gap = '8px';
+            resultBox.textContent = '';
             if (res.success) {
                 resultBox.className = 'alert alert-success';
-                resultBox.innerHTML = `
-                    <i class="fa-solid fa-circle-check" style="color: #16a34a; font-size: 1.2rem; margin-right: 6px;"></i>
-                    <div>
-                        <strong>តេស្តព្រីនបានជោគជ័យ (Test Print Success)!</strong><br>
-                        បានបញ្ជូនសំណៅតេស្តទៅកាន់ម៉ាស៊ីនព្រីន <code>${tempPrinterIp}:${tempPrinterPort}</code> (${tempPrinterType.toUpperCase()})។ វិក្កយបត្របានចេញ និងកាត់ក្រដាសដោយជោគជ័យ។
-                    </div>
-                `;
+                const icon = document.createElement('i');
+                icon.className = 'fa-solid fa-circle-check';
+                icon.style.color = '#16a34a';
+                icon.style.fontSize = '1.2rem';
+                icon.style.marginTop = '2px';
+                resultBox.appendChild(icon);
+
+                const div = document.createElement('div');
+                const strong = document.createElement('strong');
+                strong.textContent = 'តេស្តព្រីនបានជោគជ័យ (Test Print Success)!';
+                div.appendChild(strong);
+                div.appendChild(document.createElement('br'));
+                const desc = document.createElement('span');
+                desc.textContent = `បានបញ្ជូនសំណៅតេស្តទៅកាន់ម៉ាស៊ីនព្រីន ${tempPrinterIp}:${tempPrinterPort} (${tempPrinterType.toUpperCase()})។ វិក្កយបត្របានចេញ និងកាត់ក្រដាសដោយជោគជ័យ។`;
+                div.appendChild(desc);
+                resultBox.appendChild(div);
             } else {
                 resultBox.className = 'alert alert-danger';
-                resultBox.innerHTML = `
-                    <i class="fa-solid fa-circle-xmark" style="color: #dc2626; font-size: 1.2rem; margin-right: 6px;"></i>
-                    <div>
-                        <strong>ម៉ាស៊ីនព្រីនមិនអាចទាក់ទងបាន (Printer Unreachable):</strong><br>
-                        ${this.escapeHtml(res.error || 'Connection failed: Please check printer power cable, network cable / IP address.')}
-                    </div>
-                `;
+                const icon = document.createElement('i');
+                icon.className = 'fa-solid fa-circle-xmark';
+                icon.style.color = '#dc2626';
+                icon.style.fontSize = '1.2rem';
+                icon.style.marginTop = '2px';
+                resultBox.appendChild(icon);
+
+                const div = document.createElement('div');
+                const strong = document.createElement('strong');
+                strong.textContent = 'ម៉ាស៊ីនព្រីនមិនអាចទាក់ទងបាន (Printer Unreachable):';
+                div.appendChild(strong);
+                div.appendChild(document.createElement('br'));
+                const errSpan = document.createElement('span');
+                errSpan.textContent = res.error || 'Connection failed: Please check printer power cable, network cable / IP address.';
+                div.appendChild(errSpan);
+                resultBox.appendChild(div);
             }
         } catch (err) {
             resultBox.style.display = 'flex';
+            resultBox.style.alignItems = 'flex-start';
+            resultBox.style.gap = '8px';
+            resultBox.textContent = '';
             resultBox.className = 'alert alert-danger';
-            resultBox.innerHTML = `
-                <i class="fa-solid fa-circle-xmark" style="color: #dc2626; font-size: 1.2rem; margin-right: 6px;"></i>
-                <div>
-                    <strong>បរាជ័យក្នុងការតេស្ត (Test Print Failed):</strong><br>
-                    ${this.escapeHtml(err.message || 'Thermal printer communication error.')}
-                </div>
-            `;
+            const icon = document.createElement('i');
+            icon.className = 'fa-solid fa-circle-xmark';
+            icon.style.color = '#dc2626';
+            icon.style.fontSize = '1.2rem';
+            icon.style.marginTop = '2px';
+            resultBox.appendChild(icon);
+
+            const div = document.createElement('div');
+            const strong = document.createElement('strong');
+            strong.textContent = 'បរាជ័យក្នុងការតេស្ត (Test Print Failed):';
+            div.appendChild(strong);
+            div.appendChild(document.createElement('br'));
+            const errSpan = document.createElement('span');
+            errSpan.textContent = err.message || 'Thermal printer communication error.';
+            div.appendChild(errSpan);
+            resultBox.appendChild(div);
         } finally {
             btn.disabled = false;
             btn.innerHTML = `<i class="fa-solid fa-print"></i> <span data-i18n="testPrintBtn">${I18nManager.t('testPrintBtn')}</span>`;
@@ -9519,8 +9567,11 @@ class PosApp {
 
         this.showAlert(
             'settingsAlert',
-            '<i class="fa-solid fa-circle-check" style="font-size: 1.15rem; margin-right: 6px;"></i> <div><strong>Settings Saved!</strong> The connection and printer settings are saved on this device.</div>',
-            'success'
+            {
+                type: 'success',
+                title: 'Settings Saved!',
+                message: 'The connection and printer settings are saved on this device.'
+            }
         );
 
         setTimeout(async () => {
@@ -9780,9 +9831,78 @@ class PosApp {
     static showAlert(elementId, message, type = 'info') {
         const el = document.getElementById(elementId);
         if (!el) return;
-        el.className = `alert alert-${type}`;
+
+        let alertType = type;
+        let titleText = '';
+        let bodyText = '';
+        let iconClass = '';
+
+        if (message && typeof message === 'object') {
+            alertType = message.type || type || 'info';
+            titleText = message.title || '';
+            bodyText = message.message || '';
+            iconClass = message.icon || '';
+        } else if (typeof message === 'string') {
+            const match = message.match(/^<strong>(.*?)<\/strong>\s*(.*)$/i);
+            if (match) {
+                titleText = match[1].replace(/<[^>]+>/g, '').trim();
+                bodyText = match[2].replace(/<[^>]+>/g, '').trim();
+            } else {
+                bodyText = message.replace(/<[^>]+>/g, '').trim();
+            }
+        }
+
+        if (!iconClass) {
+            switch (alertType) {
+                case 'success':
+                    iconClass = 'fa-solid fa-circle-check';
+                    break;
+                case 'danger':
+                    iconClass = 'fa-solid fa-circle-xmark';
+                    break;
+                case 'warning':
+                    iconClass = 'fa-solid fa-triangle-exclamation';
+                    break;
+                default:
+                    iconClass = 'fa-solid fa-circle-info';
+                    break;
+            }
+        }
+
+        el.className = `alert alert-${alertType}`;
         el.style.display = 'flex';
-        el.innerHTML = `<i class="fa-solid fa-circle-info"></i> <span>${this.escapeHtml(message)}</span>`;
+        el.style.alignItems = 'flex-start';
+        el.style.gap = '8px';
+
+        // Clear existing children safely using DOM methods
+        el.textContent = '';
+
+        const iconEl = document.createElement('i');
+        iconEl.className = iconClass;
+        iconEl.style.fontSize = '1.2rem';
+        iconEl.style.marginTop = '2px';
+        iconEl.style.flexShrink = '0';
+        el.appendChild(iconEl);
+
+        const contentEl = document.createElement('div');
+        contentEl.style.flex = '1';
+
+        if (titleText) {
+            const strongEl = document.createElement('strong');
+            strongEl.textContent = titleText;
+            contentEl.appendChild(strongEl);
+            if (bodyText) {
+                contentEl.appendChild(document.createElement('br'));
+            }
+        }
+
+        if (bodyText) {
+            const textSpan = document.createElement('span');
+            textSpan.textContent = bodyText;
+            contentEl.appendChild(textSpan);
+        }
+
+        el.appendChild(contentEl);
     }
 
     static clearAlert(elementId) {
