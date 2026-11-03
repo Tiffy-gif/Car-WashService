@@ -1184,6 +1184,30 @@ class PosApp {
             btnSaveSettings.addEventListener('click', () => this.handleSaveSettings());
         }
 
+        // Device Key Show/Hide Toggle & Paste Validation
+        const cfgKeyEl = document.getElementById('cfgDeviceKey');
+        const btnToggleKey = document.getElementById('btnToggleCfgDeviceKey');
+        const iconToggleKey = document.getElementById('iconToggleCfgDeviceKey');
+        if (btnToggleKey && cfgKeyEl) {
+            btnToggleKey.addEventListener('click', () => {
+                const isPass = cfgKeyEl.type === 'password';
+                cfgKeyEl.type = isPass ? 'text' : 'password';
+                if (iconToggleKey) {
+                    iconToggleKey.className = isPass ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+                }
+            });
+        }
+        if (cfgKeyEl) {
+            cfgKeyEl.addEventListener('paste', (e) => {
+                const pasted = (e.clipboardData || window.clipboardData)?.getData('text') || '';
+                const clean = pasted.trim();
+                if (clean && !clean.startsWith('pos_sec_')) {
+                    e.preventDefault();
+                    this.showAlert('settingsAlert', 'This is not a device key. The real key is shown only once when the device is created or its key is regenerated.', 'danger');
+                }
+            });
+        }
+
         // Manual Refresh Catalog & Prices Button
         const btnManualSyncCatalog = document.getElementById('btnManualSyncCatalog');
         if (btnManualSyncCatalog) {
@@ -9359,6 +9383,20 @@ class PosApp {
             return;
         }
 
+        if (!testKey.startsWith('pos_sec_')) {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-tower-broadcast"></i> Test Link`;
+            this.showAlert(
+                'settingsAlert',
+                {
+                    type: 'danger',
+                    title: 'Connection Failed:',
+                    message: 'This is not a device key. The real key is shown only once when the device is created or its key is regenerated.'
+                }
+            );
+            return;
+        }
+
         try {
             const res = await PosApi.testConnection({
                 backofficeUrl: testUrl,
@@ -9521,6 +9559,14 @@ class PosApp {
             this.showAlert('settingsAlert', 'Please enter the Device API Key', 'danger');
             return;
         }
+
+        if (!key.startsWith('pos_sec_')) {
+            this.showAlert('settingsAlert', 'This is not a device key. The real key is shown only once when the device is created or its key is regenerated.', 'danger');
+            return;
+        }
+
+        const keyInput = document.getElementById('cfgDeviceKey');
+        if (keyInput) keyInput.value = key;
 
         // Collect Printer Settings
         const printerDirectEnabled = document.getElementById('cfgPrinterDirect')?.checked || false;

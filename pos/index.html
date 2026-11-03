@@ -1881,10 +1881,12 @@
                             <i class="fa-solid fa-key" style="color: var(--primary); margin-right: 4px;"></i> <span
                                 data-i18n="deviceKeyLabel">កូនសោឧបករណ៍</span> *
                         </label>
-                        <input type="text" id="cfgDeviceKey" class="form-control"
-                            placeholder="pos_sec_test_key_8899aabb" style="font-size: 0.95rem;">
-                        <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">
-                            Example: <code>pos_sec_test_key_8899aabb</code>
+                        <div style="position: relative; display: flex; align-items: center;">
+                            <input type="password" id="cfgDeviceKey" class="form-control"
+                                placeholder="Paste the device key shown once when the device was created" style="font-size: 0.95rem; padding-right: 2.5rem;">
+                            <button type="button" id="btnToggleCfgDeviceKey" aria-label="Toggle device key visibility" style="position: absolute; right: 0.5rem; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0.35rem 0.5rem; font-size: 0.9rem;">
+                                <i class="fa-solid fa-eye" id="iconToggleCfgDeviceKey"></i>
+                            </button>
                         </div>
                     </div>
 
