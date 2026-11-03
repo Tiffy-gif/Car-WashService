@@ -13,6 +13,8 @@ $pdo = Database::getInstance();
 
 $message = '';
 $messageType = 'success';
+$newlyCreatedApiKey = '';
+$newlyCreatedDeviceName = '';
 
 if (isset($csrfError)) {
     $message = $csrfError;
@@ -48,7 +50,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($csrfError)) {
                     $keyHash = hash('sha256', $apiKey);
                     $ins = $pdo->prepare("INSERT INTO pos_devices (device_name, device_uid, api_key, api_key_hash, location, status) VALUES (?, ?, '', ?, ?, 'active')");
                     $ins->execute([$name, $uid, $keyHash, $location]);
-                    $message = "New POS device '{$name}' approved successfully! Assigned API Key: {$apiKey} (Copy and save this key now; it is stored hashed and will not be displayed again)";
+                    $newlyCreatedApiKey = $apiKey;
+                    $newlyCreatedDeviceName = $name;
+                    $message = "New POS device '{$name}' approved successfully!";
                 }
             }
         }
@@ -77,7 +81,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($csrfError)) {
             $newKey = 'pos_sec_' . bin2hex(random_bytes(16));
             $newKeyHash = hash('sha256', $newKey);
             $pdo->prepare("UPDATE pos_devices SET api_key = '', api_key_hash = ? WHERE id = ?")->execute([$newKeyHash, $id]);
-            $message = "New API Key generated for device #{$id}: {$newKey} (Copy and save this key now; it is stored hashed and will not be displayed again)";
+            $dStmt = $pdo->prepare("SELECT device_name FROM pos_devices WHERE id = ?");
+            $dStmt->execute([$id]);
+            $devName = $dStmt->fetchColumn();
+            $newlyCreatedApiKey = $newKey;
+            $newlyCreatedDeviceName = $devName ? $devName : "Device #{$id}";
+            $message = "New API Key generated for " . ($devName ? "'{$devName}'" : "device #{$id}") . "!";
         }
     }
 
@@ -204,6 +213,45 @@ if ($detailDevice):
     include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
+<?php if (!empty($newlyCreatedApiKey)): ?>
+    <div class="card" style="margin-bottom: 24px; background: #fffbeb; border: 2px solid #f59e0b; border-radius: var(--radius-md); padding: 18px 22px; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.12);">
+        <div style="display: flex; align-items: flex-start; gap: 14px;">
+            <div style="background: #fef3c7; color: #d97706; width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; margin-top: 2px;">
+                <i class="fa-solid fa-key"></i>
+            </div>
+            <div style="flex: 1;">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 800; color: #92400e;">
+                        <i class="fa-solid fa-circle-check mr-1" style="color: #16a34a;"></i>
+                        New API Key: <?= htmlspecialchars($newlyCreatedDeviceName ?: $detailDevice['device_name'], ENT_QUOTES, 'UTF-8') ?>
+                    </h3>
+                    <span class="badge" style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a; font-weight: 700; font-size: 11.5px;">
+                        Shown Once Only
+                    </span>
+                </div>
+                <p style="margin: 6px 0 12px 0; font-size: 13.5px; color: #78350f; line-height: 1.45;">
+                    Copy and save this key now. It is stored securely as a SHA-256 hash and <strong>will not be displayed again</strong>. If lost, press Regenerate Key.
+                </p>
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <input type="text" id="newGeneratedApiKeyInput" readonly value="<?= htmlspecialchars($newlyCreatedApiKey, ENT_QUOTES, 'UTF-8') ?>" style="flex: 1; max-width: 440px; font-family: var(--font-mono); font-size: 13.5px; font-weight: 700; background: #ffffff; border: 1.5px solid #f59e0b; border-radius: 6px; padding: 8px 12px; color: #92400e;">
+                    <button type="button" class="btn btn-warning" id="btnCopyNewApiKey" onclick="copyNewGeneratedKey()" style="background: #f59e0b; border-color: #d97706; color: #000; font-weight: 700; padding: 8px 16px; display: inline-flex; align-items: center; gap: 6px;">
+                        <i class="fa-solid fa-copy"></i>
+                        <span>Copy Key</span>
+                    </button>
+                    <span id="copyNewApiKeyFeedback" style="display: none; font-size: 13px; font-weight: 700; color: #16a34a;">
+                        <i class="fa-solid fa-check mr-1"></i> Copied to clipboard!
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+<?php elseif (!empty($message)): ?>
+    <div style="background: <?= ($messageType === 'danger') ? 'var(--danger-bg)' : 'var(--success-bg)' ?>; color: <?= ($messageType === 'danger') ? 'var(--danger)' : 'var(--success)' ?>; padding: 14px 20px; border-radius: var(--radius-md); margin-bottom: 24px; display: flex; align-items: center; gap: 10px;">
+        <i class="fa-solid <?= ($messageType === 'danger') ? 'fa-circle-exclamation' : 'fa-circle-check' ?>"></i>
+        <span><?= htmlspecialchars($message, ENT_QUOTES, 'UTF-8') ?></span>
+    </div>
+<?php endif; ?>
+
 <!-- Device Detail Header -->
 <div style="margin-bottom: 24px;">
     <a href="<?= APP_URL ?>/index.php?view=pos_devices" class="btn btn-secondary btn-sm" style="margin-bottom: 12px;">
@@ -246,15 +294,21 @@ if ($detailDevice):
             <div class="text-xs text-muted" style="text-transform: uppercase; font-weight: 700;">
                 <i class="fa-solid fa-key mr-1" style="color: #ea580c;"></i> Device API Authentication Key
             </div>
+            <?php $isKeyHashed = empty($detailDevice['api_key']) || !str_starts_with($detailDevice['api_key'], 'pos_sec_'); ?>
             <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
-                <input type="text" value="<?= !empty($detailDevice['api_key']) ? htmlspecialchars($detailDevice['api_key']) : '[Secured as SHA-256 Hash]' ?>" readonly id="detailDevKey" style="font-family: var(--font-mono); font-size: 13px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; width: 280px; color: var(--text-main);" title="Stored as SHA-256 hash. Regenerate if lost.">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="copyApiKey('detailDevKey')">
+                <input type="password" value="<?= !empty($detailDevice['api_key']) ? htmlspecialchars($detailDevice['api_key']) : '[Secured as SHA-256 Hash]' ?>" readonly id="detailDevKey" style="font-family: var(--font-mono); font-size: 13px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; width: 280px; color: var(--text-main);" title="Stored as SHA-256 hash. Regenerate if lost.">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="copyApiKey('detailDevKey')" <?= $isKeyHashed ? 'disabled style="cursor: not-allowed; opacity: 0.5;" title="Cannot copy hashed key. If you lost it, press Regenerate Key."' : '' ?>>
                     <i class="fa-solid fa-copy mr-1"></i> Copy
                 </button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="toggleKeyVisibility('detailDevKey')">
                     <i class="fa-solid fa-eye"></i>
                 </button>
             </div>
+            <?php if ($isKeyHashed): ?>
+                <div style="font-size: 12px; color: var(--text-muted); margin-top: 6px; max-width: 550px;">
+                    <i class="fa-solid fa-circle-info mr-1"></i> The key is shown only once, right after creating the device or pressing Regenerate Key. If you lost it, press Regenerate Key.
+                </div>
+            <?php endif; ?>
         </div>
         <div style="display: flex; gap: 8px;">
             <form action="" method="POST" onsubmit="return confirm('Regenerating will invalidate the existing key on this terminal. Continue?')">
@@ -465,16 +519,71 @@ if ($detailDevice):
 </div>
 
 <script>
+function copyNewGeneratedKey() {
+    const input = document.getElementById('newGeneratedApiKeyInput');
+    if (!input) return;
+    const key = (input.value || '').trim();
+    if (!key) return;
+
+    const onSuccess = () => {
+        const feedback = document.getElementById('copyNewApiKeyFeedback');
+        const btn = document.getElementById('btnCopyNewApiKey');
+        if (feedback) {
+            feedback.style.display = 'inline-flex';
+            setTimeout(() => { feedback.style.display = 'none'; }, 3000);
+        }
+        if (btn) {
+            const orig = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-check mr-1"></i> Copied!';
+            setTimeout(() => { btn.innerHTML = orig; }, 2000);
+        }
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(key).then(onSuccess).catch(() => {
+            input.focus();
+            input.select();
+            document.execCommand('copy');
+            onSuccess();
+        });
+    } else {
+        input.focus();
+        input.select();
+        document.execCommand('copy');
+        onSuccess();
+    }
+}
+
 function copyApiKey(inputId) {
     const input = document.getElementById(inputId);
-    input.type = 'text';
-    input.select();
-    document.execCommand('copy');
-    input.type = 'password';
-    alert('API key copied to clipboard!');
+    if (!input) return;
+    const val = (input.value || '').trim();
+    if (!val || val === '[Secured as SHA-256 Hash]' || val === '[SHA-256 Hashed]' || !val.startsWith('pos_sec_')) {
+        alert('The key is stored hashed and cannot be copied. If you lost it, press Regenerate Key.');
+        return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(val).then(() => {
+            alert('API key copied to clipboard!');
+        }).catch(() => {
+            input.type = 'text';
+            input.select();
+            document.execCommand('copy');
+            input.type = 'password';
+            alert('API key copied to clipboard!');
+        });
+    } else {
+        input.type = 'text';
+        input.select();
+        document.execCommand('copy');
+        input.type = 'password';
+        alert('API key copied to clipboard!');
+    }
 }
+
 function toggleKeyVisibility(inputId) {
     const input = document.getElementById(inputId);
+    if (!input) return;
     input.type = (input.type === 'password') ? 'text' : 'password';
 }
 </script>
@@ -629,10 +738,42 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 </div>
 
-<?php if ($message): ?>
+<?php if (!empty($newlyCreatedApiKey)): ?>
+    <div class="card" style="margin-bottom: 24px; background: #fffbeb; border: 2px solid #f59e0b; border-radius: var(--radius-md); padding: 18px 22px; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.12);">
+        <div style="display: flex; align-items: flex-start; gap: 14px;">
+            <div style="background: #fef3c7; color: #d97706; width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; margin-top: 2px;">
+                <i class="fa-solid fa-key"></i>
+            </div>
+            <div style="flex: 1;">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 800; color: #92400e;">
+                        <i class="fa-solid fa-circle-check mr-1" style="color: #16a34a;"></i>
+                        New API Key: <?= htmlspecialchars($newlyCreatedDeviceName ?: 'POS Device', ENT_QUOTES, 'UTF-8') ?>
+                    </h3>
+                    <span class="badge" style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a; font-weight: 700; font-size: 11.5px;">
+                        Shown Once Only
+                    </span>
+                </div>
+                <p style="margin: 6px 0 12px 0; font-size: 13.5px; color: #78350f; line-height: 1.45;">
+                    Copy and save this key now. It is stored securely as a SHA-256 hash and <strong>will not be displayed again</strong>. If lost, press Regenerate Key.
+                </p>
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <input type="text" id="newGeneratedApiKeyInput" readonly value="<?= htmlspecialchars($newlyCreatedApiKey, ENT_QUOTES, 'UTF-8') ?>" style="flex: 1; max-width: 440px; font-family: var(--font-mono); font-size: 13.5px; font-weight: 700; background: #ffffff; border: 1.5px solid #f59e0b; border-radius: 6px; padding: 8px 12px; color: #92400e;">
+                    <button type="button" class="btn btn-warning" id="btnCopyNewApiKey" onclick="copyNewGeneratedKey()" style="background: #f59e0b; border-color: #d97706; color: #000; font-weight: 700; padding: 8px 16px; display: inline-flex; align-items: center; gap: 6px;">
+                        <i class="fa-solid fa-copy"></i>
+                        <span>Copy Key</span>
+                    </button>
+                    <span id="copyNewApiKeyFeedback" style="display: none; font-size: 13px; font-weight: 700; color: #16a34a;">
+                        <i class="fa-solid fa-check mr-1"></i> Copied to clipboard!
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+<?php elseif (!empty($message)): ?>
     <div style="background: <?= ($messageType === 'danger') ? 'var(--danger-bg)' : 'var(--success-bg)' ?>; color: <?= ($messageType === 'danger') ? 'var(--danger)' : 'var(--success)' ?>; padding: 14px 20px; border-radius: var(--radius-md); margin-bottom: 24px; display: flex; align-items: center; gap: 10px;">
         <i class="fa-solid <?= ($messageType === 'danger') ? 'fa-circle-exclamation' : 'fa-circle-check' ?>"></i>
-        <span><?= htmlspecialchars($message) ?></span>
+        <span><?= htmlspecialchars($message, ENT_QUOTES, 'UTF-8') ?></span>
     </div>
 <?php endif; ?>
 
@@ -905,12 +1046,13 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <span class="text-xs text-muted"><i class="fa-solid fa-location-dot mr-1"></i> <?= htmlspecialchars($d['location'] ?? 'Counter') ?></span>
                         </td>
                         <td>
+                            <?php $isRowHashed = empty($d['api_key']) || !str_starts_with($d['api_key'], 'pos_sec_'); ?>
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <input type="text" value="<?= !empty($d['api_key']) ? htmlspecialchars($d['api_key']) : '[SHA-256 Hashed]' ?>" readonly id="key_<?= $d['id'] ?>" style="font-family: var(--font-mono); font-size: 12px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; width: 170px; color: var(--text-muted);" title="Stored as SHA-256 hash.">
-                                <button type="button" class="btn btn-secondary btn-sm" style="padding: 4px 8px;" onclick="copyApiKey('key_<?= $d['id'] ?>')" title="Copy Key">
+                                <input type="password" value="<?= !empty($d['api_key']) ? htmlspecialchars($d['api_key']) : '[Secured as SHA-256 Hash]' ?>" readonly id="key_<?= (int)$d['id'] ?>" style="font-family: var(--font-mono); font-size: 12px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; width: 170px; color: var(--text-muted);" title="Stored as SHA-256 hash.">
+                                <button type="button" class="btn btn-secondary btn-sm" style="padding: 4px 8px;<?= $isRowHashed ? ' cursor: not-allowed; opacity: 0.5;' : '' ?>" onclick="copyApiKey('key_<?= (int)$d['id'] ?>')" title="<?= $isRowHashed ? 'The key is stored hashed and cannot be copied.' : 'Copy Key' ?>" <?= $isRowHashed ? 'disabled' : '' ?>>
                                     <i class="fa-solid fa-copy"></i>
                                 </button>
-                                <button type="button" class="btn btn-secondary btn-sm" style="padding: 4px 8px;" onclick="toggleKeyVisibility('key_<?= $d['id'] ?>')" title="Show/Hide">
+                                <button type="button" class="btn btn-secondary btn-sm" style="padding: 4px 8px;" onclick="toggleKeyVisibility('key_<?= (int)$d['id'] ?>')" title="Show/Hide">
                                     <i class="fa-solid fa-eye"></i>
                                 </button>
                             </div>
@@ -1084,17 +1226,71 @@ include dirname(__DIR__) . '/layouts/header.php';
 </div>
 
 <script>
+function copyNewGeneratedKey() {
+    const input = document.getElementById('newGeneratedApiKeyInput');
+    if (!input) return;
+    const key = (input.value || '').trim();
+    if (!key) return;
+
+    const onSuccess = () => {
+        const feedback = document.getElementById('copyNewApiKeyFeedback');
+        const btn = document.getElementById('btnCopyNewApiKey');
+        if (feedback) {
+            feedback.style.display = 'inline-flex';
+            setTimeout(() => { feedback.style.display = 'none'; }, 3000);
+        }
+        if (btn) {
+            const orig = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-check mr-1"></i> Copied!';
+            setTimeout(() => { btn.innerHTML = orig; }, 2000);
+        }
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(key).then(onSuccess).catch(() => {
+            input.focus();
+            input.select();
+            document.execCommand('copy');
+            onSuccess();
+        });
+    } else {
+        input.focus();
+        input.select();
+        document.execCommand('copy');
+        onSuccess();
+    }
+}
+
 function copyApiKey(inputId) {
     const input = document.getElementById(inputId);
-    input.type = 'text';
-    input.select();
-    document.execCommand('copy');
-    input.type = 'password';
-    alert('API key copied to clipboard!');
+    if (!input) return;
+    const val = (input.value || '').trim();
+    if (!val || val === '[Secured as SHA-256 Hash]' || val === '[SHA-256 Hashed]' || !val.startsWith('pos_sec_')) {
+        alert('The key is stored hashed and cannot be copied. If you lost it, press Regenerate Key.');
+        return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(val).then(() => {
+            alert('API key copied to clipboard!');
+        }).catch(() => {
+            input.type = 'text';
+            input.select();
+            document.execCommand('copy');
+            input.type = 'password';
+            alert('API key copied to clipboard!');
+        });
+    } else {
+        input.type = 'text';
+        input.select();
+        document.execCommand('copy');
+        input.type = 'password';
+        alert('API key copied to clipboard!');
+    }
 }
 
 function toggleKeyVisibility(inputId) {
     const input = document.getElementById(inputId);
+    if (!input) return;
     input.type = (input.type === 'password') ? 'text' : 'password';
 }
 </script>
