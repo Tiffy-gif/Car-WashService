@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Wash & Detailing Management System — Interactive User Guide</title>
+    <link rel="stylesheet" href="public/css/font-awesome.min.css">
+    <style>
+        :root {
+            --primary: #0284c7;
+            --primary-dark: #0369a1;
+            --primary-light: #e0f2fe;
+            --accent: #059669;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --bg-page: #f8fafc;
+            --bg-surface: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --border-dark: #cbd5e1;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.03);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Khmer OS Battambang", "Siemreap";
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--bg-page);
+            color: var(--text-main);
+            line-height: 1.6;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* SIDEBAR STYLES */
+        aside.guide-sidebar {
+            width: 320px;
+            background: #0f172a;
+            color: #f1f5f9;
+            position: fixed;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            overflow-y: auto;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #1e293b;
+        }
+
+        .guide-brand {
+            padding: 24px 20px 16px;
+            border-bottom: 1px solid #1e293b;
+            background: #090d16;
+        }
+
+        .guide-brand h2 {
+            font-size: 1.15rem;
+            color: #38bdf8;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 800;
+        }
+
+        .guide-brand p {
+            font-size: 0.8rem;
+            color: #94a3b8;
+            margin-top: 4px;
+        }
+
+        .guide-search {
+            padding: 14px 20px;
+            background: #090d16;
+            border-bottom: 1px solid #1e293b;
+        }
+
+        .guide-search input {
+            width: 100%;
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #f8fafc;
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .guide-search input:focus {
+            border-color: #38bdf8;
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+        }
+
+        nav.guide-nav {
+            padding: 16px 12px;
+            flex-grow: 1;
+        }
+
+        .nav-category {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: #64748b;
+            letter-spacing: 0.05em;
+            padding: 14px 12px 6px;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            color: #cbd5e1;
+            text-decoration: none;
+            font-size: 0.88rem;
+            border-radius: var(--radius-sm);
+            transition: all 0.15s ease;
+            margin-bottom: 2px;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            background: #1e293b;
+            color: #38bdf8;
+        }
+
+        .nav-link i {
+            font-size: 0.95rem;
+            width: 20px;
+            text-align: center;
+            color: #94a3b8;
+        }
+
+        .nav-link:hover i, .nav-link.active i {
+            color: #38bdf8;
+        }
+
+        /* MAIN CONTENT AREA */
+        main.guide-content {
+            margin-left: 320px;
+            flex-grow: 1;
+            padding: 40px 50px 80px;
+            max-width: 1200px;
+        }
+
+        header.guide-header {
+            margin-bottom: 40px;
+            padding-bottom: 24px;
+            border-bottom: 2px solid var(--border);
+        }
+
+        .badge-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+
+        .badge-primary { background: var(--primary-light); color: var(--primary-dark); }
+        .badge-success { background: #dcfce7; color: #15803d; }
+        .badge-warning { background: #fef3c7; color: #b45309; }
+        .badge-danger { background: #fee2e2; color: #b91c1c; }
+        .badge-purple { background: #f3e8ff; color: #7e22ce; }
+
+        h1.main-title {
+            font-size: 2.2rem;
+            font-weight: 900;
+            color: #0f172a;
+            margin-bottom: 8px;
+            line-height: 1.25;
+        }
+
+        p.lead-text {
+            font-size: 1.1rem;
+            color: var(--text-muted);
+            max-width: 900px;
+        }
+
+        /* CARDS & SECTIONS */
+        section.guide-section {
+            background: var(--bg-surface);
+            border-radius: var(--radius-lg);
+            padding: 32px 36px;
+            margin-bottom: 40px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border);
+            scroll-margin-top: 30px;
+        }
+
+        section.guide-section h2 {
+            font-size: 1.55rem;
+            color: #0f172a;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 800;
+        }
+
+        section.guide-section h3 {
+            font-size: 1.2rem;
+            color: #1e293b;
+            margin: 28px 0 12px;
+            font-weight: 700;
+        }
+
+        section.guide-section p {
+            color: #334155;
+            margin-bottom: 16px;
+            font-size: 0.98rem;
+        }
+
+        /* PROCESS DIAGRAMS & FLOWS */
+        .flow-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin: 24px 0;
+        }
+
+        .flow-step {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            padding: 18px 20px;
+            border-radius: var(--radius-md);
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            transition: all 0.2s ease;
+        }
+
+        .flow-step:hover {
+            border-color: var(--primary);
+            background: #f0f9ff;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .step-num {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 1rem;
+            flex-shrink: 0;
+            box-shadow: 0 2px 4px rgba(2, 132, 199, 0.3);
+        }
+
+        .step-content h4 {
+            font-size: 1.05rem;
+            color: #0f172a;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .step-content p {
+            margin-bottom: 0;
+            font-size: 0.92rem;
+            color: #475569;
+        }
+
+        /* TABLES */
+        table.guide-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 0.92rem;
+        }
+
+        table.guide-table th {
+            background: #f1f5f9;
+            color: #334155;
+            font-weight: 700;
+            text-align: left;
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+        }
+
+        table.guide-table td {
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            color: #334155;
+            vertical-align: top;
+        }
+
+        table.guide-table tr:nth-child(even) td {
+            background: #f8fafc;
+        }
+
+        /* ALERT CALLOUTS */
+        .callout {
+            padding: 16px 20px;
+            border-radius: var(--radius-md);
+            margin: 20px 0;
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            font-size: 0.94rem;
+        }
+
+        .callout-info {
+            background: #e0f2fe;
+            border-left: 4px solid var(--primary);
+            color: #0369a1;
+        }
+
+        .callout-success {
+            background: #dcfce7;
+            border-left: 4px solid #16a34a;
+            color: #15803d;
+        }
+
+        .callout-warning {
+            background: #fef3c7;
+            border-left: 4px solid #d97706;
+            color: #b45309;
+        }
+
+        .callout-danger {
+            background: #fee2e2;
+            border-left: 4px solid #dc2626;
+            color: #991b1b;
+        }
+
+        .callout i {
+            font-size: 1.25rem;
+            margin-top: 2px;
+        }
+
+        /* ROLE CARDS GRID */
+        .role-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 20px;
+            margin: 24px 0;
+        }
+
+        .role-card {
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .role-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 10px;
+        }
+
+        .role-card h4 {
+            font-size: 1.1rem;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .role-card ul {
+            list-style: none;
+            font-size: 0.88rem;
+            color: #475569;
+        }
+
+        .role-card ul li {
+            padding: 4px 0;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .role-card ul li i.fa-check { color: #16a34a; }
+        .role-card ul li i.fa-xmark { color: #dc2626; }
+
+        /* BUTTONS */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            font-size: 0.88rem;
+            font-weight: 600;
+            border-radius: var(--radius-sm);
+            text-decoration: none;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.15s ease;
+        }
+
+        .btn-primary { background: var(--primary); color: #fff; }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-outline { background: transparent; border-color: var(--border-dark); color: #334155; }
+        .btn-outline:hover { background: #f1f5f9; }
+
+        @media print {
+            aside.guide-sidebar { display: none !important; }
+            main.guide-content { margin-left: 0 !important; padding: 0 !important; max-width: 100% !important; }
+            section.guide-section { box-shadow: none !important; border: 1px solid #ccc !important; page-break-inside: avoid; }
+        }
+
+        @media (max-width: 900px) {
+            aside.guide-sidebar { width: 260px; }
+            main.guide-content { margin-left: 260px; padding: 24px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- SIDEBAR NAVIGATION -->
+    <aside class="guide-sidebar">
+        <div class="guide-brand">
+            <h2><i class="fa fa-car"></i> CarWash Pro</h2>
+            <p>Interactive System User Guide</p>
+            <p style="font-size: 0.72rem; color: #38bdf8;">សៀវភៅណែនាំប្រតិបត្តិការរថយន្ត</p>
+        </div>
+
+        <div class="guide-search">
+            <input type="text" id="guideSearchInput" placeholder="Quick search modules & errors..." onkeyup="filterGuideTopics()">
+        </div>
+
+        <nav class="guide-nav" id="guideNavList">
+            <div class="nav-category">Overview & Core Rules</div>
+            <a href="#overview" class="nav-link active"><i class="fa fa-compass"></i> System Architecture</a>
+            <a href="#rules" class="nav-link"><i class="fa fa-shield"></i> The 5 Unbreakable Rules</a>
+
+            <div class="nav-category">The Operational Workflow</div>
+            <a href="#workflow" class="nav-link"><i class="fa fa-road"></i> Full Customer Journey</a>
+            <a href="#pos-guide" class="nav-link"><i class="fa fa-cash-register"></i> POS Intake & Payments</a>
+            <a href="#bays-guide" class="nav-link"><i class="fa fa-warehouse"></i> Bays & Apron Queue</a>
+            <a href="#shopfloor-guide" class="nav-link"><i class="fa fa-wrench"></i> Wash & Tech Handshake</a>
+
+            <div class="nav-category">Sidebar Modules Catalog</div>
+            <a href="#module-dashboard" class="nav-link"><i class="fa fa-chart-pie"></i> 1. Dashboard</a>
+            <a href="#module-sales" class="nav-link"><i class="fa fa-shopping-cart"></i> 2. Sales & Operations</a>
+            <a href="#module-customers" class="nav-link"><i class="fa fa-users"></i> 3. Customers & Loyalty</a>
+            <a href="#module-stock" class="nav-link"><i class="fa fa-boxes"></i> 4. Catalog & Stock Ledger</a>
+            <a href="#module-finance" class="nav-link"><i class="fa fa-dollar"></i> 5. Finance & Commissions</a>
+            <a href="#module-admin" class="nav-link"><i class="fa fa-sliders"></i> 6. Admin, Roles & Sync</a>
+
+            <div class="nav-category">Controls, Roles & Errors</div>
+            <a href="#cash-controls" class="nav-link"><i class="fa fa-lock"></i> Blind Shifts & Controls</a>
+            <a href="#troubleshooting" class="nav-link"><i class="fa fa-bug"></i> Error Codes & Fixes</a>
+            <a href="#role-cards" class="nav-link"><i class="fa fa-id-card"></i> 1-Page Role Quick Cards</a>
+            <a href="#glossary" class="nav-link"><i class="fa fa-book"></i> Bilingual Glossary</a>
+        </nav>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="guide-content">
+
+        <!-- HEADER BANNER -->
+        <header class="guide-header">
+            <div class="badge-pill badge-primary"><i class="fa fa-book-open"></i> Shop Operating Manual &bull; កំណែប្រតិបត្តិការជាក់ស្តែង</div>
+            <h1 class="main-title">Car Wash & Detailing Management System</h1>
+            <p class="lead-text">
+                Welcome to the complete interactive operations guide for your car wash and automotive detailing business. 
+                Use this manual to train staff, understand every sidebar screen, run daily shifts, prevent cash leakage, and troubleshoot issues.
+            </p>
+            <div style="margin-top: 16px; display: flex; gap: 10px;">
+                <button type="button" class="btn btn-primary" onclick="window.print()"><i class="fa fa-print"></i> Print Manual / Role Cards</button>
+                <a href="index.php" class="btn btn-outline"><i class="fa fa-arrow-left"></i> Go to Live System</a>
+                <a href="tv.php" target="_blank" class="btn btn-outline"><i class="fa fa-tv"></i> Open Lounge TV</a>
+            </div>
+        </header>
+
+        <!-- SECTION 1: SYSTEM OVERVIEW -->
+        <section id="overview" class="guide-section">
+            <h2><i class="fa fa-compass" style="color: var(--primary);"></i> 1. System Architecture & Building Blocks</h2>
+            <p>
+                The Car Wash & Care platform operates on an <strong>Autonomous Local-First Architecture</strong>. Your physical workshop runs 
+                on an in-store mini-PC server that continues taking orders, printing receipts, and operating bays even if the internet drops completely.
+            </p>
+
+            <table class="guide-table">
+                <thead>
+                    <tr>
+                        <th>Pillar</th>
+                        <th>Device & Location</th>
+                        <th>Core Responsibility</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Local Shop Server</strong></td>
+                        <td>In-store mini-PC (Windows/XAMPP)</td>
+                        <td>Stores the local MySQL database, hosts the POS engine, controls receipt printers, and orchestrates local Wi-Fi terminals.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>POS & Bay Tablets</strong></td>
+                        <td>Cashier counter & Bay wall mounts</td>
+                        <td>High-speed touch interfaces for order intake, queue management, mechanic checklists, and parts requests.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Waiting Lounge TV</strong></td>
+                        <td>Smart TV in customer lounge (`tv.php`)</td>
+                        <td>Displays real-time bay progress, queue order, and ready-for-pickup notices with audio chimes.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Central Cloud Portal</strong></td>
+                        <td>Headquarters Cloud Repository</td>
+                        <td>Aggregates multi-store revenue, synchronizes master catalogs, and manages customer memberships.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- SECTION 2: 5 UNBREAKABLE RULES -->
+        <section id="rules" class="guide-section">
+            <h2><i class="fa fa-shield" style="color: var(--accent);"></i> 2. The 5 Unbreakable Operational Rules</h2>
+            <p>Every employee must memorize and respect these five core anti-fraud and quality policies:</p>
+
+            <div class="callout callout-warning">
+                <i class="fa fa-triangle-exclamation"></i>
+                <div>
+                    <strong>Rule 1: "No Receipt, No Wash" (គ្មានវិក្កយបត្រ គ្មានការលាង)</strong><br>
+                    Washers and technicians are strictly forbidden from touching any vehicle without an official printed receipt clipped under the wiper blade or displayed on the dashboard.
+                </div>
+            </div>
+
+            <div class="callout callout-info">
+                <i class="fa fa-user-secret"></i>
+                <div>
+                    <strong>Rule 2: Blind Cashiering (ការគិតលុយបិទភ្នែក)</strong><br>
+                    Expected cash sales are hidden from cashiers during their shift. Cashiers must physically count every bill and coin before the system calculates variances.
+                </div>
+            </div>
+
+            <div class="callout callout-danger">
+                <i class="fa fa-ban"></i>
+                <div>
+                    <strong>Rule 3: Immutable Warehouse Ledger (បញ្ជីឃ្លាំងមិនអាចកែប្រែបាន)</strong><br>
+                    Stock records cannot be edited or deleted (`SQLSTATE 45000`). Discrepancies are resolved solely by adding Manager-signed <strong>Correction Lines</strong>.
+                </div>
+            </div>
+
+            <div class="callout callout-info">
+                <i class="fa fa-key"></i>
+                <div>
+                    <strong>Rule 4: Manager PIN Overrides (ការអនុញ្ញាតដោយលេខកូដអ្នកគ្រប់គ្រង)</strong><br>
+                    Cashiers cannot apply manual discounts, cancel tickets, or pop open the cash drawer without a Manager PIN.
+                </div>
+            </div>
+
+            <div class="callout callout-success">
+                <i class="fa fa-user-check"></i>
+                <div>
+                    <strong>Rule 5: Soft Deactivation Only (អសកម្មបុគ្គលិក ដោយមិនលុបទិន្នន័យ)</strong><br>
+                    Departed staff accounts are set to `inactive`, never hard-deleted, permanently preserving historical audit trails and commission records.
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION 3: THE COMPLETE CUSTOMER JOURNEY -->
+        <section id="workflow" class="guide-section">
+            <h2><i class="fa fa-road" style="color: var(--primary);"></i> 3. The Complete Customer Journey (Arrival to Exit)</h2>
+            <p>Follow the end-to-end flow of every vehicle that enters your car wash:</p>
+
+            <div class="flow-container">
+                <div class="flow-step">
+                    <div class="step-num">1</div>
+                    <div class="step-content">
+                        <h4>Vehicle Pulls In & License Plate Lookup <span class="badge-pill badge-primary">Cashier</span></h4>
+                        <p>Cashier presses <code>F2</code> on the POS. Type the plate (e.g. <code>2A-1234</code>). If returning, their profile, loyalty tier, and next oil due load instantly. If new, tap <strong>[+ New Customer]</strong>, enter name, phone, and vehicle size.</p>
+                    </div>
+                </div>
+
+                <div class="flow-step">
+                    <div class="step-num">2</div>
+                    <div class="step-content">
+                        <h4>SmartQueue Wait Estimate Check <span class="badge-pill badge-warning">SmartQueue</span></h4>
+                        <p>The system calculates estimated wait time based on vehicle size and bay occupancy. If the line exceeds <strong>45 minutes</strong>, an amber banner prompts the cashier to offer an appointment booking or VIP P2 Express wash.</p>
+                    </div>
+                </div>
+
+                <div class="flow-step">
+                    <div class="step-num">3</div>
+                    <div class="step-content">
+                        <h4>Cart Builder & Contextual Upsells <span class="badge-pill badge-primary">Cashier</span></h4>
+                        <p>Add services. Prices automatically adapt to vehicle size (Small Car vs SUV vs Pickup). POS displays upsell pills (e.g. <em>"Offer Ceramic Tire Wax +$2"</em> or <em>"Oil Change Due!"</em>).</p>
+                    </div>
+                </div>
+
+                <div class="flow-step">
+                    <div class="step-num">4</div>
+                    <div class="step-content">
+                        <h4>Checkout & Slip Upload <span class="badge-pill badge-primary">Cashier</span></h4>
+                        <p>Customer chooses Cash (USD/KHR), ABA Pay, or KHQR Scan. For digital transfers, cashier enters the reference number and <strong>snaps a photo of the bank confirmation slip</strong>.</p>
+                    </div>
+                </div>
+
+                <div class="flow-step">
+                    <div class="step-num">5</div>
+                    <div class="step-content">
+                        <h4>Receipt Printing & Queue Placement <span class="badge-pill badge-success">Printer & TV</span></h4>
+                        <p>Receipt prints with bold Queue # (e.g. <code>#Q-014</code>). Receipt is placed under windshield wiper. Waiting Lounge TV (<code>tv.php</code>) displays car in progress.</p>
+                    </div>
+                </div>
+
+                <div class="flow-step">
+                    <div class="step-num">6</div>
+                    <div class="step-content">
+                        <h4>Bay Operations & The Handshake <span class="badge-pill badge-purple">Washer & Mechanic</span></h4>
+                        <p>Washer taps [Start Job]. Once dry, taps [Finish Car]. On mixed orders (Wash + Oil), the vehicle triggers the <strong>Handshake Protocol</strong>: Mechanic clicks [Receive From Wash] and drives car to Bay 4 for servicing.</p>
+                    </div>
+                </div>
+
+                <div class="flow-step">
+                    <div class="step-num">7</div>
+                    <div class="step-content">
+                        <h4>Completion Chime & Key Handover <span class="badge-pill badge-success">TV & Cashier</span></h4>
+                        <p>TV board chimes and moves vehicle to "Ready for Pick-up". Cashier returns keys to customer with a smile.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION 4: MASTER SIDEBAR MODULES -->
+        <section id="module-sales" class="guide-section">
+            <h2><i class="fa fa-list-ol" style="color: var(--primary);"></i> 4. Master Sidebar Modules Catalog</h2>
+            <p>Here is what every screen in the sidebar does and how to operate it:</p>
+
+            <table class="guide-table">
+                <thead>
+                    <tr>
+                        <th>Group</th>
+                        <th>Menu Item & Screen</th>
+                        <th>Who Uses It</th>
+                        <th>Key Actions & Purpose</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Dashboard</strong></td>
+                        <td><strong>Dashboard</strong> (`/dashboard`)</td>
+                        <td>Owner, Manager</td>
+                        <td>Real-time executive cockpit: Daily gross sales, vehicle count, bay occupancy, cash breakdown, low stock alerts.</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="8"><strong>Sales & Ops</strong></td>
+                        <td><strong>Point of Sale (POS)</strong> (`pos/index.html`)</td>
+                        <td>Cashier</td>
+                        <td>Plate lookup, order builder, vehicle size multipliers, contextual upsells, Cash/ABA/KHQR payment, receipt printing.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Shift Management</strong> (`/shift`)</td>
+                        <td>Cashier, Manager</td>
+                        <td>Opening float entry, blind cashiering, two-cashier handover sign-off, unannounced spot audits, daily Z-report day closing.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Orders & Invoices</strong> (`/orders`)</td>
+                        <td>Cashier, Manager</td>
+                        <td>Search past orders, reprint thermal receipts, verify uploaded bank slips, process refunds (Manager PIN, online only).</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Bays & Queue Monitor</strong> (`/bays_queue`)</td>
+                        <td>Supervisor, Manager</td>
+                        <td>Live bay status, drag-and-drop queue reordering, bay reassignment, setting delay reasons (e.g. heavy mud).</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Washer Bay Screen</strong> (`/washer/jobs`)</td>
+                        <td>Washer Team</td>
+                        <td>Bay tablet view: Vehicle info, [Start Job] timer countdown, 4-point dry QC checklist, [Finish Car].</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Technical Workshop</strong> (`/mechanic/jobs`)</td>
+                        <td>Lead Mechanic</td>
+                        <td>12-point multi-point inspection, digital parts request from warehouse, oil volume & mileage entry, handshake acceptance.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Vehicle Service History</strong> (`/vehicle_history`)</td>
+                        <td>Cashier, Mechanic</td>
+                        <td>Search by license plate to view historical wash dates, previous oil changes, viscosities used, and inspection reports.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Disaster Recovery</strong> (`/recovery_bulk_entry`)</td>
+                        <td>Cashier, Manager</td>
+                        <td>Printable paper emergency job cards & rapid 10-key bulk digitization to restore data after electrical blackouts.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Customers</strong></td>
+                        <td><strong>Customers & Vehicles</strong> (`/customers`)</td>
+                        <td>CRM, Cashier</td>
+                        <td>Customer database, linking multiple plates to one owner, loyalty point balances, subscription tiers, at-risk win-backs.</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="4"><strong>Catalog & Stock</strong></td>
+                        <td><strong>Services & Pricing</strong> (`/services`)</td>
+                        <td>Owner, Manager</td>
+                        <td>Service packages, vehicle pricing matrices (Small, Medium, SUV, Pickup, Van, Moto), and base duration minutes.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Oil & Reminders</strong> (`/oil_care`)</td>
+                        <td>Mechanic, CRM</td>
+                        <td>Engine oil specs, recommended viscosities, filter part numbers, and automated 6-month / mileage reminder dispatches.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Stock Ledger</strong> (`/stock_ledger`)</td>
+                        <td>Warehouse, Manager</td>
+                        <td>Append-only immutable stock ledger, receiving supplier stock, approving mechanic parts requests, manager correction lines.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Categories</strong> (`/categories`)</td>
+                        <td>Owner, Manager</td>
+                        <td>Organize product and service categories (Wash, Detailing, Lubricants, Spare Parts, Beverages).</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="3"><strong>Finance</strong></td>
+                        <td><strong>Shop Expenses</strong> (`/expenses`)</td>
+                        <td>Cashier, Manager</td>
+                        <td>Out-of-drawer petty cash tracking (ice, water, emergency supplies) and recurring shop overheads.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Staff Commissions</strong> (`/commissions`)</td>
+                        <td>Manager, Owner</td>
+                        <td>Itemized labor pay: washer per-car earnings, mechanic technical job bonuses, cashier upsell conversion rewards.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Reports & Analytics</strong> (`/reports`)</td>
+                        <td>Owner, Manager</td>
+                        <td>Financial reports, payment method breakdown, cars per labor hour, bay utilization %, technician efficiency leaderboard.</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="6"><strong>Admin & System</strong></td>
+                        <td><strong>Staff Management</strong> (`/owner/staff`)</td>
+                        <td>Owner</td>
+                        <td>Onboard employees, assign roles and 6-digit PINs, soft deactivation (never delete staff), last-owner safety guard.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Roles & Permissions</strong> (`/owner/roles`)</td>
+                        <td>Owner, Admin</td>
+                        <td>Role-Based Access Control (RBAC) matrix defining permissions for all 11 system roles.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>POS Devices</strong> (`/owner/pos_devices`)</td>
+                        <td>Owner, IT</td>
+                        <td>Register tablets, manage cryptographic pairing keys, and 1-click [Block Device] lockdown for stolen tablets.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Settings</strong> (`/owner/settings`)</td>
+                        <td>Owner</td>
+                        <td>Master shop settings: Name, exchange rate (USD/KHR), bank accounts for ABA/KHQR, printer port 1818, TV secret code.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Sync Monitor</strong> (`/owner/sync_monitor`)</td>
+                        <td>Owner, Manager</td>
+                        <td>Live health of cloud sync, pending backlog counters, manual push/pull triggers, and network sync error logs.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Audit History</strong> (`/owner/audit_logs`)</td>
+                        <td>Owner</td>
+                        <td>Permanent audit trail of sensitive actions: refunds, no-sale drawer pops, spot audits, discounts, shortages, stock edits.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- SECTION 5: MONEY & CONTROLS -->
+        <section id="cash-controls" class="guide-section">
+            <h2><i class="fa fa-lock" style="color: var(--danger);"></i> 5. Money Controls, Shifts, and Cashier Security</h2>
+            
+            <h3>A. Shift Opening & The Blind Cashiering Principle</h3>
+            <p>
+                Every shift begins with counting physical bills in the drawer to establish the <strong>Opening Float</strong> (e.g. $50 + 200,000៛). 
+                During the entire shift, the system <strong>hides expected sales</strong> from the cashier. This forces staff to perform an honest physical count at shift end.
+            </p>
+
+            <h3>B. The Two-Cashier Shift Handover Formula</h3>
+            <p>At shift end, the outgoing cashier enters their counted cash and confirms with their PIN. The incoming cashier signs off with their PIN. The system runs:</p>
+            <div style="background: #f1f5f9; padding: 14px 20px; border-radius: var(--radius-md); font-family: monospace; font-size: 1.05rem; margin: 12px 0;">
+                Expected Cash = Opening Float + Cash Sales - Drawer Expenses - Cash Refunds<br>
+                Variance = Counted Cash - Expected Cash
+            </div>
+            <p>
+                If <code>Variance &lt; 0</code>, the shift is flagged as a <strong>SHORTAGE</strong>. The deficit is recorded as owed by the outgoing cashier and logged in `audit_logs`.
+            </p>
+
+            <h3>C. Day Closing & The 23:59:00 Cutoff</h3>
+            <p>
+                At the end of the operating day, the Manager opens <strong>Close Day (Z-Report)</strong>, counts final safe cash, and generates the official Z-Report. 
+                At <strong>23:59:00</strong>, the system automatically locks registers to prevent unauthorized after-hours sales.
+            </p>
+        </section>
+
+        <!-- SECTION 6: TROUBLESHOOTING & ERROR CODES -->
+        <section id="troubleshooting" class="guide-section">
+            <h2><i class="fa fa-bug" style="color: var(--warning);"></i> 6. Error Codes & Troubleshooting Table</h2>
+            <p>Quick lookup guide for every error message you may encounter on tablets or screens:</p>
+
+            <table class="guide-table">
+                <thead>
+                    <tr>
+                        <th>Error Code</th>
+                        <th>What It Means</th>
+                        <th>Step-by-Step Fix</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>DEVICE_BLOCKED</code></td>
+                        <td>Tablet was locked in Back Office.</td>
+                        <td>Owner opens <strong>POS Devices</strong> screen and clicks <strong>[Unblock Device]</strong>.</td>
+                    </tr>
+                    <tr>
+                        <td><code>DEVICE_KEY_REQUIRED</code></td>
+                        <td>Tablet cache was cleared; pairing key lost.</td>
+                        <td>Open <code>pos/index.html#pair</code> and re-enter the pairing key from POS Devices.</td>
+                    </tr>
+                    <tr>
+                        <td><code>ACCOUNT_LOCKED</code></td>
+                        <td>5 wrong PIN attempts entered.</td>
+                        <td>Wait 10 minutes for security cooldown, or have Manager reset attempts in Staff Management.</td>
+                    </tr>
+                    <tr>
+                        <td><code>DAY_LOCKED</code></td>
+                        <td>Time is &ge; 23:59:00 or day was closed.</td>
+                        <td>Manager enters Manager PIN in Shift Management to close day or unlock with mandatory reason.</td>
+                    </tr>
+                    <tr>
+                        <td><code>DISCOUNT_EXCEEDS_TOTAL</code></td>
+                        <td>Discount entered is higher than cart total.</td>
+                        <td>Correct the discount figure so it does not exceed the ticket subtotal.</td>
+                    </tr>
+                    <tr>
+                        <td><code>Printer Port 1818 Error</code></td>
+                        <td>Thermal receipt printer offline or cable loose.</td>
+                        <td>Check printer power/paper, ensure USB is connected, or use the browser print fallback (Ctrl+P).</td>
+                    </tr>
+                    <tr>
+                        <td><code>Cash Drawer Won't Pop</code></td>
+                        <td>Drawer cable unplugged or locked.</td>
+                        <td>Ensure RJ11 cable is plugged into the printer's <code>DK</code> port; turn physical key to vertical position.</td>
+                    </tr>
+                    <tr>
+                        <td><code>TV Shows "Code Incorrect"</code></td>
+                        <td>TV URL parameter does not match secret code.</td>
+                        <td>Check <strong>Settings &rarr; General</strong> for the TV secret code and update the URL: <code>tv.php?code=...</code></td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- SECTION 7: ROLE QUICK CARDS -->
+        <section id="role-cards" class="guide-section">
+            <h2><i class="fa fa-id-card" style="color: var(--primary);"></i> 7. Printable Role Quick Reference Cards</h2>
+            <p>Print these 1-page summaries to laminate and attach to workstations:</p>
+
+            <div class="role-grid">
+                <!-- CARD 1: CASHIER -->
+                <div class="role-card">
+                    <div class="role-card-header">
+                        <h4><i class="fa fa-cash-register"></i> Cashier (អ្នកគិតលុយ)</h4>
+                        <span class="badge-pill badge-primary">Counter</span>
+                    </div>
+                    <ul>
+                        <li><i class="fa fa-check"></i> Count opening float before tapping [Start Shift]</li>
+                        <li><i class="fa fa-check"></i> Always search plate first (F2)</li>
+                        <li><i class="fa fa-check"></i> Select vehicle size type accurately</li>
+                        <li><i class="fa fa-check"></i> Offer suggested upsells (wax, engine flush)</li>
+                        <li><i class="fa fa-check"></i> Upload bank slip photo on ABA/KHQR</li>
+                        <li><i class="fa fa-check"></i> "No Receipt, No Wash" on every vehicle</li>
+                        <li><i class="fa fa-xmark"></i> NEVER wash without printed receipt</li>
+                        <li><i class="fa fa-xmark"></i> NEVER discount without Manager PIN</li>
+                        <li><i class="fa fa-xmark"></i> NEVER refund while offline</li>
+                    </ul>
+                </div>
+
+                <!-- CARD 2: WASHER -->
+                <div class="role-card">
+                    <div class="role-card-header">
+                        <h4><i class="fa fa-soap"></i> Washer (បុគ្គលិកលាង)</h4>
+                        <span class="badge-pill badge-success">Bays 1-3</span>
+                    </div>
+                    <ul>
+                        <li><i class="fa fa-check"></i> Check windshield receipt before spraying</li>
+                        <li><i class="fa fa-check"></i> Tap [Start Job] the second car enters bay</li>
+                        <li><i class="fa fa-check"></i> Clean wheels and apply tire shine evenly</li>
+                        <li><i class="fa fa-check"></i> Wipe windows streak-free inside and out</li>
+                        <li><i class="fa fa-check"></i> Perform 4-point dry QC checklist</li>
+                        <li><i class="fa fa-check"></i> Tap [Finish Car] to chime TV board</li>
+                        <li><i class="fa fa-xmark"></i> NEVER wash cars without a receipt</li>
+                        <li><i class="fa fa-xmark"></i> NEVER use dropped dirty towels on paint</li>
+                        <li><i class="fa fa-xmark"></i> NEVER spray high pressure closer than 30cm</li>
+                    </ul>
+                </div>
+
+                <!-- CARD 3: MECHANIC -->
+                <div class="role-card">
+                    <div class="role-card-header">
+                        <h4><i class="fa fa-wrench"></i> Mechanic (ជាងជួសជុល)</h4>
+                        <span class="badge-pill badge-warning">Bay 4</span>
+                    </div>
+                    <ul>
+                        <li><i class="fa fa-check"></i> Tap [Receive From Wash] on mixed orders</li>
+                        <li><i class="fa fa-check"></i> Submit digital parts requests for oil/filters</li>
+                        <li><i class="fa fa-check"></i> Perform digital 12-point inspection</li>
+                        <li><i class="fa fa-check"></i> Record exact liters used in <code>adjust_oil</code></li>
+                        <li><i class="fa fa-check"></i> Record odometer and write next oil sticker</li>
+                        <li><i class="fa fa-check"></i> Tap [Finish Task] to complete job</li>
+                        <li><i class="fa fa-xmark"></i> NEVER take parts without digital request</li>
+                        <li><i class="fa fa-xmark"></i> NEVER start engine without checking dipstick</li>
+                        <li><i class="fa fa-xmark"></i> NEVER guess oil viscosity specifications</li>
+                    </ul>
+                </div>
+
+                <!-- CARD 4: MANAGER -->
+                <div class="role-card">
+                    <div class="role-card-header">
+                        <h4><i class="fa fa-user-tie"></i> Manager (អ្នកគ្រប់គ្រង)</h4>
+                        <span class="badge-pill badge-danger">Floor & Desk</span>
+                    </div>
+                    <ul>
+                        <li><i class="fa fa-check"></i> Verify all bays online by 07:30 AM</li>
+                        <li><i class="fa fa-check"></i> Conduct unannounced surprise spot audits</li>
+                        <li><i class="fa fa-check"></i> Authorize discounts/voids with Manager PIN</li>
+                        <li><i class="fa fa-check"></i> Investigate cash shortages on shift handovers</li>
+                        <li><i class="fa fa-check"></i> Generate final Z-Report to close day</li>
+                        <li><i class="fa fa-check"></i> Scan audit logs daily for unauthorized voids</li>
+                        <li><i class="fa fa-xmark"></i> NEVER share Manager PIN with staff</li>
+                        <li><i class="fa fa-xmark"></i> NEVER approve offline refunds</li>
+                        <li><i class="fa fa-xmark"></i> NEVER ignore cash handover shortages</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION 8: GLOSSARY -->
+        <section id="glossary" class="guide-section">
+            <h2><i class="fa fa-book" style="color: var(--primary);"></i> 8. Bilingual English & Khmer Glossary</h2>
+            <table class="guide-table">
+                <thead>
+                    <tr>
+                        <th>English Term</th>
+                        <th>Khmer Term (ភាសាខ្មែរ)</th>
+                        <th>Operational Meaning</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>SmartQueue</strong></td>
+                        <td>ជួរឆ្លាតវៃ</td>
+                        <td>Intelligent scheduling engine calculating wait times from vehicle sizes and bay speed.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Blind Cashiering</strong></td>
+                        <td>ការគិតលុយបិទភ្នែក</td>
+                        <td>Hiding system cash sales from cashiers during shifts to force an honest physical count.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Opening Float</strong></td>
+                        <td>មូលនិធិដើមវេន</td>
+                        <td>Base change fund placed in register at shift start to tender customer change.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Handshake Protocol</strong></td>
+                        <td>ពិធីសារផ្ទេរការងារ</td>
+                        <td>Digital custody handover of a vehicle from Wash Bay to Technical Bay on mixed orders.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Immutable Ledger</strong></td>
+                        <td>បញ្ជីទំនិញមិនអាចកែប្រែបាន</td>
+                        <td>Append-only warehouse ledger protected by database triggers against updates or deletes.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Z-Report</strong></td>
+                        <td>របាយការណ៍ Z</td>
+                        <td>Official final financial summary generated at day close that resets daily sales counters.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+    </main>
+
+    <script>
+        // Interactive live search filter
+        function filterGuideTopics() {
+            const query = document.getElementById('guideSearchInput').value.toLowerCase();
+            const sections = document.querySelectorAll('section.guide-section');
+            const navLinks = document.querySelectorAll('.guide-nav .nav-link');
+
+            sections.forEach(sec => {
+                const text = sec.innerText.toLowerCase();
+                sec.style.display = text.includes(query) ? 'block' : 'none';
+            });
+
+            navLinks.forEach(link => {
+                const text = link.innerText.toLowerCase();
+                link.style.display = text.includes(query) ? 'flex' : 'none';
+            });
+        }
+
+        // Active link tracking on scroll
+        window.addEventListener('scroll', () => {
+            const sections = document.querySelectorAll('section.guide-section');
+            const navLinks = document.querySelectorAll('.guide-nav .nav-link');
+            let current = '';
+
+            sections.forEach(sec => {
+                const top = sec.offsetTop;
+                if (pageYOffset >= (top - 120)) {
+                    current = sec.getAttribute('id');
+                }
+            });
+
+            navLinks.forEach(link => {
+                link.classList.remove('active');
+                if (link.getAttribute('href') === '#' + current) {
+                    link.classList.add('active');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
