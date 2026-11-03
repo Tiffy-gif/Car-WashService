@@ -1,5 +1,6 @@
 # Storage and cache
 storage/
+storage/snapshots/
 
 # Dependencies
 node_modules/
