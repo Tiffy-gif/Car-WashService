@@ -117,10 +117,20 @@ foreach ($forbiddenFolders as $folder) {
 $noForbiddenFolders = empty($existingForbidden);
 printResult("No Pos-Carwash/ or scratch/ in web root", $noForbiddenFolders, $noForbiddenFolders ? "Clean web root" : "Found: " . implode(', ', $existingForbidden));
 
-// 3e. No dev helper scripts present
-$devHelperFile = dirname(__DIR__) . '/scripts/dev_reset_logins.php';
-$hasDevHelper = file_exists($devHelperFile);
-printResult("No dev helper scripts present", !$hasDevHelper, $hasDevHelper ? "Found: scripts/dev_reset_logins.php" : "Clean: dev helper scripts absent");
+// 3e. No dev helper scripts or snapshots present
+$devArtifacts = [
+    dirname(__DIR__) . '/scripts/dev_reset_logins.php',
+    dirname(__DIR__) . '/scripts/dev_data_tool.php',
+    dirname(__DIR__) . '/storage/snapshots',
+];
+$foundDevArtifacts = [];
+foreach ($devArtifacts as $art) {
+    if (file_exists($art)) {
+        $foundDevArtifacts[] = (is_dir($art) ? basename($art) . '/' : basename($art));
+    }
+}
+$noDevArtifacts = empty($foundDevArtifacts);
+printResult("No dev helper scripts or snapshots present", $noDevArtifacts, $noDevArtifacts ? "Clean: dev helper scripts and snapshots absent" : "Found: " . implode(', ', $foundDevArtifacts));
 
 // 4. API_BASE_URL uses https
 $apiUrl = defined('API_BASE_URL') ? API_BASE_URL : '';
