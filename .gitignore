@@ -5,6 +5,9 @@ storage/snapshots/
 # Dependencies
 node_modules/
 
+# Graphify output
+graphify-out/
+
 # Database dumps & SQL
 *.sql
 
