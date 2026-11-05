@@ -221,47 +221,6 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
         </div>
     </div>
 </div>
-        </h2>
-        <span class="badge <?= $totalPending > 0 ? 'badge-warning' : 'badge-success' ?>">
-            <?= $totalPending ?> unsynced record(s)
-        </span>
-    </div>
-
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
-        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
-            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-receipt mr-1"></i> Sales / Invoices</div>
-            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['orders'] ?></div>
-        </div>
-        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
-            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-wrench mr-1"></i> Job Orders &amp; Tasks</div>
-            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['tasks'] ?></div>
-        </div>
-        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
-            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-boxes-stacked mr-1"></i> Stock Movements</div>
-            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['stock'] ?></div>
-        </div>
-        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
-            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-cash-register mr-1"></i> Shifts &amp; Z-Reports</div>
-            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['shifts'] ?></div>
-        </div>
-        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
-            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-business-time mr-1"></i> Staff Timecards</div>
-            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['timecards'] ?></div>
-        </div>
-        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
-            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-heart mr-1"></i> CRM &amp; Loyalty</div>
-            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['loyalty'] ?></div>
-        </div>
-        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
-            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-shield-halved mr-1"></i> Audit Logs</div>
-            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['audit'] ?></div>
-        </div>
-        <div style="background: var(--bg-surface-alt, #f8fafc); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
-            <div style="font-size: 12px; color: var(--text-muted);"><i class="fa-solid fa-chart-line mr-1"></i> Performance Metrics</div>
-            <div style="font-size: 20px; font-weight: 700; margin-top: 4px;"><?= $syncCounts['performance_metrics'] ?? 0 ?></div>
-        </div>
-    </div>
-</div>
 
 <!-- Conflicts Review Section -->
 <?php if ($conflictCount > 0): ?>
