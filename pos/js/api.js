@@ -544,24 +544,6 @@ class PosApi {
         });
     }
 
-    /**
-     * Customer Arrived: Cashier marks vehicle arrived (joins queue)
-     */
-    static async markCustomerArrived(orderId, plateNumber = '') {
-        const user = PosStorage.getUser();
-        return await this.request('customer_arrived', {
-            order_id: orderId,
-            plate_number: plateNumber,
-            staff_id: user?.id || null
-        });
-    }
-
-    /**
-     * Live Bays & Queue Summary
-     */
-    static async getBaysAndQueue() {
-        return await this.request('get_bays_and_queue');
-    }
 
     /**
      * Washer Screen: Fetch washer jobs, bays, and queue

@@ -7080,11 +7080,14 @@ class PosApp {
     static async renderJobQueue() {
         const grid = document.getElementById('queueGrid');
         if (!grid) return;
+        if (this.isQueueRendering) return;
+        this.isQueueRendering = true;
 
-        const errorBanner = document.getElementById('queueErrorBanner');
-        const offlineBanner = document.getElementById('queueOfflineBanner');
-        if (errorBanner) errorBanner.style.display = 'none';
-        if (offlineBanner) offlineBanner.style.display = 'none';
+        try {
+            const errorBanner = document.getElementById('queueErrorBanner');
+            const offlineBanner = document.getElementById('queueOfflineBanner');
+            if (errorBanner) errorBanner.style.display = 'none';
+            if (offlineBanner) offlineBanner.style.display = 'none';
 
         // Requirement 1 & 4: Fetch bays and queue data
         await this.fetchBaysAndQueue(true);
@@ -7328,6 +7331,9 @@ class PosApp {
                 this.printWasherTicket(num);
             }
         };
+        } finally {
+            this.isQueueRendering = false;
+        }
     }
 
     // Requirement 7: Offline status changes saved in queue, sent when connection returns, not overwritten
@@ -11646,6 +11652,13 @@ class PosApp {
                 await this.renderWasherScreen();
             } else if (role === 'technical' || role === 'mechanic') {
                 await this.renderMechanicScreen();
+            } else if (this.currentView === 'queue') {
+                const activeModal = document.querySelector('.modal.open');
+                if (!activeModal) {
+                    await this.renderJobQueue();
+                } else {
+                    await this.fetchBaysAndQueue(true);
+                }
             } else {
                 await this.fetchBaysAndQueue(true);
             }
