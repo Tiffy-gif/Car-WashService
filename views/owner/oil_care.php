@@ -282,13 +282,24 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
     }
 }
 
-// Fetch Oil Change Due Reminders
+// Fetch Oil Change Due Reminders (latest record per vehicle)
 $reminderFilter = $_GET['filter'] ?? 'all';
 $today = date('Y-m-d');
 $soonDate = date('Y-m-d', strtotime('+30 days'));
 
-$remSql = "SELECT * FROM oil_change_logs ORDER BY next_due_date ASC";
-$allReminders = $pdo->query($remSql)->fetchAll();
+$remSql = "SELECT o.* 
+           FROM oil_change_logs o
+           INNER JOIN (
+               SELECT plate_number, MAX(id) as max_id
+               FROM oil_change_logs
+               GROUP BY plate_number
+           ) latest ON o.id = latest.max_id
+           ORDER BY o.next_due_date ASC";
+try {
+    $allReminders = $pdo->query($remSql)->fetchAll();
+} catch (Throwable $e) {
+    $allReminders = $pdo->query("SELECT * FROM oil_change_logs ORDER BY next_due_date ASC")->fetchAll();
+}
 
 $dueSoonCount = 0;
 $overdueCount = 0;
@@ -296,18 +307,24 @@ $goodCount = 0;
 
 $filteredReminders = [];
 foreach ($allReminders as $rem) {
-    $dueDate = $rem['next_due_date'];
-    $diffDays = (int)round((strtotime($dueDate) - strtotime($today)) / 86400);
-
-    if ($diffDays < 0) {
-        $statusKey = 'overdue';
-        $overdueCount++;
-    } elseif ($diffDays <= 30) {
-        $statusKey = 'due_soon';
-        $dueSoonCount++;
-    } else {
+    $dueDate = $rem['next_due_date'] ?? '';
+    if (empty($dueDate) || strtotime($dueDate) === false) {
+        $diffDays = 0;
         $statusKey = 'good';
         $goodCount++;
+    } else {
+        $diffDays = (int)round((strtotime($dueDate) - strtotime($today)) / 86400);
+
+        if ($diffDays < 0) {
+            $statusKey = 'overdue';
+            $overdueCount++;
+        } elseif ($diffDays <= 30) {
+            $statusKey = 'due_soon';
+            $dueSoonCount++;
+        } else {
+            $statusKey = 'good';
+            $goodCount++;
+        }
     }
 
     $rem['diff_days'] = $diffDays;
@@ -408,7 +425,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 
 <!-- Tabs Header -->
 <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 24px; flex-wrap: wrap;">
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'requests') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('requests')">
+    <button type="button" data-tab-target="requests" class="btn btn-sm <?= ($activeTab === 'requests') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('requests')">
         <i class="fa-solid fa-boxes-packing mr-1" style="color: #ea580c;"></i> Parts Requests
         <?php if ($pendingReqCount > 0): ?>
             <span class="badge badge-danger" style="margin-left: 6px; font-weight: 800;"><?= $pendingReqCount ?> Pending</span>
@@ -416,13 +433,13 @@ include dirname(__DIR__) . '/layouts/header.php';
             <span class="badge badge-slate" style="margin-left: 6px;">0</span>
         <?php endif; ?>
     </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'products') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('products')">
+    <button type="button" data-tab-target="products" class="btn btn-sm <?= ($activeTab === 'products') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('products')">
         <i class="fa-solid fa-boxes-stacked mr-1"></i> Products &amp; Stock (<?= $catCounts['all'] ?>)
     </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'discrepancies') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('discrepancies')">
+    <button type="button" data-tab-target="discrepancies" class="btn btn-sm <?= ($activeTab === 'discrepancies') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('discrepancies')">
         <i class="fa-solid fa-scale-unbalanced mr-1" style="color: #8b5cf6;"></i> Discrepancy Log (<?= count($discrepancies) ?>)
     </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'reminders') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('reminders')">
+    <button type="button" data-tab-target="reminders" class="btn btn-sm <?= ($activeTab === 'reminders') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('reminders')">
         <i class="fa-solid fa-bell mr-1" style="color: #f59e0b;"></i> Oil Due Reminders (<?= count($allReminders) ?>)
         <?php if ($dueSoonCount > 0 || $overdueCount > 0): ?>
             <span class="badge badge-amber" style="margin-left: 6px;"><?= $dueSoonCount + $overdueCount ?> Alert</span>
@@ -687,15 +704,19 @@ include dirname(__DIR__) . '/layouts/header.php';
 
     <!-- Filter Buttons & Search -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
-        <div style="display: flex; gap: 8px;">
-            <a href="?view=oil_care&tab=reminders&filter=all" class="btn btn-sm <?= ($reminderFilter === 'all') ? 'btn-primary' : 'btn-secondary' ?>">All Vehicles</a>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <a href="?view=oil_care&tab=reminders&filter=all" class="btn btn-sm <?= ($reminderFilter === 'all') ? 'btn-primary' : 'btn-secondary' ?>">
+                All Vehicles (<?= count($allReminders) ?>)
+            </a>
             <a href="?view=oil_care&tab=reminders&filter=due_soon" class="btn btn-sm <?= ($reminderFilter === 'due_soon') ? 'btn-primary' : 'btn-secondary' ?>">
-                <i class="fa-solid fa-triangle-exclamation mr-1" style="color: var(--warning);"></i> Due Soon (<?= $dueSoonCount ?>)
+                <i class="fa-solid fa-triangle-exclamation mr-1" style="<?= ($reminderFilter === 'due_soon') ? '' : 'color: var(--warning);' ?>"></i> Due Soon (<?= $dueSoonCount ?>)
             </a>
             <a href="?view=oil_care&tab=reminders&filter=overdue" class="btn btn-sm <?= ($reminderFilter === 'overdue') ? 'btn-primary' : 'btn-secondary' ?>">
-                <i class="fa-solid fa-circle-exclamation mr-1" style="color: var(--danger);"></i> Overdue (<?= $overdueCount ?>)
+                <i class="fa-solid fa-circle-exclamation mr-1" style="<?= ($reminderFilter === 'overdue') ? '' : 'color: var(--danger);' ?>"></i> Overdue (<?= $overdueCount ?>)
             </a>
-            <a href="?view=oil_care&tab=reminders&filter=good" class="btn btn-sm <?= ($reminderFilter === 'good') ? 'btn-primary' : 'btn-secondary' ?>">Good</a>
+            <a href="?view=oil_care&tab=reminders&filter=good" class="btn btn-sm <?= ($reminderFilter === 'good') ? 'btn-primary' : 'btn-secondary' ?>">
+                <i class="fa-solid fa-circle-check mr-1" style="<?= ($reminderFilter === 'good') ? '' : 'color: var(--success);' ?>"></i> Good (<?= $goodCount ?>)
+            </a>
         </div>
         <input type="text" id="tableSearchInput" class="form-input" style="width: 240px; min-height: 38px; padding: 4px 12px;" placeholder="Search plate or customer...">
     </div>
@@ -749,7 +770,14 @@ include dirname(__DIR__) . '/layouts/header.php';
                                 <strong style="font-size: 15px; color: var(--primary);">
                                     <?= number_format((int)$r['next_due_mileage']) ?> km
                                 </strong>
-                                <div class="text-xs text-muted">+10,000 km interval</div>
+                                <?php 
+                                    $intervalKm = (int)$r['next_due_mileage'] - (int)$r['current_mileage'];
+                                ?>
+                                <?php if ($intervalKm > 0): ?>
+                                    <div class="text-xs text-muted">+<?= number_format($intervalKm) ?> km interval</div>
+                                <?php else: ?>
+                                    <div class="text-xs text-muted">Scheduled Target</div>
+                                <?php endif; ?>
                             </td>
                             <td>
                                 <strong><?= htmlspecialchars((string)$r['next_due_date']) ?></strong>
@@ -1063,7 +1091,18 @@ include dirname(__DIR__) . '/layouts/header.php';
 <script>
 function switchTab(tabId) {
     document.querySelectorAll('.tab-pane').forEach(el => el.style.display = 'none');
-    document.getElementById('tab_' + tabId).style.display = 'block';
+    const targetPane = document.getElementById('tab_' + tabId);
+    if (targetPane) targetPane.style.display = 'block';
+
+    document.querySelectorAll('[data-tab-target]').forEach(btn => {
+        if (btn.getAttribute('data-tab-target') === tabId) {
+            btn.classList.remove('btn-secondary');
+            btn.classList.add('btn-primary');
+        } else {
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-secondary');
+        }
+    });
 
     const url = new URL(window.location);
     url.searchParams.set('tab', tabId);
@@ -1221,6 +1260,13 @@ function openEditProductModal(btnOrP) {
     openModal('productModal');
 }
 
+<?php
+$cfgShopName = get_setting('shop_name_en', get_setting('shop_name', 'AquaGleam Car Wash & Detailing'));
+$cfgShopPhone = get_setting('shop_phone', '012 334 556');
+?>
+const shopName = <?= json_encode($cfgShopName) ?>;
+const shopPhone = <?= json_encode($cfgShopPhone) ?>;
+
 let currentReminderCopyText = '';
 function openReminderAlertModal(btnOrName, plate, nextMileage, dueDate) {
     let customerName = btnOrName;
@@ -1230,17 +1276,44 @@ function openReminderAlertModal(btnOrName, plate, nextMileage, dueDate) {
         nextMileage = btnOrName.getAttribute('data-mileage');
         dueDate = btnOrName.getAttribute('data-due');
     }
-    const text = `AquaGleam Oil Change Reminder:\nDear ${customerName}, your vehicle ${plate} is due for its next engine oil change at ${nextMileage} KM (Due by: ${dueDate}). Visit us for premium synthetic oil & genuine filters! Tel: 012 334 556`;
+    const phonePart = shopPhone ? ` Tel: ${shopPhone}` : '';
+    const text = `${shopName} Oil Change Reminder:\nDear ${customerName}, your vehicle ${plate} is due for its next engine oil change at ${nextMileage} KM (Due by: ${dueDate}). Visit us for premium synthetic oil & genuine filters!${phonePart}`;
     currentReminderCopyText = text;
-    document.getElementById('reminderMsgBox').innerText = text;
+    const msgBox = document.getElementById('reminderMsgBox');
+    if (msgBox) msgBox.innerText = text;
     openModal('reminderAlertModal');
 }
 
 function copyReminderText() {
-    navigator.clipboard.writeText(currentReminderCopyText).then(() => {
-        alert('Reminder message copied to clipboard!');
-    });
+    const text = currentReminderCopyText;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            alert('Reminder message copied to clipboard!');
+        }).catch(() => {
+            fallbackCopy(text);
+        });
+    } else {
+        fallbackCopy(text);
+    }
 }
+
+function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        document.execCommand('copy');
+        alert('Reminder message copied to clipboard!');
+    } catch (e) {
+        alert('Please manually copy the text from the preview box.');
+    }
+    document.body.removeChild(ta);
+}
+</script>
+
 <!-- Modal: Reject Parts Request -->
 <div class="modal-backdrop" id="rejectPartsModal">
     <div class="modal" style="max-width: 440px;">
