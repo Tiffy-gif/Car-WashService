@@ -843,6 +843,7 @@ class PosApp {
             this.renderCatalog();
             this.renderCart();
             this.populateCrewDropdowns();
+            this.fetchBaysAndQueue(true).catch(() => {});
         } else if (current === 'queue') {
             this.renderJobQueue();
         } else if (current === 'orders') {
@@ -2968,6 +2969,7 @@ class PosApp {
             this.renderCatalog();
             this.renderCart();
             this.populateCrewDropdowns();
+            this.fetchBaysAndQueue(true).catch(() => {});
 
             // Resolve initial view
             if (canPosAccess) {
@@ -3074,6 +3076,9 @@ class PosApp {
 
         if (viewName === 'pos') {
             this.populateCrewDropdowns();
+            if (this.currentUser) {
+                this.fetchBaysAndQueue(true).catch(() => {});
+            }
         } else if (viewName === 'queue') {
             this.renderJobQueue();
         } else if (viewName === 'orders') {
@@ -3966,6 +3971,11 @@ class PosApp {
     static updateCartQty(index, delta) {
         if (!this.cart[index]) return;
         const item = this.cart[index];
+        if (delta > 0 && item.is_member_benefit) {
+            const limitMsg = I18nManager.t('memberBenefitQtyLimit') || 'Included member benefit is limited to 1 item.';
+            this.showToastNotice(limitMsg, 'warning');
+            return;
+        }
         if (delta > 0 && item.product_id) {
             const catalog = PosStorage.getCatalog();
             const prod = (catalog?.products || []).find(p => p.id === item.product_id);
@@ -4001,6 +4011,11 @@ class PosApp {
         document.getElementById('cartLoyaltyRewardStatusBadge')?.setAttribute('style', 'display: none;');
         document.querySelectorAll('.disc-btn').forEach(b => b.classList.remove('active'));
         document.querySelector('.disc-btn[data-disc="0"]')?.classList.add('active');
+        if (document.getElementById('cartMileageInput')) document.getElementById('cartMileageInput').value = '';
+        if (document.getElementById('cartNextOilMileageInput')) document.getElementById('cartNextOilMileageInput').value = '';
+        if (document.getElementById('cartNextOilDateInput')) document.getElementById('cartNextOilDateInput').value = '';
+        if (document.getElementById('cartRepairNotesInput')) document.getElementById('cartRepairNotesInput').value = '';
+        if (document.getElementById('cartOilReminderBox')) document.getElementById('cartOilReminderBox').style.display = 'none';
         this.renderCart();
     }
 
@@ -4750,7 +4765,9 @@ class PosApp {
         // Update UI
         document.getElementById('custDropdown')?.classList.remove('open');
         this.closeSavedCustomersPanel();
-        document.getElementById('custSearchInput').value = '';
+        const custInp = document.getElementById('custSearchInput');
+        if (custInp) custInp.value = '';
+        this.handleGlobalSearch('');
         document.getElementById('selectedCustBadgeWrap').style.display = 'block';
         document.getElementById('badgePlate').textContent = cleanPlate;
         document.getElementById('badgeName').textContent = cleanName;
@@ -4797,7 +4814,9 @@ class PosApp {
         if (this._dismissedUpsellIds) this._dismissedUpsellIds.clear();
         document.getElementById('modalUpsellPrompt')?.classList.remove('open');
         document.getElementById('selectedCustBadgeWrap').style.display = 'none';
-        document.getElementById('custSearchInput').value = '';
+        const custInp = document.getElementById('custSearchInput');
+        if (custInp) custInp.value = '';
+        this.handleGlobalSearch('');
         const topCustName = document.getElementById('topbarCustomerName');
         if (topCustName) {
             topCustName.textContent = I18nManager.t('generalCustomer');
@@ -5575,7 +5594,7 @@ class PosApp {
                 this.currentCustomer.plate = plate;
                 this.currentCustomer.vehicle_type = customer.vehicle_type;
             }
-            const pInput = document.getElementById('searchCustomerInput');
+            const pInput = document.getElementById('custSearchInput') || document.getElementById('searchCustomerInput');
             if (pInput) pInput.value = plate;
         }
 
@@ -5785,7 +5804,7 @@ class PosApp {
                 this.currentCustomer.plate = plate;
                 this.currentCustomer.vehicle_type = customer.vehicle_type;
             }
-            const pInput = document.getElementById('searchCustomerInput');
+            const pInput = document.getElementById('custSearchInput') || document.getElementById('searchCustomerInput');
             if (pInput) pInput.value = plate;
         }
 

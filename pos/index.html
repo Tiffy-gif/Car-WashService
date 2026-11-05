@@ -361,7 +361,7 @@
 
             <!-- Bay Status Strip (Requirement 1: Live summary of bays and queue) -->
             <div class="pos-bay-status-strip" id="posBayStatusStrip">
-                <div class="bay-strip-queue-summary" id="stripQueueSummary">
+                <div class="bay-strip-queue-summary" id="stripQueueSummary" style="cursor: pointer;" title="View Queue" onclick="if(window.PosApp) PosApp.switchView('queue')">
                     <i class="fa-solid fa-list-ol"></i>
                     <span>Queue: <strong id="stripWaitingCount">0</strong> waiting</span>
                 </div>
@@ -382,8 +382,7 @@
                             <i class="fa-solid fa-magnifying-glass search-icon-left"></i>
                             <input type="text" id="custSearchInput" class="search-input"
                                 placeholder="ស្វែងរកតាមស្លាកលេខ រថយន្ត លេខទូរស័ព្ទ..."
-                                data-i18n="searchCustomerPlate" autocomplete="off"
-                                oninput="if(window.PosApp) PosApp.handleGlobalSearch(this.value)">
+                                data-i18n="searchCustomerPlate" autocomplete="off">
                             <!-- Saved Customers Button inside right end of search bar -->
                             <button type="button" class="btn-saved-customers-icon" id="btnOpenSavedCustomers"
                                 title="Saved customers" data-i18n-title="savedCustomersTooltip"
