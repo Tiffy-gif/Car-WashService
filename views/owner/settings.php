@@ -568,46 +568,48 @@ require_once dirname(__DIR__) . '/layouts/header.php';
 <?php endif; ?>
 
 <!-- Settings Navigation Tabs -->
-<div style="display: flex; gap: 6px; border-bottom: 2px solid var(--border); padding-bottom: 8px; margin-bottom: 24px; flex-wrap: wrap;">
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'shop') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('shop')">
-        <i class="fa-solid fa-store mr-1"></i> 1. Shop Info
-    </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'receipt') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('receipt')">
-        <i class="fa-solid fa-receipt mr-1"></i> 2. Receipt
-    </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'money') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('money')">
-        <i class="fa-solid fa-money-bill-transfer mr-1"></i> 3. Money &amp; Rate
-    </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'payment') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('payment')">
-        <i class="fa-solid fa-qrcode mr-1"></i> 4. ABA &amp; KHQR
-    </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'bays') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('bays')">
-        <i class="fa-solid fa-warehouse mr-1"></i> <?= htmlspecialchars(__('nav_bays_queue', 'Bays & Queue')) ?>
-    </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'oil') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('oil')">
-        <i class="fa-solid fa-oil-can mr-1"></i> 5. Oil Reminders
-    </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'loyalty') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('loyalty')">
-        <i class="fa-solid fa-award mr-1" style="color: #f59e0b;"></i> 6. Loyalty &amp; Tiers
-    </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'performance') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('performance')">
-        <i class="fa-solid fa-gauge-high mr-1" style="color: #10b981;"></i> 7. Performance &amp; Leaderboard
-    </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'telegram') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('telegram')">
-        <i class="fa-brands fa-telegram mr-1" style="color: #0284c7;"></i> 8. Telegram
-    </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'sync') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('sync')">
-        <i class="fa-solid fa-cloud-arrow-up mr-1" style="color: #6366f1;"></i> 9. Cloud Sync
-        <?php if (empty($settings['cloud_api_url']) || empty($settings['cloud_api_token']) || empty($settings['cloud_api_secret'])): ?>
-            <span class="badge badge-warning" style="margin-left: 4px; padding: 2px 6px; font-size: 10px;" title="Not configured">!</span>
-        <?php endif; ?>
-    </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'system') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('system')">
-        <i class="fa-solid fa-sliders mr-1"></i> 10. System
-    </button>
-    <button type="button" class="btn btn-sm <?= ($activeTab === 'history') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('history')">
-        <i class="fa-solid fa-clock-rotate-left mr-1"></i> Change History (<?= count($historyList) ?>)
-    </button>
+<div class="settings-nav-scroll" style="overflow-x: auto; -webkit-overflow-scrolling: touch; border-bottom: 2px solid var(--border); padding-bottom: 10px; margin-bottom: 24px; scrollbar-width: thin;">
+    <div style="display: flex; gap: 8px; min-width: max-content; align-items: center;">
+        <button type="button" data-tab-target="shop" class="btn btn-sm <?= ($activeTab === 'shop') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('shop')" style="white-space: nowrap; flex-shrink: 0;">
+            <i class="fa-solid fa-store mr-1"></i> 1. Shop Info
+        </button>
+        <button type="button" data-tab-target="receipt" class="btn btn-sm <?= ($activeTab === 'receipt') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('receipt')" style="white-space: nowrap; flex-shrink: 0;">
+            <i class="fa-solid fa-receipt mr-1"></i> 2. Receipt
+        </button>
+        <button type="button" data-tab-target="money" class="btn btn-sm <?= ($activeTab === 'money') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('money')" style="white-space: nowrap; flex-shrink: 0;">
+            <i class="fa-solid fa-money-bill-transfer mr-1"></i> 3. Money &amp; Rate
+        </button>
+        <button type="button" data-tab-target="payment" class="btn btn-sm <?= ($activeTab === 'payment') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('payment')" style="white-space: nowrap; flex-shrink: 0;">
+            <i class="fa-solid fa-qrcode mr-1"></i> 4. ABA &amp; KHQR
+        </button>
+        <button type="button" data-tab-target="bays" class="btn btn-sm <?= ($activeTab === 'bays') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('bays')" style="white-space: nowrap; flex-shrink: 0;">
+            <i class="fa-solid fa-warehouse mr-1"></i> 5. <?= htmlspecialchars(__('nav_bays_queue', 'Bays & Queue')) ?>
+        </button>
+        <button type="button" data-tab-target="oil" class="btn btn-sm <?= ($activeTab === 'oil') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('oil')" style="white-space: nowrap; flex-shrink: 0;">
+            <i class="fa-solid fa-oil-can mr-1"></i> 6. Oil Reminders
+        </button>
+        <button type="button" data-tab-target="loyalty" class="btn btn-sm <?= ($activeTab === 'loyalty') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('loyalty')" style="white-space: nowrap; flex-shrink: 0;">
+            <i class="fa-solid fa-award mr-1" style="color: #f59e0b;"></i> 7. Loyalty &amp; Tiers
+        </button>
+        <button type="button" data-tab-target="performance" class="btn btn-sm <?= ($activeTab === 'performance') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('performance')" style="white-space: nowrap; flex-shrink: 0;">
+            <i class="fa-solid fa-gauge-high mr-1" style="color: #10b981;"></i> 8. Performance &amp; Leaderboard
+        </button>
+        <button type="button" data-tab-target="telegram" class="btn btn-sm <?= ($activeTab === 'telegram') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('telegram')" style="white-space: nowrap; flex-shrink: 0;">
+            <i class="fa-brands fa-telegram mr-1" style="color: #0284c7;"></i> 9. Telegram
+        </button>
+        <button type="button" data-tab-target="sync" class="btn btn-sm <?= ($activeTab === 'sync') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('sync')" style="white-space: nowrap; flex-shrink: 0;">
+            <i class="fa-solid fa-cloud-arrow-up mr-1" style="color: #6366f1;"></i> 10. Cloud Sync
+            <?php if (empty($settings['cloud_api_url']) || empty($settings['cloud_api_token']) || empty($settings['cloud_api_secret'])): ?>
+                <span class="badge badge-warning" style="margin-left: 4px; padding: 2px 6px; font-size: 10px;" title="Not configured">!</span>
+            <?php endif; ?>
+        </button>
+        <button type="button" data-tab-target="system" class="btn btn-sm <?= ($activeTab === 'system') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('system')" style="white-space: nowrap; flex-shrink: 0;">
+            <i class="fa-solid fa-sliders mr-1"></i> 11. System
+        </button>
+        <button type="button" data-tab-target="history" class="btn btn-sm <?= ($activeTab === 'history') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('history')" style="white-space: nowrap; flex-shrink: 0;">
+            <i class="fa-solid fa-clock-rotate-left mr-1"></i> Change History (<?= count($historyList) ?>)
+        </button>
+    </div>
 </div>
 
 <!-- ======================================================== -->
@@ -2001,9 +2003,10 @@ function switchTab(tabId) {
         target.style.display = 'block';
     }
     // Update button active states
-    document.querySelectorAll('[onclick^="switchTab"]').forEach(btn => {
-        if (btn.getAttribute('onclick').includes(tabId)) {
+    document.querySelectorAll('[data-tab-target]').forEach(btn => {
+        if (btn.getAttribute('data-tab-target') === tabId) {
             btn.className = 'btn btn-sm btn-primary';
+            btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
         } else {
             btn.className = 'btn btn-sm btn-secondary';
         }
@@ -2013,6 +2016,14 @@ function switchTab(tabId) {
     url.searchParams.set('tab', tabId);
     window.history.replaceState({}, '', url);
 }
+
+// Auto-scroll active tab into view on page load
+document.addEventListener('DOMContentLoaded', function() {
+    const activeBtn = document.querySelector('[data-tab-target].btn-primary');
+    if (activeBtn) {
+        activeBtn.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' });
+    }
+});
 
 // Live Exchange Rate Calculator & Confirmation
 const rateInput = document.getElementById('new_exchange_rate_input');
