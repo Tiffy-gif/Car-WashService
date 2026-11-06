@@ -3,7 +3,13 @@
 **Document ID:** POS-REV-2026-003  
 **Project:** Car-WashService  
 **Date:** November 6, 2026  
-**Status:** Complete Architectural Revision – Awaiting Management Approval  
+**Status:** Superseded by Round 4 – See [POS-FINAL-REVIEW-CHANGELOG-4.md](file:///C:/xampp/htdocs/Car-WashService/POS-FINAL-REVIEW-CHANGELOG-4.md)  
+
+---
+
+> [!NOTE]
+> **Round 4 Audit Update:**  
+> Financial integrity and deployment consistency corrections have been implemented in Round 4. For the latest authoritative specifications, please refer to [POS-FINAL-REVIEW-CHANGELOG-4.md](file:///C:/xampp/htdocs/Car-WashService/POS-FINAL-REVIEW-CHANGELOG-4.md).
 
 ---
 
