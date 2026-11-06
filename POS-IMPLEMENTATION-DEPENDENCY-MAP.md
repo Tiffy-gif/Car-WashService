@@ -30,6 +30,8 @@ graph TD
 
     subgraph DatabaseTables["Database Persistence Layer"]
         T_Ord[("orders")]
+        T_Pay[("order_payments (Ledger)")]
+        T_Ref[("order_refunds (Ledger)")]
         T_Item[("order_items")]
         T_Bay[("bays")]
         T_BayHist[("bay_history")]
@@ -38,6 +40,7 @@ graph TD
         T_Mech[("order_mechanics")]
         T_Shift[("cashier_shifts")]
         T_Audit[("audit_logs")]
+        T_Webhook[("webhook_events")]
     end
 
     subgraph Peripherals["Hardware & Presentation Layer"]
@@ -94,6 +97,7 @@ graph TD
         │     ├── Set receipt_issued_at = NOW() (Electronic receipt contract established)
         │     ├── INSERT INTO orders (...)
         │     ├── INSERT INTO order_items (...)
+        │     ├── INSERT INTO order_payments (order_id, payment_seq=1, amount_usd, payment_method='cash', payment_provider='cash', merchant_account_id='counter_drawer', payment_ref=CONCAT('CASH-', order_number), cashier_id)
         │     │
         │     ├── [Stock Deduction via StockControl]
         │     │     └── StockControl::commitOrderStock(order_id, order_number, cashier_id)
@@ -159,7 +163,11 @@ graph TD
         │     │       AND merchant_account_id = '001-234567' 
         │     │       AND payment_ref = '849201';
         │     │     If exists -> HTTP 409 DUPLICATE_PAYMENT_REFERENCE
+        │     │     (CRITICAL: payment_provider, merchant_account_id, and payment_ref are strictly NOT NULL;
+        │     │      in MySQL, composite UNIQUE treats NULL != NULL, so NOT NULL is mandatory to prevent bypass)
         │     ├── Note: Backend records cashier attestation; does NOT simulate external bank calls
+        │     │     (Automated Webhooks contrast: require bank onboarding, signature verification per bank spec,
+        │     │      timestamp drift rejection > 300s, and replay protection via webhook_events table)
         │     ├── Verify cashier authenticated session
         │     │
         │     ├── [TRANSACTION BEGIN]
@@ -175,6 +183,11 @@ graph TD
         │     │     payment_verified_at = NOW(),
         │     │     receipt_number = 'REC-261106-0042',
         │     │     receipt_issued_at = NOW()
+        │     │
+        │     ├── INSERT INTO order_payments:
+        │     │     (order_id, payment_seq=1, amount_usd, payment_method='khqr', 
+        │     │      payment_provider='aba_payway', merchant_account_id='001-234567', 
+        │     │      payment_ref='849201', cashier_id)
         │     │
         │     ├── Atomically claim target bay or place in Priority Queue
         │     ├── OrderGate::assertAdmissibleToService($order) -> Passes electronic gate
@@ -223,8 +236,10 @@ graph TD
               │
               ├── [Stage 1: In Progress on Workshop Tablet: views/mechanic/jobs.php]
               │     ├── Mechanic drains oil, replaces filter, tops fluids
-              │     ├── Task-based commission logged with unique idempotency key:
+              │     ├── Task-based commission logged with deterministic idempotency key:
+              │     │     hash = sha256("comm_v1_order_{$orderId}_task_{$taskId}_worker_{$workerId}")
               │     │     INSERT INTO order_mechanics (order_id, task_id=101, mechanic_id, commission_usd, commission_idempotency_key)
+              │     │     (Retries compute identical key preventing duplicate payout; distinct tasks compute distinct keys)
               │     └── Mechanic taps "Complete Oil Stage"
               │           │
               │           ├── [core/BayManager::transitionStageAtomically(order_id, stage=1, next_stage=2, bay_id=4)]
@@ -242,7 +257,8 @@ graph TD
               └── [Stage 2: Auto-Transition to Wash Bay]
                     ├── tv.php alerts: "Car [Plate] moving to Wash Bay"
                     ├── Next free wash bay (Bay 1) atomically claims vehicle
-                    ├── Washer commission logged: INSERT INTO order_washers (order_id, task_id=102, washer_id, commission_idempotency_key)
+                    ├── Washer commission logged with deterministic idempotency key:
+                    │     INSERT INTO order_washers (order_id, task_id=102, washer_id, commission_usd, commission_idempotency_key)
                     └── Washers complete exterior wash & dry
 ```
 
@@ -268,19 +284,25 @@ graph TD
         │     │     │     Release Bay 4: UPDATE bays SET status = 'free', current_order_id = NULL WHERE id = 4
         │     │     │     If parts already poured into engine: Technician logs parts consumed
         │     │     │     Refund wash portion ($3.00) only; parts portion not refundable
-        │     │     │     Set payment_status = 'partially_refunded', refunded_amount = 3.00
         │     │     │
         │     │     └── If active_stage == 2 (Wash Bay):
         │     │           Mechanic commission for Stage 1 remains locked and credited
         │     │           Refund wash service ($3.00)
         │     │           Cancel Stage 2 queue ticket
-        │     │           Set payment_status = 'partially_refunded', refunded_amount = 3.00
+        │     │
+        │     ├── Record Discrete Refund in Ledger (Supports multiple partial refunds):
+        │     │     INSERT INTO order_refunds (order_id, refund_seq, amount_usd, reason, cashier_id, manager_user_id, attestation_status='cashier_attested')
+        │     │     (CRITICAL: Marking refund in POS is an administrative attestation by cashier/manager,
+        │     │      NOT physical/cryptographic proof that cash reached customer hands or bank reversed settlement)
+        │     │
+        │     ├── Update Cached Order Summaries:
+        │     │     UPDATE orders SET 
+        │     │       refunded_amount = (SELECT COALESCE(SUM(amount_usd),0) FROM order_refunds WHERE order_id = ?),
+        │     │       payment_status = CASE WHEN refunded_amount >= total_usd THEN 'refunded' ELSE 'partially_refunded' END,
+        │     │       status = 'cancelled', refunded_at = NOW() WHERE id = ?
         │     │
         │     ├── Restore unused products to stock via StockControl::reverseOrderStock()
         │     ├── Deactivate washer commission: UPDATE order_washers SET is_active = 0 WHERE order_id = ?
-        │     ├── Note: Operational cancellation separates from financial refund:
-        │     │     UPDATE orders SET status = 'cancelled', refunded_amount = :refund, refunded_at = NOW()
-        │     │     (payment_status becomes 'refunded' or 'partially_refunded'; remains 'paid' if unrefunded)
         │     ├── AuditLogger::log('ORDER_CANCELLED', "Order #... voided by Manager ...", ...)
         │     └── [TRANSACTION COMMIT]
         │
@@ -315,6 +337,8 @@ The following schema diagram and matrix detail all entities created, updated, or
 ```mermaid
 erDiagram
     orders ||--o{ order_items : contains
+    orders ||--o{ order_payments : records_tender
+    orders ||--o{ order_refunds : records_refunds
     orders ||--o{ order_tasks : tracks
     orders ||--o{ order_washers : attributes
     orders ||--o{ order_mechanics : attributes
@@ -328,7 +352,7 @@ erDiagram
         string order_number UK
         string idempotency_key UK
         string status "waiting, washing, finished, cancelled"
-        string payment_status "unpaid, paid, refunded, partially_refunded"
+        string payment_status "unpaid, paid, refunded, partially_refunded (Cached)"
         string payment_method "cash, khqr"
         string payment_provider "cash, aba_payway, bakong, acleda"
         string merchant_account_id
@@ -337,7 +361,7 @@ erDiagram
         int payment_verified_by_id FK
         string payment_verified_by_name
         datetime payment_verified_at
-        decimal refunded_amount
+        decimal refunded_amount "Cached aggregate"
         datetime refunded_at
         int active_stage "1 or 2"
         string stage_routing "bay4_to_wash"
@@ -345,62 +369,153 @@ erDiagram
         datetime receipt_issued_at "Electronic Issuance"
         datetime receipt_printed_at "Physical Paper Output"
     }
+
+    order_payments {
+        bigint id PK
+        int order_id FK
+        tinyint payment_seq "1, 2, ..."
+        decimal amount_usd
+        int amount_khr
+        string payment_method "cash, khqr, card"
+        string payment_provider "NOT NULL"
+        string merchant_account_id "NOT NULL"
+        string payment_ref "NOT NULL (Bank/Tender Ref)"
+        int cashier_id FK
+        datetime verified_at
+        datetime created_at
+    }
+
+    order_refunds {
+        bigint id PK
+        int order_id FK
+        tinyint refund_seq "Supports multiple partial refunds"
+        bigint payment_id FK "Optional link to specific tender"
+        decimal amount_usd
+        int amount_khr
+        string refund_method "cash, bank_reversal, store_credit"
+        string reason
+        int cashier_id FK
+        int manager_user_id FK
+        string attestation_status "cashier_attested (Administrative attestation)"
+        datetime created_at
+    }
+
+    webhook_events {
+        bigint id PK
+        string provider "aba_payway, bakong"
+        string event_id UK "Unique bank event ID"
+        string merchant_account_id
+        string payment_ref
+        decimal amount
+        string currency "USD, KHR"
+        datetime bank_timestamp
+        int drift_seconds "Must be < 300s"
+        string signature_hash
+        string processing_status "processed, rejected, duplicate"
+        datetime received_at
+    }
 ```
 
 | Table Name | Operations Performed | Critical Columns Impacted | Locking & Concurrency Standards |
 | :--- | :--- | :--- | :--- |
-| **`orders`** | `INSERT`, `UPDATE`, `SELECT` | `idempotency_key`, `status`, `payment_status`, `payment_provider`, `merchant_account_id`, `payment_ref`, `refunded_amount`, `receipt_number`, `receipt_issued_at` | Idempotency unique constraint; scoped unique index `UNIQUE(payment_provider, merchant_account_id, payment_ref)`. |
+| **`orders`** | `INSERT`, `UPDATE`, `SELECT` | `idempotency_key`, `status`, `payment_status`, `payment_provider`, `merchant_account_id`, `payment_ref`, `refunded_amount`, `receipt_number`, `receipt_issued_at` | Idempotency unique constraint; scoped unique index `UNIQUE(payment_provider, merchant_account_id, payment_ref)` with mandatory `NOT NULL` columns. `payment_status` & `refunded_amount` serve as cached aggregates. |
+| **`order_payments`** | `INSERT`, `SELECT` | `order_id`, `payment_seq`, `amount_usd`, `amount_khr`, `payment_method`, `payment_provider`, `merchant_account_id`, `payment_ref`, `cashier_id` | Immutable discrete payment transaction ledger. Unique key `(order_id, payment_seq)`. Scoped index `(payment_provider, merchant_account_id, payment_ref)`. |
+| **`order_refunds`** | `INSERT`, `SELECT` | `order_id`, `refund_seq`, `amount_usd`, `refund_method`, `reason`, `cashier_id`, `manager_user_id`, `attestation_status` | Discrete refund transaction ledger supporting multiple partial refunds. Unique key `(order_id, refund_seq)`. Records administrative attestation. |
+| **`webhook_events`** | `INSERT`, `SELECT` | `provider`, `event_id`, `payment_ref`, `bank_timestamp`, `processing_status` | Idempotency log for automated bank webhooks. Unique index on `(provider, event_id)`. Drift check rejects `|bank_ts - NOW()| > 300s`. |
 | **`order_items`** | `INSERT`, `SELECT` | `order_id`, `item_type`, `service_id`, `product_id`, `qty`, `price_usd` | Standard transactional insert inside order creation transaction. |
-| **`bays`** | `SELECT`, `UPDATE` | `status`, `reservation_state`, `hold_expires_at`, `current_order_id`, `occupied_at`, `last_freed_at` | **Atomic conditional lock:** `UPDATE bays ... WHERE id = ? AND status = 'free'`. Never marks occupied bay as reserved. Never auto-releases busy bay by timeout. |
+| **`bays`** | `SELECT`, `UPDATE` | `status`, `reservation_state`, `hold_expires_at`, `current_order_id`, `occupied_at`, `last_freed_at` | **Atomic conditional lock:** `UPDATE bays ... WHERE id = ? AND status = 'free'`. Never marks occupied bay as reserved. Never auto-releases busy bay by timeout. Expiry sweep strictly at 3 minutes with safety guard: `WHERE reservation_state = 'intake_reserved' AND status != 'busy' AND physical_occupancy = 'vacant' AND current_order_id IS NULL AND hold_expires_at < NOW()`. |
 | **`bay_history`** | `INSERT` | `order_id`, `bay_id`, `action`, `performed_by`, `performed_by_name`, `reason` | Append-only audit ledger for every bay movement. |
 | **`order_tasks`** | `INSERT`, `UPDATE` | `order_id`, `sequence`, `task_type`, `bay_id`, `status`, `started_at`, `completed_at` | Enforces single-execution stage completions via `WHERE sequence = ? AND status = 'waiting'`. |
-| **`order_washers`** | `INSERT`, `UPDATE` | `order_id`, `task_id`, `washer_id`, `commission_usd`, `commission_idempotency_key` | Unique constraint `UNIQUE(commission_idempotency_key)` to protect task-level commission idempotency while supporting multi-task earnings. |
-| **`order_mechanics`** | `INSERT`, `UPDATE` | `order_id`, `task_id`, `mechanic_id`, `commission_usd`, `commission_idempotency_key` | Unique constraint `UNIQUE(commission_idempotency_key)` to protect task-level commission idempotency while supporting multi-task earnings. |
+| **`order_washers`** | `INSERT`, `UPDATE` | `order_id`, `task_id`, `washer_id`, `commission_usd`, `commission_idempotency_key` | Unique constraint `UNIQUE(commission_idempotency_key)`. Key derived deterministically: `sha256("comm_v1_order_{$orderId}_task_{$taskId}_worker_{$workerId}")` ensuring retry safety and multi-task earnings. |
+| **`order_mechanics`** | `INSERT`, `UPDATE` | `order_id`, `task_id`, `mechanic_id`, `commission_usd`, `commission_idempotency_key` | Unique constraint `UNIQUE(commission_idempotency_key)`. Key derived deterministically: `sha256("comm_v1_order_{$orderId}_task_{$taskId}_worker_{$workerId}")` ensuring retry safety and multi-task earnings. |
 | **`audit_logs`** | `INSERT` | `action`, `details`, `entity_type`, `entity_id`, `user_id`, `username`, `role` | Immutable security log for all checkouts, overrides, and cancellations. |
 
 ---
 
 ## 4. Breakage Prevention, Financial Accounting & Backup Standards
 
-### 4.1 Strict Accounting & Actual Payment/Refund Revenue Calculations (`views/owner/reports.php`)
-Revenue reports must calculate financial performance strictly using actual payment and refund ledger events, separating operational cancellations from financial settlement:
+### 4.1 Strict Accounting & Two-Tier Revenue Calculations (`views/owner/reports.php`)
+Revenue reports must calculate financial performance strictly using actual payment and refund ledger events, separating operational cancellations from financial settlement, while bridging historical orders seamlessly via a Two-Tier Architecture:
+
+> [!WARNING]
+> **Administrative Attestation vs. Physical Settlement Proof:**  
+> Recording a refund in the POS (`attestation_status = 'cashier_attested'`) documents administrative approval by the cashier and manager. It does NOT constitute physical proof that currency was handed to the customer or that an interbank reversal settled. Net cash balancing requires physical drawer reconciliation; digital reversals require monthly bank statement audits.
 
 ```sql
--- Certified Financial Revenue Aggregation Query:
+-- Certified Two-Tier Financial Revenue Aggregation Query:
+-- Bridges historical legacy records and post-cutover transaction ledgers
+
+WITH CutoverSetting AS (
+    SELECT COALESCE(
+        (SELECT setting_value FROM system_settings WHERE setting_key = 'receipt_v2_cutover_timestamp'),
+        '2099-12-31 23:59:59'
+    ) AS cutover_ts
+),
+
+-- Tier 1: Post-Cutover Discrete Ledger Transactions
+Tier1_PostCutover AS (
+    SELECT 
+        'post_cutover_ledger' AS reporting_tier,
+        COALESCE((
+            SELECT SUM(p.amount_usd) 
+            FROM order_payments p
+            JOIN orders o ON p.order_id = o.id
+            JOIN CutoverSetting c ON 1=1
+            WHERE o.created_at >= c.cutover_ts
+              AND o.created_at BETWEEN :start_date AND :end_date
+        ), 0) AS gross_payments_collected_usd,
+
+        COALESCE((
+            SELECT SUM(r.amount_usd) 
+            FROM order_refunds r
+            JOIN orders o ON r.order_id = o.id
+            JOIN CutoverSetting c ON 1=1
+            WHERE o.created_at >= c.cutover_ts
+              AND o.created_at BETWEEN :start_date AND :end_date
+        ), 0) AS total_refunds_usd,
+
+        COALESCE((
+            SELECT SUM(o.total_usd) 
+            FROM orders o
+            JOIN CutoverSetting c ON 1=1
+            WHERE o.created_at >= c.cutover_ts
+              AND o.created_at BETWEEN :start_date AND :end_date
+              AND o.status = 'cancelled' 
+              AND o.payment_status = 'unpaid'
+        ), 0) AS unpaid_voids_usd
+),
+
+-- Tier 2: Pre-Cutover Historical Fallback (Aggregated from Orders Cache)
+Tier2_PreCutover AS (
+    SELECT 
+        'pre_cutover_fallback' AS reporting_tier,
+        COALESCE(SUM(CASE 
+            WHEN o.payment_status IN ('paid', 'partially_refunded', 'refunded') 
+            THEN o.total_usd ELSE 0 END), 0) AS gross_payments_collected_usd,
+
+        COALESCE(SUM(CASE 
+            WHEN o.payment_status = 'refunded' THEN COALESCE(o.refunded_amount, o.total_usd)
+            WHEN o.payment_status = 'partially_refunded' THEN COALESCE(o.refunded_amount, 0)
+            ELSE 0 END), 0) AS total_refunds_usd,
+
+        COALESCE(SUM(CASE 
+            WHEN o.status = 'cancelled' AND (o.payment_status = 'unpaid' OR o.payment_status IS NULL)
+            THEN o.total_usd ELSE 0 END), 0) AS unpaid_voids_usd
+    FROM orders o
+    JOIN CutoverSetting c ON 1=1
+    WHERE o.created_at < c.cutover_ts
+      AND o.created_at BETWEEN :start_date AND :end_date
+)
+
+-- Unified Executive Financial Statement
 SELECT 
-    -- 1. Gross Payments Collected (All cash & digital funds received)
-    COALESCE(SUM(CASE 
-        WHEN payment_status IN ('paid', 'partially_refunded', 'refunded') 
-        THEN total_usd ELSE 0 END), 0) AS gross_payments_collected_usd,
-
-    -- 2. Full Refunds Issued (Money returned in full)
-    COALESCE(SUM(CASE 
-        WHEN payment_status = 'refunded' 
-        THEN COALESCE(refunded_amount, total_usd) ELSE 0 END), 0) AS full_refunds_usd,
-
-    -- 3. Partial Refunds Issued (Portion returned)
-    COALESCE(SUM(CASE 
-        WHEN payment_status = 'partially_refunded' 
-        THEN refunded_amount ELSE 0 END), 0) AS partial_refunds_usd,
-
-    -- 4. Total Refunds (Full + Partial)
-    COALESCE(SUM(CASE 
-        WHEN payment_status = 'refunded' THEN COALESCE(refunded_amount, total_usd)
-        WHEN payment_status = 'partially_refunded' THEN refunded_amount 
-        ELSE 0 END), 0) AS total_refunds_usd,
-
-    -- 5. Net Retained Payments (Actual money kept by the business)
-    COALESCE(SUM(CASE 
-        WHEN payment_status = 'paid' THEN total_usd
-        WHEN payment_status = 'partially_refunded' THEN (total_usd - refunded_amount)
-        ELSE 0 END), 0) AS net_retained_payments_usd,
-
-    -- 6. Unpaid Operational Cancellations (Never tendered)
-    COALESCE(SUM(CASE 
-        WHEN status = 'cancelled' AND payment_status = 'unpaid' 
-        THEN total_usd ELSE 0 END), 0) AS unpaid_voids_usd
-FROM orders
-WHERE created_at BETWEEN :start_date AND :end_date;
+    (t1.gross_payments_collected_usd + t2.gross_payments_collected_usd) AS gross_payments_collected_usd,
+    (t1.total_refunds_usd + t2.total_refunds_usd) AS total_refunds_usd,
+    ((t1.gross_payments_collected_usd + t2.gross_payments_collected_usd) - 
+     (t1.total_refunds_usd + t2.total_refunds_usd)) AS net_retained_payments_usd,
+    (t1.unpaid_voids_usd + t2.unpaid_voids_usd) AS unpaid_voids_usd
+FROM Tier1_PostCutover t1
+CROSS JOIN Tier2_PreCutover t2;
 ```
 
 ### 4.2 Washer Job Board & OrderGate Decoupling (`views/washer/jobs.php`)

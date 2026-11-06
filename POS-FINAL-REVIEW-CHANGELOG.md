@@ -1,9 +1,13 @@
-# Final POS Design Review – Correction Changelog
+# Final POS Design Review – Correction Changelog (Round 1)
 
 **Document ID:** POS-REV-2026-001  
 **Project:** Car-WashService  
 **Date:** November 6, 2026  
-**Status:** Complete – Awaiting Management Approval  
+**Status:** Superseded by Round 2 Revisions ([POS-FINAL-REVIEW-CHANGELOG-2.md](file:///C:/xampp/htdocs/Car-WashService/POS-FINAL-REVIEW-CHANGELOG-2.md)) – Awaiting Management Approval  
+
+> [!NOTE]
+> **Round 2 Revisions Available:**  
+> For subsequent technical corrections concerning transaction ledgers (`order_payments` & `order_refunds`), multiple partial refunds, MySQL NULL unique index defense, bank webhook replay specifications, deterministic commission idempotency keys, dynamic cutoff timestamps, and 3-minute TTL intervals, refer to **[POS-FINAL-REVIEW-CHANGELOG-2.md](file:///C:/xampp/htdocs/Car-WashService/POS-FINAL-REVIEW-CHANGELOG-2.md)**.
 
 ---
 

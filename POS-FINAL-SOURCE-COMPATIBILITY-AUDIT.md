@@ -80,7 +80,18 @@ Management has set strict, non-negotiable security rules for service admission:
 ```php
 // core/OrderGate.php - Revised Implementation Specification
 class OrderGate {
-    const MIGRATION_CUTOFF = '2026-11-06 00:00:00';
+    /**
+     * Retrieves the dynamic migration cutover timestamp established during deployment.
+     * Prevents arbitrary hardcoded dates from misclassifying imported or pre-deployment orders.
+     */
+    public static function getCutoverTimestamp(): string {
+        static $cutover = null;
+        if ($cutover === null) {
+            // Established dynamically during deployment in system_settings
+            $cutover = SystemSettings::get('receipt_v2_cutover_timestamp', '2099-12-31 23:59:59');
+        }
+        return $cutover;
+    }
 
     /**
      * Asserts that an order satisfies all gate criteria before entering a bay.
@@ -94,25 +105,27 @@ class OrderGate {
             );
         }
 
-        // Rule 2: Electronic Receipt Gate for New Orders
-        $isLegacyOrder = empty($order['receipt_issued_at']) 
-            && !empty($order['created_at']) 
-            && (strtotime($order['created_at']) < strtotime(self::MIGRATION_CUTOFF));
+        // Rule 2: Explicit Legacy Cutoff Classification
+        // Orders created prior to the deployment cutover timestamp are legacy orders.
+        $cutoverTime = strtotime(self::getCutoverTimestamp());
+        $orderCreatedAt = !empty($order['created_at']) ? strtotime($order['created_at']) : 0;
+        $isLegacyOrder = ($orderCreatedAt < $cutoverTime) && empty($order['receipt_issued_at']);
 
         if ($isLegacyOrder) {
             // Explicit Legacy Compatibility:
-            // Historical orders without electronic receipt columns pass if they have physical receipt timestamp
-            // OR if explicitly passed via migration/legacy flag or manager PIN override.
+            // Historical orders pass if they have physical receipt timestamp or explicit manager override.
             if (!empty($order['receipt_printed_at']) || !empty($options['allow_legacy_order'])) {
                 return true;
             }
+            // Ambiguous legacy cases: lack printed timestamp and lack electronic receipt
             throw new ReceiptRequiredException(
-                "Legacy order #{$order['order_number']} missing receipt_printed_at. Requires manager override."
+                "Legacy order #{$order['order_number']} missing receipt_printed_at. Requires manager PIN override to admit."
             );
         }
 
         // Rule 3: Strict New Order Requirement:
-        // payment_status='paid' alone is NOT enough; electronic receipt issuance is mandatory.
+        // For all orders created post-cutover, payment_status='paid' alone is NOT enough;
+        // Electronic receipt issuance is mandatory.
         if (empty($order['receipt_issued_at']) || empty($order['receipt_number'])) {
             throw new ReceiptRequiredException(
                 "Service gate rejected: Electronic receipt has not been issued for Order #{$order['order_number']}. An electronic receipt must be generated at checkout."
@@ -159,7 +172,7 @@ if (in_array($paymentMethod, ['aba', 'khqr'], true) && empty($paymentRef)) {
 
 #### Fundamental Architectural Distinction:
 - **Manual Merchant-Device Verification:** The cashier is the human verifier who inspects the store's dedicated mobile phone, Telegram bot, or IoT soundbox chime. **The POS backend DOES NOT query the bank API and CANNOT independently validate the bank-side amount, currency, merchant account, or settlement status.** The POS relies on human cashier attestation and enforces local structural rules, mandatory input fields, cashier attribution, and scoped duplicate protection.
-- **Automated Bank Webhook Verification:** Requires genuine commercial bank merchant integration (e.g., ABA PayWay, NBC Bakong Open API), mutual TLS/SSL certificates, and server-to-server webhook callbacks with cryptographic signature verification (HMAC-SHA512). The bank's server directly pushes confirmed settlement data to the Car-WashService endpoint. **The codebase must never simulate or invent non-existent bank API capabilities.**
+- **Automated Bank Webhook Verification:** Requires genuine commercial bank merchant integration (e.g., ABA PayWay, NBC Bakong Open API), mutual TLS/SSL certificates, and server-to-server webhook callbacks with cryptographic signature verification following the respective bank's published specification. The bank's server directly pushes confirmed settlement data to the Car-WashService endpoint. **The codebase must never simulate or invent non-existent bank API capabilities.**
 
 #### Cashier Attestation & System Enforcement Matrix (Manual Mode):
 
@@ -170,45 +183,72 @@ if (in_array($paymentMethod, ['aba', 'khqr'], true) && empty($paymentRef)) {
 | **Merchant Account ID** | **Cashier + System** | Cashier confirms funds arrived in the store's business account (not a personal QR). | System records store merchant account ID associated with the shift/station. |
 | **Settlement Status** | **Cashier** | Cashier visually checks notification indicates `'SUCCESS'` / `'RECEIVED'`. | System transitions order `payment_status` to `'paid'` based on cashier's authenticated submission. |
 | **Cashier Attribution** | **System** | Authenticated session token (`Auth::getUserId()`, `X-Staff-Token`). | System immutably records cashier user ID, cashier name, and precise server timestamp. |
-| **Duplicate Prevention** | **System** | Scoped database unique constraint. | System rejects reused references within the same provider and merchant account scope. |
+| **Duplicate Prevention** | **System** | Scoped database unique constraint with strict NOT NULL enforcement. | System rejects reused references within the same provider and merchant account scope. |
 
-### 2.3 Scoped Duplicate-Reference Protection & Schema Architecture
+### 2.3 Scoped Duplicate-Reference Protection & Webhook Security Architecture
 
-To prevent accidental double-submits or fraudulent re-use of bank references across different carts while allowing legitimate multi-account business operations:
+#### 1. The MySQL NULL Bypass Vulnerability & Definitive Scoped Protection:
+- **Technical Database Reality:** In MySQL/MariaDB InnoDB, standard unique indexes **do not prevent duplicate rows if any column in the composite index contains a `NULL` value**. A composite unique index `UNIQUE(payment_provider, merchant_account_id, payment_ref)` would permit infinite duplicate rows if `merchant_account_id` or `payment_ref` were allowed to be `NULL`!
+- **Definitive Schema & Application Enforcement:**
+  1. For all non-cash digital transactions (`khqr`, `aba`, `bakong`), `payment_provider`, `merchant_account_id`, and `payment_ref` **are strictly enforced as NOT NULL, non-empty strings** at both the application gateway and database schema levels.
+  2. Cash transactions use non-colliding explicit identifiers (`payment_provider = 'cash'`, `merchant_account_id = 'CASH_DRAWER'`, `payment_ref = CONCAT('CASH-', order_number)`), preventing cash from creating NULL index bypasses.
+  3. Schema declaration:
+     ```sql
+     ALTER TABLE orders 
+       ADD COLUMN payment_provider VARCHAR(50) NOT NULL DEFAULT 'cash' AFTER payment_method,
+       ADD COLUMN merchant_account_id VARCHAR(100) NOT NULL DEFAULT 'CASH_DRAWER' AFTER payment_provider,
+       ADD COLUMN payment_verified_by_id INT DEFAULT NULL AFTER payment_ref,
+       ADD COLUMN payment_verified_by_name VARCHAR(100) DEFAULT NULL AFTER payment_verified_by_id,
+       ADD COLUMN payment_verified_at DATETIME DEFAULT NULL AFTER payment_verified_by_name,
+       ADD COLUMN verification_method ENUM('manual_merchant_device', 'automated_webhook', 'cash_drawer') NOT NULL DEFAULT 'cash_drawer' AFTER payment_verified_at,
+       ADD UNIQUE INDEX uq_provider_account_ref (payment_provider, merchant_account_id, payment_ref);
+     ```
+  4. Backend validation in `api/pos/index.php`:
+     ```php
+     if (in_array($paymentMethod, ['khqr', 'aba', 'bakong'], true)) {
+         if (empty($paymentRef) || trim($paymentRef) === '') {
+             throw new ValidationException("BANK_REFERENCE_REQUIRED: Real transaction reference is mandatory.");
+         }
+         if (empty($merchantAccountId) || trim($merchantAccountId) === '') {
+             throw new ValidationException("MERCHANT_ACCOUNT_REQUIRED: Receiving merchant account must be identified.");
+         }
+     }
+     ```
 
-1. **Scoped Uniqueness Standard:**  
-   A reference is unique within a specific payment provider and store merchant account:
-   ```sql
-   ALTER TABLE orders 
-     ADD COLUMN payment_provider VARCHAR(50) DEFAULT 'cash' AFTER payment_method,
-     ADD COLUMN merchant_account_id VARCHAR(100) DEFAULT NULL AFTER payment_provider,
-     ADD COLUMN payment_verified_by_id INT DEFAULT NULL AFTER payment_ref,
-     ADD COLUMN payment_verified_by_name VARCHAR(100) DEFAULT NULL AFTER payment_verified_by_id,
-     ADD COLUMN payment_verified_at DATETIME DEFAULT NULL AFTER payment_verified_by_name,
-     ADD COLUMN verification_method ENUM('manual_merchant_device', 'automated_webhook', 'cash_drawer') DEFAULT 'cash_drawer' AFTER payment_verified_at,
-     ADD UNIQUE INDEX uq_provider_account_ref (payment_provider, merchant_account_id, payment_ref);
-   ```
-2. **Backend Duplicate Check Query:**
-   ```sql
-   -- Validates that this bank reference has never been used for this merchant account
-   SELECT id, order_number, created_at, payment_verified_by_name 
-   FROM orders 
-   WHERE payment_provider = :provider 
-     AND merchant_account_id = :account_id 
-     AND payment_ref = :ref 
-     AND id != :current_order_id;
-   ```
-   If a matching row is returned, the checkout is rejected with HTTP 409: `DUPLICATE_PAYMENT_REFERENCE`.
+#### 2. Eradication of Synthetic Fallback:
+Lines 2006–2008 and 2609–2611 of `api/pos/index.php` that generate `'TRX-' . strtoupper(substr(md5(uniqid()), 0, 8))` must be permanently deleted. If `payment_ref` is omitted during KHQR checkout, the POS API strictly rejects the request with HTTP 422: `BANK_REFERENCE_REQUIRED`.
 
-3. **Eradication of Synthetic Fallback:**  
-   Lines 2006–2008 and 2609–2611 of `api/pos/index.php` that generate `'TRX-' . strtoupper(substr(md5(uniqid()), 0, 8))` must be permanently deleted. If `payment_ref` is omitted during KHQR checkout, the POS API strictly rejects the request with HTTP 422: `BANK_REFERENCE_REQUIRED`.
+#### 3. Automated Bank Webhook Security Architecture:
+Automated bank verification must remain strictly separated from manual cashier attestation, routed to an independent webhook receiver (`api/webhook/khqr_callback.php`):
 
-4. **Automated Webhook Security Boundary:**  
-   When commercial bank integration is completed in future phases, the webhook endpoint (`api/pos/khqr_webhook.php`) must:
-   - Enforce IP allowlisting against bank server subnets.
-   - Cryptographically verify the HMAC-SHA512 payload signature using the bank-issued secret key.
-   - Reject unsigned, expired, or non-matching merchant account payloads.
-   - Record `verification_method = 'automated_webhook'`.
+1. **Bank-Specific Signature Specification Compliance:**
+   - Rather than assuming a generic HMAC-SHA512 across all banks, the webhook receiver binds to the **specific bank's published integration guide**:
+     - *ABA PayWay API:* Implements PayWay's published hash specification (MD5 or HMAC-SHA512 computed over the exact concatenated sequence of transaction parameters specified in PayWay documentation: `req_time`, `tran_id`, `amount`, `items`, etc.).
+     - *NBC Bakong Open API:* Implements NBC Bakong's published token/signature specification (JWT with RSA-256 public-key certificate verification).
+2. **Timestamp Validation & Replay Attack Defense:**
+   - The webhook receiver extracts the request timestamp (`req_time` parameter or `X-Signature-Timestamp` header).
+   - If `abs(time() - strtotime($requestTimestamp)) > 300` (drift exceeds 5 minutes), the request is rejected with HTTP 403: `TIMESTAMP_OUT_OF_WINDOW`.
+3. **Idempotent Replay Protection & Duplicate Delivery Handling:**
+   - Commercial banks employ at-least-once delivery, frequently retrying webhooks upon transient network timeouts.
+   - An immutable event table `webhook_events` tracks all incoming events:
+     ```sql
+     CREATE TABLE IF NOT EXISTS webhook_events (
+         id BIGINT AUTO_INCREMENT PRIMARY KEY,
+         provider VARCHAR(50) NOT NULL,
+         event_id VARCHAR(100) NOT NULL,
+         order_id INT DEFAULT NULL,
+         payload_hash CHAR(64) NOT NULL,
+         received_at DATETIME NOT NULL,
+         processed_at DATETIME DEFAULT NULL,
+         status ENUM('processed', 'duplicate', 'rejected') NOT NULL,
+         UNIQUE KEY uq_provider_event (provider, event_id)
+     ) ENGINE=InnoDB;
+     ```
+   - When a webhook arrives, the system attempts an atomic insert into `webhook_events`. If a duplicate `(provider, event_id)` is caught:
+     - The webhook receiver immediately responds with HTTP 200 (acknowledging receipt to stop bank retries).
+     - Execution halts immediately, preventing duplicate order updates or double ledger entries.
+4. **Strict Separation of Concerns:**
+   - Automated webhook processing updates `verification_method = 'automated_webhook'` and does not alter or overwrite cashier attestation metadata.
 
 ---
 
@@ -537,14 +577,19 @@ Management has established strict operational safety boundaries to prevent dange
 
 #### 2. Heartbeat, Expiration, and Crash Recovery Specification:
 - **Intake Hold TTL Sweep (Every 30 seconds):**
+  - **Reconciliation of TTL Standards:** The intake reservation hold expires after **strictly 3 minutes (180 seconds)**. Any reference to a 15-minute wait was an editorial contradiction and has been eliminated.
+  - **Protection of Physical Occupancy & Active Checkouts:** The cleanup query is constrained so that it can **never** release a physically occupied bay or interfere with an active order in checkout:
   ```sql
-  -- Releases ONLY temporary intake holds that were never paid or confirmed:
+  -- Safe intake hold expiry cleanup:
   UPDATE bays 
   SET status = 'free', 
       reservation_state = 'none', 
-      reserved_by_session_id = NULL,
+      reserved_by_session_id = NULL, 
       hold_expires_at = NULL 
   WHERE reservation_state = 'intake_reserved' 
+    AND status != 'busy' 
+    AND physical_occupancy = 'vacant'
+    AND current_order_id IS NULL
     AND hold_expires_at < CURRENT_TIMESTAMP;
   ```
 - **Orphan Auto-Healing (Crash Recovery):**
@@ -630,13 +675,13 @@ ALTER TABLE order_mechanics
   ADD INDEX idx_mechanic_task (task_id, mechanic_id);
 ```
 
-#### Idempotency Key Derivation:
-- Key format: `hash('sha256', "comm_{order_id}_{task_id}_{worker_id}_{action_sequence}")`
-- When a technician completes Task 14, the frontend or controller sends the idempotency key.
-- If the network lags and the technician taps "Complete" 3 times in 400ms:
-  - First request commits the commission row.
-  - Second and third requests hit `uq_mechanic_idempotency`, catch the unique violation gracefully, and return idempotent success without creating duplicate payouts.
-- When the same technician is assigned to Task 15 (a different task on the same order and stage), the derived key includes `task_id = 15`, which succeeds without collision, completely preserving multi-task commission earnings.
+#### Deterministic Idempotency Key Derivation & Persistence:
+- **Generation Rule:** The idempotency key must be derived **deterministically from immutable assignment attributes**, rather than an ephemeral random token or incrementing sequence that would change upon retry:
+  `commission_idempotency_key = hash('sha256', "comm_v1_order_{$order_id}_task_{$task_id}_worker_{$worker_id}")`
+- **Retry Invariance:** When a technician taps "Complete Task 14", the backend derives the key using the immutable `$order_id`, `$task_id = 14`, and `$worker_id = 7`. If the network times out or the technician double-taps:
+  - First attempt executes and commits the commission row.
+  - Retried attempts compute the **exact same deterministic key**, hit `uq_mechanic_idempotency`, and return idempotent HTTP 200 without creating a second commission.
+- **Support for Multiple Legitimate Assignments:** When the same technician is legitimately assigned to a second distinct task on the same order (e.g. Task 15 Brake Inspection), `$task_id = 15` produces a distinct hash (`comm_v1_order_..._task_15_...`), allowing the worker to receive legitimate separate commissions without collision.
 
 ---
 
@@ -681,69 +726,222 @@ ALTER TABLE order_mechanics
 
 ### 5.3 Redesigned Revenue Accounting & Payment Ledger Formulations
 
-Management has instructed that revenue reporting must be grounded strictly in **actual financial payment and refund records**, rather than assuming operational `status = 'cancelled'` equates to zero payment:
+Management has instructed that revenue reporting must be grounded strictly in **actual financial payment and refund records**, resolving the architectural contradiction between claiming a ledger-based accounting model while querying only denormalized summary fields on `orders`.
 
-#### 1. Core Accounting Distinctions:
-- **Gross Payments Collected:** Total tender physically received into the cash drawer or verified via merchant KHQR, regardless of subsequent operational completion. If a customer paid $30 and the service was subsequently aborted without a refund, the $30 remains collected gross tender.
-- **Full Refunds Returned:** Payments where 100% of the funds were returned to the customer (`payment_status = 'refunded'`).
-- **Partial Refunds Returned:** Payments where a portion of the funds was refunded (e.g., $10 refunded from a $38 mixed package when Stage 2 was cancelled; `payment_status = 'partially_refunded'`).
-- **Net Retained Payments:** The exact net cash/digital funds retained by the business: `Gross Payments - Full Refunds - Partial Refunds`.
-- **Unpaid Cancellations:** Orders cancelled prior to payment receipt (`payment_status = 'unpaid' AND status = 'cancelled'`). Zero cash impact.
-- **Paid Operational Cancellations:** Orders where payment was collected (`payment_status = 'paid'`), but service was aborted (`status = 'cancelled'`). If no refund was granted (e.g. materials poured or policy forfeiture), these funds remain retained in Net Payments. If refunded, they are accounted for under Full or Partial Refunds.
+#### 1. Core Accounting Model: Immutable Ledgers vs. Cached Order Summaries
 
-| Transaction Classification | Financial Payment Status | Operational Service Status | Gross Payments Impact | Refunds Impact | Net Retained Impact |
-| :--- | :--- | :--- | :---: | :---: | :---: |
-| **Standard Completed Order** | `payment_status = 'paid'` | `status = 'finished'` | `+total_usd` | $0.00 | `+total_usd` |
-| **Active In-Flight Paid Order** | `payment_status = 'paid'` | `status IN ('waiting', 'washing')` | `+total_usd` | $0.00 | `+total_usd` |
-| **Paid Cancellation (No Refund)** | `payment_status = 'paid'` | `status = 'cancelled'` | `+total_usd` | $0.00 | `+total_usd` *(Retained)* |
-| **Full Refund Cancellation** | `payment_status = 'refunded'` | `status = 'cancelled'` | `+total_usd` | `+total_usd` | **$0.00** |
-| **Partial Refund Cancellation** | `payment_status = 'partially_refunded'` | `status = 'cancelled'` | `+total_usd` | `+refunded_amount` | `+(total_usd - refunded_amount)` |
-| **Unpaid Cancellation** | `payment_status = 'unpaid'` | `status = 'cancelled'` | **$0.00** | $0.00 | **$0.00** |
+To ensure auditability, financial accuracy, and support for multi-tender payments and multiple partial refunds, the system separates the **immutable transaction ledgers** from the **denormalized order summary**:
 
-#### 2. Certified Financial SQL Formulation:
-```sql
--- Certified Financial Revenue Query for views/owner/reports.php
-SELECT 
-    -- 1. Gross Payments Collected (All cash & digital funds received)
-    COALESCE(SUM(CASE 
-        WHEN payment_status IN ('paid', 'partially_refunded', 'refunded') 
-        THEN total_usd ELSE 0 END), 0) AS gross_payments_collected_usd,
-
-    -- 2. Full Refunds Issued (Money returned in full)
-    COALESCE(SUM(CASE 
-        WHEN payment_status = 'refunded' 
-        THEN COALESCE(refunded_amount, total_usd) ELSE 0 END), 0) AS full_refunds_usd,
-
-    -- 3. Partial Refunds Issued (Portion returned)
-    COALESCE(SUM(CASE 
-        WHEN payment_status = 'partially_refunded' 
-        THEN refunded_amount ELSE 0 END), 0) AS partial_refunds_usd,
-
-    -- 4. Total Refunds (Full + Partial)
-    COALESCE(SUM(CASE 
-        WHEN payment_status = 'refunded' THEN COALESCE(refunded_amount, total_usd)
-        WHEN payment_status = 'partially_refunded' THEN refunded_amount 
-        ELSE 0 END), 0) AS total_refunds_usd,
-
-    -- 5. Net Retained Payments (Actual money kept by the business)
-    COALESCE(SUM(CASE 
-        WHEN payment_status = 'paid' THEN total_usd
-        WHEN payment_status = 'partially_refunded' THEN (total_usd - refunded_amount)
-        ELSE 0 END), 0) AS net_retained_payments_usd,
-
-    -- 6. Unpaid Operational Cancellations (Never tendered)
-    COALESCE(SUM(CASE 
-        WHEN status = 'cancelled' AND payment_status = 'unpaid' 
-        THEN total_usd ELSE 0 END), 0) AS unpaid_voids_usd
-FROM orders
-WHERE created_at BETWEEN :start_date AND :end_date;
+```
+                       ┌─────────────────────────────────────────┐
+                       │              orders table               │
+                       │─────────────────────────────────────────│
+                       │ total_usd: 38.00                        │
+                       │ payment_status: 'partially_refunded'    │ (Cached aggregate)
+                       │ refunded_amount: 15.00                  │ (Cached aggregate)
+                       └───────────────────┬─────────────────────┘
+                                           │
+                    ┌──────────────────────┴──────────────────────┐
+                    │                                             │
+                    ▼ 1 : N                                       ▼ 1 : N
+   ┌──────────────────────────────────┐          ┌──────────────────────────────────┐
+   │      order_payments table        │          │       order_refunds table        │
+   │──────────────────────────────────│          │──────────────────────────────────│
+   │ id: 101                          │          │ id: 501                          │
+   │ payment_seq: 1                   │          │ refund_seq: 1                    │
+   │ amount_usd: 38.00                │          │ amount_usd: 10.00                │
+   │ method: 'khqr'                   │          │ reason: 'Stage 2 Polish Cancel'  │
+   │ ref: 'FT261106981245'            │          │ attestation_status: 'attested'   │
+   │ status: 'settled'                │          │──────────────────────────────────│
+   │ created_at: 2026-11-06 08:30:00  │          │ id: 502                          │
+   └──────────────────────────────────┘          │ refund_seq: 2                    │
+                                                 │ amount_usd: 5.00                 │
+                                                 │ reason: 'Shampoo Upgrade Credit' │
+                                                 │ attestation_status: 'attested'   │
+                                                 │ created_at: 2026-11-06 09:15:00  │
+                                                 └──────────────────────────────────┘
 ```
 
-#### 3. Legacy Records Reconciliation Strategy:
-- **Historical Orders (`created_at < MIGRATION_DATE`):**
+1. **Immutable Transaction Ledgers (`order_payments` & `order_refunds`):**
+   - Every physical cash tender, digital KHQR settlement, or card swipe generates a discrete, immutable row in `order_payments`.
+   - Every refund event generates a discrete, immutable row in `order_refunds`.
+2. **Denormalized Order Summaries (`orders.payment_status` & `orders.refunded_amount`):**
+   - The fields `orders.payment_status` and `orders.refunded_amount` are **denormalized read-caches** maintained for high-speed POS list rendering, legacy backward compatibility, and quick order gate checks.
+   - Whenever an insert occurs in `order_refunds`, a transactional trigger or service layer updates `orders.refunded_amount = (SELECT COALESCE(SUM(amount_usd), 0) FROM order_refunds WHERE order_id = NEW.order_id)`.
+   - If `refunded_amount == 0`, `payment_status = 'paid'`.
+   - If `0 < refunded_amount < total_usd`, `payment_status = 'partially_refunded'`.
+   - If `refunded_amount >= total_usd`, `payment_status = 'refunded'`.
+
+#### 2. Detailed Ledger Schemas & Multiple Partial Refunds
+
+##### Schema Specifications:
+
+```sql
+-- 1. Discrete Payment Transactions Ledger
+CREATE TABLE order_payments (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NOT NULL,
+    payment_seq TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    amount_usd DECIMAL(10,2) NOT NULL,
+    amount_khr INT UNSIGNED NOT NULL DEFAULT 0,
+    exchange_rate INT UNSIGNED NOT NULL DEFAULT 4100,
+    payment_method ENUM('cash', 'khqr', 'card') NOT NULL,
+    payment_provider VARCHAR(32) NOT NULL DEFAULT 'cash',
+    merchant_account_id VARCHAR(64) NOT NULL DEFAULT 'counter_drawer',
+    payment_ref VARCHAR(128) NOT NULL,
+    cashier_id INT NOT NULL,
+    verified_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_op_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT,
+    UNIQUE INDEX uq_order_payment_seq (order_id, payment_seq),
+    INDEX idx_op_provider_ref (payment_provider, merchant_account_id, payment_ref)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 2. Discrete Refund Transactions Ledger (Supporting Multiple Partial Refunds)
+CREATE TABLE order_refunds (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NOT NULL,
+    refund_seq TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    payment_id BIGINT UNSIGNED NULL, -- Links to specific original tender if multi-tender
+    amount_usd DECIMAL(10,2) NOT NULL,
+    amount_khr INT UNSIGNED NOT NULL DEFAULT 0,
+    exchange_rate INT UNSIGNED NOT NULL DEFAULT 4100,
+    refund_method ENUM('cash', 'bank_reversal', 'store_credit') NOT NULL,
+    reason VARCHAR(255) NOT NULL,
+    cashier_id INT NOT NULL,
+    manager_user_id INT NOT NULL,
+    attestation_status ENUM('cashier_attested', 'drawer_confirmed', 'bank_reversal_pending', 'settled') 
+        NOT NULL DEFAULT 'cashier_attested',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_or_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_or_payment FOREIGN KEY (payment_id) REFERENCES order_payments(id) ON DELETE SET NULL,
+    UNIQUE INDEX uq_order_refund_seq (order_id, refund_seq),
+    INDEX idx_or_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+##### Recording Multiple Partial Refunds:
+- When a customer purchases a combined service package ($38 total) and later cancels Stage 2 (Polish, $10 value):
+  1. Cashier enters Manager PIN to authorize partial refund.
+  2. System inserts row into `order_refunds` with `refund_seq = 1`, `amount_usd = 10.00`, `reason = 'Cancelled Stage 2 Polish'`.
+  3. System updates `orders.refunded_amount = 10.00` and `orders.payment_status = 'partially_refunded'`.
+- If the customer subsequently requests a refund for an unused shampoo upgrade ($5 value):
+  1. Cashier enters Manager PIN.
+  2. System inserts row into `order_refunds` with `refund_seq = 2`, `amount_usd = 5.00`, `reason = 'Shampoo Upgrade Credit'`.
+  3. System updates `orders.refunded_amount = 15.00` (`10.00 + 5.00`) and maintains `orders.payment_status = 'partially_refunded'`.
+- Every individual refund event has its own timestamp, reason, manager authorization ID, and audit sequence.
+
+#### 3. Administrative Attestation vs. Physical/Banking Settlement Proof
+
+Management mandates absolute clarity regarding what the POS records when an order is refunded:
+
+> [!WARNING]
+> **Administrative Attestation vs. Physical/Banking Reality:**  
+> Marking an order or item as refunded in the POS application is an **administrative attestation** by the cashier and authorizing manager that funds were authorized to be disbursed or returned.  
+> 
+> - **It is NOT cryptographic proof** that physical paper US Dollars or Cambodian Riel banknotes were handed into the customer's physical hands.  
+> - **It is NOT bank confirmation** that an interbank payment reversal occurred across the NBC Bakong or commercial bank rails. (For KHQR payments, immediate API automated refunds are generally unavailable to SME merchants; bank reversals typically require external manual merchant portal processing or offline cash disbursement from the drawer).  
+> 
+> Therefore:
+> 1. In `order_refunds`, the initial state is strictly `attestation_status = 'cashier_attested'`.
+> 2. True financial drawer balance verification occurs during **End-of-Shift Cash Drawer Reconciliation** (`CashierControl::closeShift()`) when physical banknotes in the till are counted against expected net drawer cash (`starting_cash + cash_sales - cash_refunds`).
+> 3. True digital settlement reconciliation occurs during **Monthly Bank Merchant Statement Audits** matching bank reversal debit slips against POS refund attestation logs.
+
+#### 4. Two-Tier Certified Financial Reporting SQL Formulation
+
+Because historical orders created prior to deployment cutover lack row-level rows in `order_payments` and `order_refunds`, reporting queries must implement a **Two-Tier Architecture**:
+- **Tier 1 (Post-Cutover Orders):** Derived strictly from granular `order_payments` and `order_refunds` ledgers.
+- **Tier 2 (Pre-Cutover Historical Orders):** Derived from `orders.payment_status` and `orders.refunded_amount` fallback aggregation.
+
+```sql
+-- Two-Tier Financial Revenue Query for views/owner/reports.php
+-- Dynamically bridges historical legacy orders and post-cutover ledger records
+
+WITH CutoverSetting AS (
+    SELECT COALESCE(
+        (SELECT setting_value FROM system_settings WHERE setting_key = 'receipt_v2_cutover_timestamp'),
+        '2099-12-31 23:59:59'
+    ) AS cutover_ts
+),
+
+-- Tier 1: Post-Cutover Ledger Aggregation (Discrete Transactions)
+Tier1_PostCutover AS (
+    SELECT 
+        'post_cutover_ledger' AS reporting_tier,
+        -- Gross Payments Collected from Payments Ledger
+        COALESCE((
+            SELECT SUM(p.amount_usd) 
+            FROM order_payments p
+            JOIN orders o ON p.order_id = o.id
+            JOIN CutoverSetting c ON 1=1
+            WHERE o.created_at >= c.cutover_ts
+              AND o.created_at BETWEEN :start_date AND :end_date
+        ), 0) AS gross_payments_collected_usd,
+
+        -- Total Refunds Issued from Refunds Ledger
+        COALESCE((
+            SELECT SUM(r.amount_usd) 
+            FROM order_refunds r
+            JOIN orders o ON r.order_id = o.id
+            JOIN CutoverSetting c ON 1=1
+            WHERE o.created_at >= c.cutover_ts
+              AND o.created_at BETWEEN :start_date AND :end_date
+        ), 0) AS total_refunds_usd,
+
+        -- Unpaid Voids from Orders table
+        COALESCE((
+            SELECT SUM(o.total_usd) 
+            FROM orders o
+            JOIN CutoverSetting c ON 1=1
+            WHERE o.created_at >= c.cutover_ts
+              AND o.created_at BETWEEN :start_date AND :end_date
+              AND o.status = 'cancelled' 
+              AND o.payment_status = 'unpaid'
+        ), 0) AS unpaid_voids_usd
+),
+
+-- Tier 2: Pre-Cutover Historical Fallback (Aggregated from Orders Cache)
+Tier2_PreCutover AS (
+    SELECT 
+        'pre_cutover_fallback' AS reporting_tier,
+        -- Gross Payments: all historical orders marked paid/partially_refunded/refunded
+        COALESCE(SUM(CASE 
+            WHEN o.payment_status IN ('paid', 'partially_refunded', 'refunded') 
+            THEN o.total_usd ELSE 0 END), 0) AS gross_payments_collected_usd,
+
+        -- Total Refunds: full + partial refunds
+        COALESCE(SUM(CASE 
+            WHEN o.payment_status = 'refunded' THEN COALESCE(o.refunded_amount, o.total_usd)
+            WHEN o.payment_status = 'partially_refunded' THEN COALESCE(o.refunded_amount, 0)
+            ELSE 0 END), 0) AS total_refunds_usd,
+
+        -- Unpaid Voids
+        COALESCE(SUM(CASE 
+            WHEN o.status = 'cancelled' AND (o.payment_status = 'unpaid' OR o.payment_status IS NULL)
+            THEN o.total_usd ELSE 0 END), 0) AS unpaid_voids_usd
+    FROM orders o
+    JOIN CutoverSetting c ON 1=1
+    WHERE o.created_at < c.cutover_ts
+      AND o.created_at BETWEEN :start_date AND :end_date
+)
+
+-- Unified Executive Financial Statement
+SELECT 
+    (t1.gross_payments_collected_usd + t2.gross_payments_collected_usd) AS gross_payments_collected_usd,
+    (t1.total_refunds_usd + t2.total_refunds_usd) AS total_refunds_usd,
+    ((t1.gross_payments_collected_usd + t2.gross_payments_collected_usd) - 
+     (t1.total_refunds_usd + t2.total_refunds_usd)) AS net_retained_payments_usd,
+    (t1.unpaid_voids_usd + t2.unpaid_voids_usd) AS unpaid_voids_usd
+FROM Tier1_PostCutover t1
+CROSS JOIN Tier2_PreCutover t2;
+```
+
+#### 5. Legacy Records Reconciliation Strategy:
+- **Historical Orders (`created_at < cutover_ts`):**
   - Historical orders where `orders.status = 'paid'` and `cancelled_at IS NULL` are recognized as `payment_status = 'paid'` (Gross & Net).
   - Historical orders where `orders.status = 'paid'` but `cancelled_at IS NOT NULL` without refund amounts are flagged in the Manual Reconciliation Report as `PAID_OPERATIONAL_CANCELLATION_UNKNOWN_REFUND`. Management reviews bank and drawer history to classify whether funds were refunded or retained before finalizing historical statements.
   - Historical orders where `orders.status = 'cancelled'` and `payment_status` is NULL/unpaid are treated as Unpaid Cancellations ($0 financial impact).
+  - The migration script does **not** attempt to synthetically manufacture historical `order_payments` or `order_refunds` rows out of thin air, preserving strict forensic separation between authentic ledger records and estimated historical aggregates.
 
 ---
 
