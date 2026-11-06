@@ -155,61 +155,60 @@ if (in_array($paymentMethod, ['aba', 'khqr'], true) && empty($paymentRef)) {
 - If a cashier clicks confirm without entering a genuine reference, the system invents a fake ID (e.g. `TRX-A8F12C09`), writes it to `orders.payment_ref`, and marks the transaction.
 - **Accountability Consequence:** Daily bank statement reconciliation becomes impossible because no bank statement on earth contains `TRX-A8F12C09`.
 
-### 2.2 Exact Payment Matching Requirements (6-Point Verification Protocol)
+### 2.2 Payment Matching Requirements & Manual vs. Automated Boundaries
 
-To eliminate fraud, customer screenshot spoofing, and synthetic references, every KHQR transaction must satisfy a rigorous 6-point verification protocol before payment status can become `'paid'`:
+#### Fundamental Architectural Distinction:
+- **Manual Merchant-Device Verification:** The cashier is the human verifier who inspects the store's dedicated mobile phone, Telegram bot, or IoT soundbox chime. **The POS backend DOES NOT query the bank API and CANNOT independently validate the bank-side amount, currency, merchant account, or settlement status.** The POS relies on human cashier attestation and enforces local structural rules, mandatory input fields, cashier attribution, and scoped duplicate protection.
+- **Automated Bank Webhook Verification:** Requires genuine commercial bank merchant integration (e.g., ABA PayWay, NBC Bakong Open API), mutual TLS/SSL certificates, and server-to-server webhook callbacks with cryptographic signature verification (HMAC-SHA512). The bank's server directly pushes confirmed settlement data to the Car-WashService endpoint. **The codebase must never simulate or invent non-existent bank API capabilities.**
 
-| # | Verification Criterion | Matching Rule & Enforcement | Failure Action |
-| :-: | :--- | :--- | :--- |
-| **1** | **Genuine Bank Transaction Reference** | Must be the actual reference issued by the bank/Bakong network (e.g. ABA 6-to-9 digit trace number or Bakong hash), extracted from merchant notification. Synthetic `TRX-` strings are forbidden. | Rejection (HTTP 422: `BANK_REFERENCE_REQUIRED`) |
-| **2** | **Exact Amount and Currency Match** | The received amount and currency must match the cart grand total exactly. If cart is `$5.00 USD`, a payment of `$4.50 USD` or `20,000 KHR` with wrong exchange rate must NOT be confirmed as paid. | Rejection (HTTP 422: `PAYMENT_AMOUNT_MISMATCH`) |
-| **3** | **Correct Merchant Receiving Account** | Must verify the funds entered the store's designated merchant account ID (e.g. store ABA PayWay merchant ID or Bakong account), not a personal account or unrelated QR. | Rejection / Alert |
-| **4** | **Successful Transaction Status** | Must confirm the transaction is in `'SUCCESS'` / `'SETTLED'` state on the banking network, not `'PENDING'`, `'ON HOLD'`, or `'FAILED'`. | Rejection |
-| **5** | **Duplicate Transaction Detection** | Backend enforces uniqueness: `SELECT id FROM orders WHERE payment_ref = :ref AND id != :current_order_id`. The exact same bank reference can NEVER be reused across multiple orders or retried carts. | Rejection (HTTP 409: `DUPLICATE_PAYMENT_REFERENCE`) |
-| **6** | **Cashier Attribution & Immutable Audit History** | Every manually verified transaction must capture `payment_verified_by_id`, `payment_verified_by_name`, `payment_verified_at`, and client IP in an immutable audit ledger. | Unattributed verification blocked |
+#### Cashier Attestation & System Enforcement Matrix (Manual Mode):
 
-### 2.3 Verification Methods: Manual Merchant Device vs. Automated Bank Webhook
+| Data Point | Who Verifies It? | Verification Mechanism | POS System Role & Enforcement |
+| :--- | :---: | :--- | :--- |
+| **Bank Reference #** | **Cashier + System** | Cashier reads 6-to-9 digit trace number from store phone; enters it into POS. | System rejects empty string; enforces scoped uniqueness; prohibits synthetic `TRX-` prefixes. |
+| **Amount & Currency** | **Cashier** | Cashier visually confirms the notification matches cart grand total ($ or ៛) on the merchant device. | System verifies cashier entered a reference, but does not independently query the bank. |
+| **Merchant Account ID** | **Cashier + System** | Cashier confirms funds arrived in the store's business account (not a personal QR). | System records store merchant account ID associated with the shift/station. |
+| **Settlement Status** | **Cashier** | Cashier visually checks notification indicates `'SUCCESS'` / `'RECEIVED'`. | System transitions order `payment_status` to `'paid'` based on cashier's authenticated submission. |
+| **Cashier Attribution** | **System** | Authenticated session token (`Auth::getUserId()`, `X-Staff-Token`). | System immutably records cashier user ID, cashier name, and precise server timestamp. |
+| **Duplicate Prevention** | **System** | Scoped database unique constraint. | System rejects reused references within the same provider and merchant account scope. |
 
-To ensure complete architectural clarity without inventing non-existent bank API capabilities:
+### 2.3 Scoped Duplicate-Reference Protection & Schema Architecture
 
-```mermaid
-graph TD
-    subgraph ManualMode["Tier 1: Manual Merchant-Device Verification (Production Ready / Immediate)"]
-        M1["Customer scans Dynamic or Static KHQR"]
-        M2["Store Counter Device (Phone / Soundbox) receives bank push chime"]
-        M3["Cashier checks store device: verifies Amount, Currency, Status, and 6-digit Bank Ref"]
-        M4["Cashier enters genuine Bank Ref into POS checkout field"]
-        M5["Backend runs Duplicate Check & records Cashier Attribution in orders table"]
-    end
+To prevent accidental double-submits or fraudulent re-use of bank references across different carts while allowing legitimate multi-account business operations:
 
-    subgraph AutoWebhook["Tier 2: Automated Bank Webhook Verification (Requires Commercial Onboarding)"]
-        W1["Store registers formal merchant contract with ABA PayWay / NBC Bakong"]
-        W2["Acquiring bank issues API Credentials, Secret HMAC Key & Webhook URL"]
-        W3["Bank server pushes signed HTTPS webhook to Car-WashService endpoint"]
-        W4["Backend cryptographically verifies HMAC-SHA512 signature"]
-        W5["Automated touchless payment confirmation without cashier manual input"]
-    end
-```
+1. **Scoped Uniqueness Standard:**  
+   A reference is unique within a specific payment provider and store merchant account:
+   ```sql
+   ALTER TABLE orders 
+     ADD COLUMN payment_provider VARCHAR(50) DEFAULT 'cash' AFTER payment_method,
+     ADD COLUMN merchant_account_id VARCHAR(100) DEFAULT NULL AFTER payment_provider,
+     ADD COLUMN payment_verified_by_id INT DEFAULT NULL AFTER payment_ref,
+     ADD COLUMN payment_verified_by_name VARCHAR(100) DEFAULT NULL AFTER payment_verified_by_id,
+     ADD COLUMN payment_verified_at DATETIME DEFAULT NULL AFTER payment_verified_by_name,
+     ADD COLUMN verification_method ENUM('manual_merchant_device', 'automated_webhook', 'cash_drawer') DEFAULT 'cash_drawer' AFTER payment_verified_at,
+     ADD UNIQUE INDEX uq_provider_account_ref (payment_provider, merchant_account_id, payment_ref);
+   ```
+2. **Backend Duplicate Check Query:**
+   ```sql
+   -- Validates that this bank reference has never been used for this merchant account
+   SELECT id, order_number, created_at, payment_verified_by_name 
+   FROM orders 
+   WHERE payment_provider = :provider 
+     AND merchant_account_id = :account_id 
+     AND payment_ref = :ref 
+     AND id != :current_order_id;
+   ```
+   If a matching row is returned, the checkout is rejected with HTTP 409: `DUPLICATE_PAYMENT_REFERENCE`.
 
-| Verification Method | Architectural Nature | Implementation Status in Car-WashService | Hardware / Network Prerequisites | Operational Boundary |
-| :--- | :--- | :---: | :--- | :--- |
-| **Manual Merchant-Device Verification** | Cashier matches notification on store-owned hardware (IoT soundbox, dedicated counter phone, or Telegram merchant bot) and inputs genuine bank reference. | **Fully Supported & Recommended for Immediate Deployment.** Requires zero bank API contracts. | Dedicated store mobile device or soundbox with active cellular/Wi-Fi connection. | Cashier is legally and operationally accountable for matching the 6-point criteria before clicking confirm. |
-| **Automated Bank Webhook Verification** | Commercial payment gateway (e.g. ABA PayWay API, Bakong Open API) delivers direct server-to-server webhook callback. | **Requires External Commercial Bank Onboarding.** Not currently activated. | Live public domain/IP, valid SSL certificate, formal merchant acquiring agreement, bank-issued API keys and webhook secrets. | Touchless automation; cannot be deployed until commercial banking contracts and onboarding are formally completed. **Do not simulate or invent fictitious bank endpoints.** |
+3. **Eradication of Synthetic Fallback:**  
+   Lines 2006–2008 and 2609–2611 of `api/pos/index.php` that generate `'TRX-' . strtoupper(substr(md5(uniqid()), 0, 8))` must be permanently deleted. If `payment_ref` is omitted during KHQR checkout, the POS API strictly rejects the request with HTTP 422: `BANK_REFERENCE_REQUIRED`.
 
-### 2.4 Removal of Auto-Generated Fallback & Cashier Attribution Schema
-1. **Eradication of Synthetic Fallback:**  
-   Lines 2006–2008 and 2609–2611 of `api/pos/index.php` that generate `'TRX-' . strtoupper(substr(md5(uniqid()), 0, 8))` must be permanently deleted.
-2. **Database Schema Enhancements for Attribution & Deduplication:**
-```sql
-ALTER TABLE orders 
-  ADD COLUMN payment_verified_by_id INT DEFAULT NULL AFTER payment_ref,
-  ADD COLUMN payment_verified_by_name VARCHAR(100) DEFAULT NULL AFTER payment_verified_by_id,
-  ADD COLUMN payment_verified_at DATETIME DEFAULT NULL AFTER payment_verified_by_name,
-  ADD UNIQUE INDEX uq_payment_ref (payment_ref); -- Prevents duplicate bank reference reuse across orders
-```
-3. **Audit Log Recording:**
-   When cashier verifies payment:
-   `AuditLogger::log('KHQR_VERIFIED', "Cashier {$cashierName} (ID: {$cashierId}) verified KHQR Bank Ref #{$bankRef} for \${$amountUsd}", 'order', $orderId, ['bank_ref' => $bankRef, 'method' => 'manual_merchant_device']);`
+4. **Automated Webhook Security Boundary:**  
+   When commercial bank integration is completed in future phases, the webhook endpoint (`api/pos/khqr_webhook.php`) must:
+   - Enforce IP allowlisting against bank server subnets.
+   - Cryptographically verify the HMAC-SHA512 payload signature using the bank-issued secret key.
+   - Reject unsigned, expired, or non-matching merchant account payloads.
+   - Record `verification_method = 'automated_webhook'`.
 
 ---
 
@@ -247,27 +246,36 @@ Before executing any database alteration or migration, management requires an un
 
 ---
 
-### 3.3 Evidence-Based Classification Rules
+### 3.3 Evidence-Based Classification & Cancellation vs. Refund Separation
 
-Every historical record with `status = 'paid'` must be classified strictly based on immutable physical evidence:
+Management has mandated strict separation between **operational service cancellation** and **financial payment status**:
+- **Never Automatically Convert Paid Orders to Financially Cancelled:** If an order has `status = 'paid'`, cash or digital funds were tendered into the business. If the car was later operationally cancelled (`cancelled_at IS NOT NULL` or `cancel_reason IS NOT NULL`), that represents an operational cancellation of service, **NOT** proof that money was refunded.
+- **Financial Status Preservation:** In the absence of an explicit, verified refund record (e.g. `refunded_amount > 0` or `refunded_at IS NOT NULL`), `payment_status` must remain `'paid'`. Blindly forcing `payment_status = 'cancelled'` falsely deletes collected cash from drawer totals and bank reconciliations!
+- **Independent Full & Partial Refund Tracking:** Operational cancellations where money was actually returned must track refunds independently:
+  - Full Refund: `payment_status = 'refunded'`, `refunded_amount = total_usd`, `refunded_at` timestamped.
+  - Partial Refund: `payment_status = 'partially_refunded'`, `refunded_amount = :amount`, `refunded_at` timestamped.
+  - Paid Service Cancellation (No Refund / Forfeited): `status = 'cancelled'`, `payment_status = 'paid'`, `refunded_amount = 0.00`.
+- **Ambiguous Historical Records Unchanged:** Historical records with cancellation evidence but missing refund transaction trails must **remain completely unchanged** in the database and appear in the Manual Reconciliation Report for management accounting review.
 
 ```mermaid
 flowchart TD
-    Start["Historical Orders with status = 'paid'"] --> Dump["Step 1: Complete DB Backup & Verified Restoration Test"]
+    Start["Historical Orders with status = 'paid'"] --> Dump["Step 1: Complete DB Backup & Isolated Verification Test"]
     Dump --> Prev["Step 2: Execute Migration Preview Query (Dry-Run Verification)"]
     Prev --> CheckCancel{"cancelled_at IS NOT NULL<br>OR cancel_reason IS NOT NULL?"}
     
-    CheckCancel -->|Yes| SetCancel["Rule 1: Reliable Cancellation Evidence<br>status = 'cancelled'<br>payment_status = 'cancelled' or 'refunded'<br>Notes: PRESERVED UNCHANGED"]
+    CheckCancel -->|Yes| CheckRefund{"Explicit Refund Record Exists?<br>(refunded_amount > 0 OR refunded_at IS NOT NULL)"}
+    CheckRefund -->|Yes| SetRef["Operational status = 'cancelled'<br>Financial payment_status = 'refunded' / 'partially_refunded'"]
+    CheckRefund -->|No (Ambiguous Refund)| AmbiguousCancel["Rule 1: Paid Cancellation with Unknown Refund<br>MUST REMAIN UNCHANGED in Database!<br>Preserve status = 'paid', preserve original notes.<br>Output to Manual Reconciliation Report"]
+    
     CheckCancel -->|No| CheckFin{"finished_at IS NOT NULL?"}
+    CheckFin -->|Yes| SetFin["Rule 2: Reliable Completion Evidence<br>status = 'finished', payment_status = 'paid'"]
     
-    CheckFin -->|Yes| SetFin["Rule 2: Reliable Completion Evidence<br>status = 'finished'<br>payment_status = 'paid'"]
     CheckFin -->|No| CheckStart{"started_at IS NOT NULL?"}
+    CheckStart -->|Yes| SetWash["Rule 3: Reliable Active-Service Evidence<br>status = 'washing', payment_status = 'paid'"]
     
-    CheckStart -->|Yes| SetWash["Rule 3: Reliable Active-Service Evidence<br>status = 'washing'<br>payment_status = 'paid'"]
     CheckStart -->|No| CheckToday{"DATE(created_at) = CURRENT_DATE?"}
-    
-    CheckToday -->|Yes (Today)| SetWait["Rule 4: Reliable Queue Evidence<br>status = 'waiting'<br>payment_status = 'paid'"]
-    CheckToday -->|No (Past Dates)| Ambiguous["Rule 5: Ambiguous / Conflicting Records<br>MUST REMAIN UNCHANGED in Database!<br>Preserve original status and original notes.<br>Output into Manual Reconciliation Report"]
+    CheckToday -->|Yes (Today)| SetWait["Rule 4: Reliable Queue Evidence<br>status = 'waiting', payment_status = 'paid'"]
+    CheckToday -->|No (Past Dates)| Ambiguous["Rule 5: Ambiguous Historical Records<br>MUST REMAIN UNCHANGED in Database!<br>Preserve original status and original notes.<br>Output into Manual Reconciliation Report"]
 ```
 
 ---
@@ -280,15 +288,17 @@ Before executing any updates, the administrator must run this non-destructive qu
 -- Migration Preview & Verification Query (READ-ONLY)
 SELECT 
     CASE 
-        WHEN cancelled_at IS NOT NULL OR cancel_reason IS NOT NULL 
-            THEN '1_RELIABLE_CANCELLATION (Will become status=cancelled)'
+        WHEN (cancelled_at IS NOT NULL OR cancel_reason IS NOT NULL) AND (COALESCE(refunded_amount, 0) > 0)
+            THEN '1_VERIFIED_REFUNDED_CANCELLATION (Will become status=cancelled, payment_status=refunded)'
+        WHEN (cancelled_at IS NOT NULL OR cancel_reason IS NOT NULL) AND (COALESCE(refunded_amount, 0) = 0)
+            THEN '2_PAID_CANCELLATION_UNKNOWN_REFUND (WILL REMAIN UNCHANGED - Flagged for Reconciliation)'
         WHEN finished_at IS NOT NULL 
-            THEN '2_RELIABLE_COMPLETION (Will become status=finished)'
+            THEN '3_RELIABLE_COMPLETION (Will become status=finished, payment_status=paid)'
         WHEN started_at IS NOT NULL AND finished_at IS NULL 
-            THEN '3_RELIABLE_ACTIVE_SERVICE (Will become status=washing)'
+            THEN '4_RELIABLE_ACTIVE_SERVICE (Will become status=washing, payment_status=paid)'
         WHEN started_at IS NULL AND finished_at IS NULL AND DATE(created_at) = CURRENT_DATE 
-            THEN '4_RELIABLE_TODAYS_QUEUE (Will become status=waiting)'
-        ELSE '5_AMBIGUOUS_RECORDS (WILL REMAIN UNCHANGED - Flagged for Reconciliation)'
+            THEN '5_RELIABLE_TODAYS_QUEUE (Will become status=waiting, payment_status=paid)'
+        ELSE '6_AMBIGUOUS_HISTORICAL_RECORDS (WILL REMAIN UNCHANGED - Flagged for Reconciliation)'
     END AS migration_category,
     COUNT(*) AS record_count,
     MIN(created_at) AS earliest_record,
@@ -309,18 +319,22 @@ ORDER BY migration_category ASC;
 -- NON-DESTRUCTIVE EVIDENCE-BASED MIGRATION SCRIPT
 -- ====================================================================
 
--- 1. Create Supplementary Fast-Rollback Table Copy
+-- 1. Create Supplementary Fast-Comparison Table Copy (NOT a full rollback)
 CREATE TABLE IF NOT EXISTS orders_migration_backup_20261106 AS 
 SELECT * FROM orders;
 
--- 2. Rule 1: Reconcile Reliable Cancellation Evidence
--- Preserves original cancellation notes and timestamps exactly as-is.
+-- 2. Rule 1: Reconcile Verified Refunded Cancellations ONLY
+-- Only updates records where explicit financial refund evidence exists.
 UPDATE orders 
-SET payment_status = 'cancelled', 
+SET payment_status = CASE 
+        WHEN refunded_amount >= total_usd THEN 'refunded'
+        ELSE 'partially_refunded'
+    END,
     status = 'cancelled',
     updated_at = CURRENT_TIMESTAMP
 WHERE status = 'paid' 
-  AND (cancelled_at IS NOT NULL OR cancel_reason IS NOT NULL);
+  AND (cancelled_at IS NOT NULL OR cancel_reason IS NOT NULL)
+  AND (COALESCE(refunded_amount, 0) > 0);
 
 -- 3. Rule 2: Reconcile Reliable Completion Evidence
 -- Has clear physical timestamp indicating completion.
@@ -355,11 +369,12 @@ WHERE status = 'paid'
   AND DATE(created_at) = CURRENT_DATE 
   AND cancelled_at IS NULL;
 
--- 6. Rule 5: Ambiguous Historical Records
--- MANDATORY COMPLIANCE: Records with missing/conflicting operational timestamps
--- MUST REMAIN UNCHANGED in the database.
--- Do NOT set status = 'finished'.
--- Do NOT overwrite or append text to notes.
+-- 6. Rule 5: Ambiguous Historical Records & Paid Cancellations with Unknown Refunds
+-- MANDATORY COMPLIANCE:
+-- - Records with missing/conflicting operational timestamps MUST REMAIN UNCHANGED.
+-- - Paid orders with cancellation notes but unknown refund state MUST REMAIN UNCHANGED.
+-- - Do NOT set status = 'finished' or payment_status = 'cancelled'.
+-- - Do NOT overwrite or append text to notes.
 -- These records remain untouched and are extracted into the Reconciliation Report below.
 ```
 
@@ -382,39 +397,51 @@ SELECT
     payment_ref, 
     status, 
     payment_status, 
-    notes
+    cancelled_at,
+    cancel_reason,
+    COALESCE(refunded_amount, 0) AS refunded_amount,
+    notes,
+    CASE 
+        WHEN cancelled_at IS NOT NULL OR cancel_reason IS NOT NULL 
+            THEN 'PAID_OPERATIONAL_CANCELLATION_UNKNOWN_REFUND'
+        ELSE 'AMBIGUOUS_HISTORICAL_TIMESTAMPS'
+    END AS reconciliation_issue
 FROM orders 
 WHERE status = 'paid' 
-  AND started_at IS NULL 
-  AND finished_at IS NULL 
-  AND DATE(created_at) < CURRENT_DATE 
-  AND cancelled_at IS NULL
+  AND (
+    -- Case A: Paid cancellation without verified refund record
+    ((cancelled_at IS NOT NULL OR cancel_reason IS NOT NULL) AND COALESCE(refunded_amount, 0) = 0)
+    OR
+    -- Case B: Older than today with all operational timestamps NULL
+    (started_at IS NULL AND finished_at IS NULL AND DATE(created_at) < CURRENT_DATE AND cancelled_at IS NULL)
+  )
 ORDER BY created_at DESC;
 ```
 
 ---
 
-### 3.7 Comprehensive Rollback Strategy
+### 3.7 Complete Database Backup vs. Supplementary Table Copy & True Rollback
 
-In the event of any discrepancy post-migration, two levels of rollback are provided:
+Management requires strict clarity regarding backup architecture and disaster recovery:
 
-#### Level 1: Immediate Fast Table-Level Reversion
-```sql
--- Fast 1-Step Reversion from supplementary backup table:
-UPDATE orders o
-JOIN orders_migration_backup_20261106 b ON o.id = b.id
-SET o.status = b.status,
-    o.payment_status = b.payment_status,
-    o.receipt_issued_at = b.receipt_issued_at,
-    o.receipt_number = b.receipt_number,
-    o.notes = b.notes,
-    o.updated_at = b.updated_at;
-```
+#### Limitations of Supplementary Table Copy (`CREATE TABLE ... AS SELECT`):
+1. **Not a Complete Rollback Mechanism:** A table copy is merely a transient row snapshot of a single table (`orders`).
+2. **Inability to Revert Relational Cascades:** Executing a `JOIN`-based update (`UPDATE orders JOIN backup...`) **cannot** delete rows created post-migration, **cannot** restore deleted records, **cannot** revert modifications to related tables (`order_items`, `order_tasks`, `order_washers`, `order_mechanics`, `bay_history`), and **cannot** reset table auto-increment counters, triggers, or views.
+3. **Role:** The table copy is used strictly as a supplementary local diff tool to verify before/after row transformations.
 
-#### Level 2: Full Database Disaster Recovery Restore
+#### Mandatory True Rollback Procedure (Full Database Restoration):
+To execute a genuine, mathematically complete rollback that restores 100% of the relational schema, constraints, and data:
+
 ```bash
-# Complete DB restore from verified full backup:
+# Step 1: Terminate active Apache/PHP-FPM connections to prevent write-skew
+# Step 2: Drop and recreate database or execute clean restore
+mysql -u [username] -p -e "DROP DATABASE IF EXISTS carwash_db; CREATE DATABASE carwash_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+# Step 3: Restore complete physical/logical dump from pre-migration backup
 mysql -u [username] -p carwash_db < backup_pre_migration.sql
+
+# Step 4: Verify complete restoration integrity
+mysql -u [username] -p carwash_db -e "CHECKSUM TABLE orders, order_items, bays, bay_history, order_tasks, order_washers, order_mechanics, audit_logs;"
 ```
 
 ---
@@ -491,54 +518,125 @@ stateDiagram-v2
    - Pre-locking a wash bay while the car spends 30 minutes on the lift would hold an empty wash bay idle, cutting shop wash capacity by 50%.
    - Stage 2 is registered as a priority queue transition upon Stage 1 completion.
 
-### 4.4 Reservation Expiry & Crash Recovery (Auto-Healing Engine)
+### 4.4 Separation of Intake Reservation vs. Physical Bay Occupancy & Recovery Engine
 
-To prevent orphaned or dead-locked bays caused by browser crashes, terminal power loss, or abandoned intake sessions:
+Management has established strict operational safety boundaries to prevent dangerous shop-floor collisions:
 
-1. **Intake Reservation Expiry Timeout (15-Minute TTL):**
-   - If a bay is locked by a cashier intake session but no active physical check-in or progress occurs on the shop floor within 15 minutes, the reservation expires.
-   - A background heartbeat checks:
-     ```sql
-     UPDATE bays 
-     SET status = 'free', current_order_id = NULL, last_freed_at = CURRENT_TIMESTAMP 
-     WHERE status = 'busy' 
-       AND occupied_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 15 MINUTE)
-       AND current_order_id IN (SELECT id FROM orders WHERE status = 'waiting' AND started_at IS NULL);
-     ```
-2. **Crash Recovery & Orphan Auto-Healing:**
-   - If a bay is marked `status = 'busy'`, but its associated `current_order_id` has completed (`status = 'finished'`) or been voided (`status = 'cancelled'`), the engine auto-heals the bay status to `free`.
-3. **Manual Manager Override:**
-   - The Bay Queue dashboard (`views/owner/bays_queue.php`) provides an emergency "Force Release Bay" action protected by Manager PIN, logging an audit trail (`BAY_FORCE_RELEASED`).
+#### 1. Separation of Temporary Intake Reservation from Physical Occupancy:
+- **Temporary Intake Hold (`reservation_state = 'intake_reserved'`):**
+  - Occurs during cashier checkout when a bay is selected.
+  - Holds the bay for a maximum of 3 minutes (`hold_expires_at = DATE_ADD(NOW(), INTERVAL 3 MINUTE)`) while the cashier completes payment and cash tendering.
+  - If the cashier abandons the cart, closes the browser, or fails to complete checkout within 3 minutes, the temporary intake hold automatically expires and releases the bay back to `'free'`.
+- **Physical Bay Occupancy (`status = 'busy'`, `physical_occupancy = 'occupied'`):**
+  - Occurs when payment is confirmed and the vehicle physically enters the bay.
+  - **CRITICAL SAFETY RULE: NEVER auto-release a physically occupied bay using an elapsed time limit, order timestamp, or 15-minute timeout!**
+  - A comprehensive detail wash, paint correction, or mechanical repair can legitimately take 30, 45, or 90 minutes. Auto-releasing an occupied bay based on elapsed time causes catastrophic double-dispatch, routing a second vehicle into a bay where workers are actively operating!
+  - Physical bay occupancy can **ONLY** be released by:
+    1. Legitimate job completion submitted by the technician or washer via workshop tablet (`finishStage()` or `completeOrder()`), OR
+    2. Explicit Manager PIN Override on the Bay Queue dashboard (`BAY_FORCE_RELEASED`), generating an immutable security audit event.
 
-### 4.5 Prevention of Duplicate Stage Completion & Multi-Stage Commission Integrity
+#### 2. Heartbeat, Expiration, and Crash Recovery Specification:
+- **Intake Hold TTL Sweep (Every 30 seconds):**
+  ```sql
+  -- Releases ONLY temporary intake holds that were never paid or confirmed:
+  UPDATE bays 
+  SET status = 'free', 
+      reservation_state = 'none', 
+      reserved_by_session_id = NULL,
+      hold_expires_at = NULL 
+  WHERE reservation_state = 'intake_reserved' 
+    AND hold_expires_at < CURRENT_TIMESTAMP;
+  ```
+- **Orphan Auto-Healing (Crash Recovery):**
+  - If a bay is marked `status = 'busy'`, but its associated `current_order_id` is completed (`status = 'finished'`) or voided (`status = 'cancelled'`), the system auto-heals the bay to `free`:
+  ```sql
+  UPDATE bays b
+  JOIN orders o ON b.current_order_id = o.id
+  SET b.status = 'free', b.current_order_id = NULL, b.last_freed_at = CURRENT_TIMESTAMP
+  WHERE b.status = 'busy' 
+    AND o.status IN ('finished', 'cancelled');
+  ```
 
-In `core/BayManager.php` and `views/mechanic/jobs.php`, rapid double-clicking of stage completion must be handled idempotently without corrupting commissions:
+#### 3. Transaction-Safe Bay Release and Stage Progression:
+To guarantee that bay release, stage advancement, and queue transitions occur atomically without race conditions, operations must execute within an isolated database transaction using row-level locking:
 
-1. **Idempotent Stage Transition:**
-   - When completing Stage 1:
-     ```sql
-     UPDATE orders 
-     SET active_stage = 2, 
-         repair_status = 'finished',
-         updated_at = CURRENT_TIMESTAMP 
-     WHERE id = :order_id 
-       AND active_stage = 1; -- Enforces single execution!
-     ```
-   - If `rowCount() === 0`, Stage 1 was already completed; duplicate requests are safely ignored.
-2. **Worker Commission Uniqueness Per Legitimate Stage Assignment:**
-   - **Critical Problem with Simple `UNIQUE(order_id, staff_id)`:** In a combined service (Oil Change + Detail Wash), a cross-trained staff member might legitimately perform Stage 1 (Oil service) and later perform Stage 2 (Wash/Wax). A simple `UNIQUE(order_id, staff_id)` would improperly reject the legitimate second commission!
-   - **Correct Solution:** Commission uniqueness must be enforced **per legitimate assignment or service stage**, not merely per worker and order:
-     ```sql
-     -- Schema constraint enforcing uniqueness per stage sequence:
-     ALTER TABLE order_washers 
-       ADD COLUMN stage_sequence TINYINT NOT NULL DEFAULT 1 AFTER order_id,
-       ADD UNIQUE INDEX uq_order_stage_washer (order_id, stage_sequence, washer_id);
+```php
+// core/BayManager.php - Transaction-Safe Stage Progression
+public function transitionStageAtomically(int $orderId, int $currentStage, int $nextStage, int $bayId): bool {
+    $this->pdo->beginTransaction();
+    try {
+        // 1. Lock the order and bay rows to eliminate concurrent race conditions
+        $stmtOrd = $this->pdo->prepare("SELECT id, active_stage, status FROM orders WHERE id = ? FOR UPDATE");
+        $stmtOrd->execute([$orderId]);
+        $order = $stmtOrd->fetch();
 
-     ALTER TABLE order_mechanics 
-       ADD COLUMN stage_sequence TINYINT NOT NULL DEFAULT 1 AFTER order_id,
-       ADD UNIQUE INDEX uq_order_stage_mechanic (order_id, stage_sequence, mechanic_id);
-     ```
-   - This prevents duplicate commission payouts if a cashier or technician taps "Submit" twice on the same stage, while cleanly allowing distinct legitimate commissions across separate stages.
+        if (!$order || (int)$order['active_stage'] !== $currentStage) {
+            $this->pdo->rollBack();
+            return false; // Already transitioned or invalid stage
+        }
+
+        $stmtBay = $this->pdo->prepare("SELECT id, status, current_order_id FROM bays WHERE id = ? FOR UPDATE");
+        $stmtBay->execute([$bayId]);
+        $bay = $stmtBay->fetch();
+
+        // 2. Mark task completed
+        $updTask = $this->pdo->prepare("UPDATE order_tasks SET status = 'completed', completed_at = NOW() WHERE order_id = ? AND sequence = ?");
+        $updTask->execute([$orderId, $currentStage]);
+
+        // 3. Atomically release the physical bay
+        $updBay = $this->pdo->prepare("UPDATE bays SET status = 'free', current_order_id = NULL, last_freed_at = NOW() WHERE id = ? AND current_order_id = ?");
+        $updBay->execute([$bayId, $orderId]);
+
+        // 4. Advance order to next stage and buffer in wash queue
+        $updOrd = $this->pdo->prepare("UPDATE orders SET active_stage = ?, status = 'waiting', updated_at = NOW() WHERE id = ?");
+        $updOrd->execute([$nextStage, $orderId]);
+
+        // 5. Log audit trail
+        AuditLogger::log('STAGE_TRANSITION', "Order #{$orderId} transitioned from Stage {$currentStage} to {$nextStage}. Bay {$bayId} released.", 'bay', $bayId);
+
+        $this->pdo->commit();
+        return true;
+    } catch (\Throwable $e) {
+        $this->pdo->rollBack();
+        throw $e;
+    }
+}
+```
+
+---
+
+### 4.5 Task-Based Commission Idempotency & Multi-Assignment Integrity
+
+#### Why Simple Uniqueness by `(order_id, stage, worker)` is Insufficient:
+- In real workshop operations, a cross-trained worker may legitimately perform **multiple distinct tasks within the same stage** (e.g., in Stage 1 Mechanical, a technician performs Task A: Oil & Filter Change [$5 commission] AND Task B: Brake Pad Replacement [$8 commission]).
+- A constraint restricted merely to `UNIQUE(order_id, stage, worker)` would improperly reject the worker's second legitimate task commission!
+- Conversely, omitting uniqueness allows rapid double-clicking of the "Complete Task" button to duplicate payouts.
+
+#### Robust Solution: Task-Assignment ID & Commission Idempotency Keys
+Commission records in `order_washers` and `order_mechanics` must be tied directly to a specific task instance (`task_assignment_id`) and protect against retry/double-click duplication using a unique commission idempotency key:
+
+```sql
+-- Schema enhancements for task-level commission integrity:
+ALTER TABLE order_washers 
+  ADD COLUMN task_id INT NOT NULL AFTER order_id,
+  ADD COLUMN commission_idempotency_key VARCHAR(64) NOT NULL AFTER commission_usd,
+  ADD UNIQUE INDEX uq_washer_idempotency (commission_idempotency_key),
+  ADD INDEX idx_washer_task (task_id, washer_id);
+
+ALTER TABLE order_mechanics 
+  ADD COLUMN task_id INT NOT NULL AFTER order_id,
+  ADD COLUMN commission_idempotency_key VARCHAR(64) NOT NULL AFTER commission_usd,
+  ADD UNIQUE INDEX uq_mechanic_idempotency (commission_idempotency_key),
+  ADD INDEX idx_mechanic_task (task_id, mechanic_id);
+```
+
+#### Idempotency Key Derivation:
+- Key format: `hash('sha256', "comm_{order_id}_{task_id}_{worker_id}_{action_sequence}")`
+- When a technician completes Task 14, the frontend or controller sends the idempotency key.
+- If the network lags and the technician taps "Complete" 3 times in 400ms:
+  - First request commits the commission row.
+  - Second and third requests hit `uq_mechanic_idempotency`, catch the unique violation gracefully, and return idempotent success without creating duplicate payouts.
+- When the same technician is assigned to Task 15 (a different task on the same order and stage), the derived key includes `task_id = 15`, which succeeds without collision, completely preserving multi-task commission earnings.
 
 ---
 
@@ -581,45 +679,71 @@ In `core/BayManager.php` and `views/mechanic/jobs.php`, rapid double-clicking of
    - **Risk:** Station-to-cloud sync must transmit `payment_status` alongside `status`.
    - New columns (`assigned_bay_id`, `active_stage`) must be made nullable and optional in sync payloads to prevent cloud sync rejections.
 
-### 5.3 Strict Accounting & Revenue Calculation Formulas
+### 5.3 Redesigned Revenue Accounting & Payment Ledger Formulations
 
-To ensure zero accounting ambiguity across financial reports, the revenue aggregation logic in `views/owner/reports.php` and `api/reports/` must implement standard accounting formulas across all transaction states:
+Management has instructed that revenue reporting must be grounded strictly in **actual financial payment and refund records**, rather than assuming operational `status = 'cancelled'` equates to zero payment:
 
-| Order Transaction State | Database Status Mapping | Revenue Ledger Treatment | Accounting Impact |
-| :--- | :--- | :--- | :--- |
-| **Fully Paid Order** | `payment_status = 'paid'` AND `status != 'cancelled'` | Included in Gross and Net Sales (+100% `total_usd`) | Positive recognized revenue |
-| **Fully Refunded Order** | `payment_status = 'refunded'` | Fully deducted from Gross Sales (-100% `total_usd` or `refunded_amount`) | Net Revenue impact = $0.00; Refund loss tracked |
-| **Partially Refunded Order** | `payment_status = 'partially_refunded'` OR `(payment_status = 'paid' AND refunded_amount > 0)` | Net recognized amount = `(total_usd - refunded_amount)` | Only unrefunded portion counted in Net Sales |
-| **Cancelled / Voided Order** | `status = 'cancelled'` OR `payment_status = 'cancelled'` | **100% EXCLUDED** from both Gross and Net Sales | Never counts toward sales; reported in Void / Loss log |
+#### 1. Core Accounting Distinctions:
+- **Gross Payments Collected:** Total tender physically received into the cash drawer or verified via merchant KHQR, regardless of subsequent operational completion. If a customer paid $30 and the service was subsequently aborted without a refund, the $30 remains collected gross tender.
+- **Full Refunds Returned:** Payments where 100% of the funds were returned to the customer (`payment_status = 'refunded'`).
+- **Partial Refunds Returned:** Payments where a portion of the funds was refunded (e.g., $10 refunded from a $38 mixed package when Stage 2 was cancelled; `payment_status = 'partially_refunded'`).
+- **Net Retained Payments:** The exact net cash/digital funds retained by the business: `Gross Payments - Full Refunds - Partial Refunds`.
+- **Unpaid Cancellations:** Orders cancelled prior to payment receipt (`payment_status = 'unpaid' AND status = 'cancelled'`). Zero cash impact.
+- **Paid Operational Cancellations:** Orders where payment was collected (`payment_status = 'paid'`), but service was aborted (`status = 'cancelled'`). If no refund was granted (e.g. materials poured or policy forfeiture), these funds remain retained in Net Payments. If refunded, they are accounted for under Full or Partial Refunds.
 
-#### Standard Revenue SQL Formulation:
+| Transaction Classification | Financial Payment Status | Operational Service Status | Gross Payments Impact | Refunds Impact | Net Retained Impact |
+| :--- | :--- | :--- | :---: | :---: | :---: |
+| **Standard Completed Order** | `payment_status = 'paid'` | `status = 'finished'` | `+total_usd` | $0.00 | `+total_usd` |
+| **Active In-Flight Paid Order** | `payment_status = 'paid'` | `status IN ('waiting', 'washing')` | `+total_usd` | $0.00 | `+total_usd` |
+| **Paid Cancellation (No Refund)** | `payment_status = 'paid'` | `status = 'cancelled'` | `+total_usd` | $0.00 | `+total_usd` *(Retained)* |
+| **Full Refund Cancellation** | `payment_status = 'refunded'` | `status = 'cancelled'` | `+total_usd` | `+total_usd` | **$0.00** |
+| **Partial Refund Cancellation** | `payment_status = 'partially_refunded'` | `status = 'cancelled'` | `+total_usd` | `+refunded_amount` | `+(total_usd - refunded_amount)` |
+| **Unpaid Cancellation** | `payment_status = 'unpaid'` | `status = 'cancelled'` | **$0.00** | $0.00 | **$0.00** |
+
+#### 2. Certified Financial SQL Formulation:
 ```sql
--- Certified Revenue Formula for Financial Reports:
+-- Certified Financial Revenue Query for views/owner/reports.php
 SELECT 
-    -- 1. Gross Revenue (Total cash & KHQR received before refunds)
+    -- 1. Gross Payments Collected (All cash & digital funds received)
     COALESCE(SUM(CASE 
-        WHEN payment_status IN ('paid', 'partially_refunded') AND status != 'cancelled' 
-        THEN total_usd ELSE 0 END), 0) AS gross_sales_usd,
+        WHEN payment_status IN ('paid', 'partially_refunded', 'refunded') 
+        THEN total_usd ELSE 0 END), 0) AS gross_payments_collected_usd,
 
-    -- 2. Total Refunds Issued
+    -- 2. Full Refunds Issued (Money returned in full)
     COALESCE(SUM(CASE 
-        WHEN payment_status = 'refunded' THEN total_usd 
+        WHEN payment_status = 'refunded' 
+        THEN COALESCE(refunded_amount, total_usd) ELSE 0 END), 0) AS full_refunds_usd,
+
+    -- 3. Partial Refunds Issued (Portion returned)
+    COALESCE(SUM(CASE 
+        WHEN payment_status = 'partially_refunded' 
+        THEN refunded_amount ELSE 0 END), 0) AS partial_refunds_usd,
+
+    -- 4. Total Refunds (Full + Partial)
+    COALESCE(SUM(CASE 
+        WHEN payment_status = 'refunded' THEN COALESCE(refunded_amount, total_usd)
         WHEN payment_status = 'partially_refunded' THEN refunded_amount 
         ELSE 0 END), 0) AS total_refunds_usd,
 
-    -- 3. Net Revenue (Actual retained cash flow)
+    -- 5. Net Retained Payments (Actual money kept by the business)
     COALESCE(SUM(CASE 
-        WHEN payment_status = 'paid' AND status != 'cancelled' THEN (total_usd - COALESCE(refunded_amount, 0))
-        WHEN payment_status = 'partially_refunded' AND status != 'cancelled' THEN (total_usd - refunded_amount)
-        ELSE 0 END), 0) AS net_revenue_usd,
+        WHEN payment_status = 'paid' THEN total_usd
+        WHEN payment_status = 'partially_refunded' THEN (total_usd - refunded_amount)
+        ELSE 0 END), 0) AS net_retained_payments_usd,
 
-    -- 4. Voided Sales Volume (Audit traceability)
+    -- 6. Unpaid Operational Cancellations (Never tendered)
     COALESCE(SUM(CASE 
-        WHEN status = 'cancelled' OR payment_status = 'cancelled' THEN total_usd 
-        ELSE 0 END), 0) AS voided_sales_usd
+        WHEN status = 'cancelled' AND payment_status = 'unpaid' 
+        THEN total_usd ELSE 0 END), 0) AS unpaid_voids_usd
 FROM orders
 WHERE created_at BETWEEN :start_date AND :end_date;
 ```
+
+#### 3. Legacy Records Reconciliation Strategy:
+- **Historical Orders (`created_at < MIGRATION_DATE`):**
+  - Historical orders where `orders.status = 'paid'` and `cancelled_at IS NULL` are recognized as `payment_status = 'paid'` (Gross & Net).
+  - Historical orders where `orders.status = 'paid'` but `cancelled_at IS NOT NULL` without refund amounts are flagged in the Manual Reconciliation Report as `PAID_OPERATIONAL_CANCELLATION_UNKNOWN_REFUND`. Management reviews bank and drawer history to classify whether funds were refunded or retained before finalizing historical statements.
+  - Historical orders where `orders.status = 'cancelled'` and `payment_status` is NULL/unpaid are treated as Unpaid Cancellations ($0 financial impact).
 
 ---
 
