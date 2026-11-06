@@ -843,7 +843,6 @@ class PosApp {
             this.renderCatalog();
             this.renderCart();
             this.populateCrewDropdowns();
-            this.fetchBaysAndQueue(true).catch(() => {});
         } else if (current === 'queue') {
             this.renderJobQueue();
         } else if (current === 'orders') {
@@ -2229,8 +2228,10 @@ class PosApp {
                 // Update timestamp display
                 this.updateCatalogSyncStatus(true);
 
-                // Background sync customers list too
-                PosApi.syncCustomers().catch(() => {});
+                // Background sync customers list only if staff session token is active
+                if (typeof PosStorage !== 'undefined' && PosStorage.getSessionToken()) {
+                    PosApi.syncCustomers().catch(() => {});
+                }
             } else {
                 this.setOnlineStatus(false);
                 this.updateCatalogSyncStatus(false);
@@ -2369,9 +2370,25 @@ class PosApp {
     /**
      * Check active staff session
      */
-    static checkSession() {
-        const user = PosStorage.getUser();
-        const token = PosStorage.getSessionToken();
+    static async checkSession() {
+        let user = PosStorage.getUser();
+        let token = PosStorage.getSessionToken();
+
+        // If no token, check if server has an active web session (e.g. from Back Office login)
+        if (!token) {
+            try {
+                const res = await PosApi.getWebSession();
+                if (res && res.success && res.session_token && res.user) {
+                    token = res.session_token;
+                    user = res.user;
+                    PosStorage.setSessionToken(token);
+                    PosStorage.setUser(user);
+                }
+            } catch (e) {
+                // Not authenticated in web session
+            }
+        }
+
         if (user && token) {
             this.currentUser = user;
             this.renderLoggedInState();
@@ -2969,7 +2986,6 @@ class PosApp {
             this.renderCatalog();
             this.renderCart();
             this.populateCrewDropdowns();
-            this.fetchBaysAndQueue(true).catch(() => {});
 
             // Resolve initial view
             if (canPosAccess) {
@@ -3076,9 +3092,6 @@ class PosApp {
 
         if (viewName === 'pos') {
             this.populateCrewDropdowns();
-            if (this.currentUser) {
-                this.fetchBaysAndQueue(true).catch(() => {});
-            }
         } else if (viewName === 'queue') {
             this.renderJobQueue();
         } else if (viewName === 'orders') {
@@ -3971,11 +3984,6 @@ class PosApp {
     static updateCartQty(index, delta) {
         if (!this.cart[index]) return;
         const item = this.cart[index];
-        if (delta > 0 && item.is_member_benefit) {
-            const limitMsg = I18nManager.t('memberBenefitQtyLimit') || 'Included member benefit is limited to 1 item.';
-            this.showToastNotice(limitMsg, 'warning');
-            return;
-        }
         if (delta > 0 && item.product_id) {
             const catalog = PosStorage.getCatalog();
             const prod = (catalog?.products || []).find(p => p.id === item.product_id);
@@ -4011,11 +4019,6 @@ class PosApp {
         document.getElementById('cartLoyaltyRewardStatusBadge')?.setAttribute('style', 'display: none;');
         document.querySelectorAll('.disc-btn').forEach(b => b.classList.remove('active'));
         document.querySelector('.disc-btn[data-disc="0"]')?.classList.add('active');
-        if (document.getElementById('cartMileageInput')) document.getElementById('cartMileageInput').value = '';
-        if (document.getElementById('cartNextOilMileageInput')) document.getElementById('cartNextOilMileageInput').value = '';
-        if (document.getElementById('cartNextOilDateInput')) document.getElementById('cartNextOilDateInput').value = '';
-        if (document.getElementById('cartRepairNotesInput')) document.getElementById('cartRepairNotesInput').value = '';
-        if (document.getElementById('cartOilReminderBox')) document.getElementById('cartOilReminderBox').style.display = 'none';
         this.renderCart();
     }
 
@@ -4765,9 +4768,7 @@ class PosApp {
         // Update UI
         document.getElementById('custDropdown')?.classList.remove('open');
         this.closeSavedCustomersPanel();
-        const custInp = document.getElementById('custSearchInput');
-        if (custInp) custInp.value = '';
-        this.handleGlobalSearch('');
+        document.getElementById('custSearchInput').value = '';
         document.getElementById('selectedCustBadgeWrap').style.display = 'block';
         document.getElementById('badgePlate').textContent = cleanPlate;
         document.getElementById('badgeName').textContent = cleanName;
@@ -4814,9 +4815,7 @@ class PosApp {
         if (this._dismissedUpsellIds) this._dismissedUpsellIds.clear();
         document.getElementById('modalUpsellPrompt')?.classList.remove('open');
         document.getElementById('selectedCustBadgeWrap').style.display = 'none';
-        const custInp = document.getElementById('custSearchInput');
-        if (custInp) custInp.value = '';
-        this.handleGlobalSearch('');
+        document.getElementById('custSearchInput').value = '';
         const topCustName = document.getElementById('topbarCustomerName');
         if (topCustName) {
             topCustName.textContent = I18nManager.t('generalCustomer');
@@ -5594,7 +5593,7 @@ class PosApp {
                 this.currentCustomer.plate = plate;
                 this.currentCustomer.vehicle_type = customer.vehicle_type;
             }
-            const pInput = document.getElementById('custSearchInput') || document.getElementById('searchCustomerInput');
+            const pInput = document.getElementById('searchCustomerInput');
             if (pInput) pInput.value = plate;
         }
 
@@ -5804,7 +5803,7 @@ class PosApp {
                 this.currentCustomer.plate = plate;
                 this.currentCustomer.vehicle_type = customer.vehicle_type;
             }
-            const pInput = document.getElementById('custSearchInput') || document.getElementById('searchCustomerInput');
+            const pInput = document.getElementById('searchCustomerInput');
             if (pInput) pInput.value = plate;
         }
 
@@ -7080,14 +7079,11 @@ class PosApp {
     static async renderJobQueue() {
         const grid = document.getElementById('queueGrid');
         if (!grid) return;
-        if (this.isQueueRendering) return;
-        this.isQueueRendering = true;
 
-        try {
-            const errorBanner = document.getElementById('queueErrorBanner');
-            const offlineBanner = document.getElementById('queueOfflineBanner');
-            if (errorBanner) errorBanner.style.display = 'none';
-            if (offlineBanner) offlineBanner.style.display = 'none';
+        const errorBanner = document.getElementById('queueErrorBanner');
+        const offlineBanner = document.getElementById('queueOfflineBanner');
+        if (errorBanner) errorBanner.style.display = 'none';
+        if (offlineBanner) offlineBanner.style.display = 'none';
 
         // Requirement 1 & 4: Fetch bays and queue data
         await this.fetchBaysAndQueue(true);
@@ -7331,9 +7327,6 @@ class PosApp {
                 this.printWasherTicket(num);
             }
         };
-        } finally {
-            this.isQueueRendering = false;
-        }
     }
 
     // Requirement 7: Offline status changes saved in queue, sent when connection returns, not overwritten
@@ -11652,13 +11645,6 @@ class PosApp {
                 await this.renderWasherScreen();
             } else if (role === 'technical' || role === 'mechanic') {
                 await this.renderMechanicScreen();
-            } else if (this.currentView === 'queue') {
-                const activeModal = document.querySelector('.modal.open');
-                if (!activeModal) {
-                    await this.renderJobQueue();
-                } else {
-                    await this.fetchBaysAndQueue(true);
-                }
             } else {
                 await this.fetchBaysAndQueue(true);
             }

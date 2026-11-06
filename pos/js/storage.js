@@ -56,7 +56,7 @@ class PosStorage {
     // User Session & Token
     static getSessionToken() {
         try {
-            return sessionStorage.getItem('cw_pos_session_token');
+            return sessionStorage.getItem('cw_pos_session_token') || localStorage.getItem('cw_pos_session_token') || null;
         } catch (e) {
             return null;
         }
@@ -66,11 +66,13 @@ class PosStorage {
         try {
             if (token) {
                 sessionStorage.setItem('cw_pos_session_token', token);
+                localStorage.setItem('cw_pos_session_token', token);
             } else {
                 sessionStorage.removeItem('cw_pos_session_token');
+                localStorage.removeItem('cw_pos_session_token');
             }
         } catch (e) {
-            console.error('Failed to update session token in sessionStorage:', e);
+            console.error('Failed to update session token in storage:', e);
         }
     }
 

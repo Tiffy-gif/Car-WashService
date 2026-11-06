@@ -7,7 +7,8 @@ class Language {
 
     public static function init(): void {
         if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+            require_once __DIR__ . '/Auth.php';
+            Auth::startSession();
         }
 
         // Check GET switch

@@ -1,3 +1,33 @@
-<FilesMatch "\.(php|phtml|php5|php7|phar)$">
-    Deny from all
-</FilesMatch>
+# ====================================================================
+#  AquaGleam Bank Slips Upload Protection
+#  Disallow script execution and directory browsing
+# ====================================================================
+
+Options -ExecCGI -Indexes
+
+<IfModule mod_authz_core.c>
+    <FilesMatch "(?i)\.(php|phtml|php3|php4|php5|php7|php8|phps|phar|inc|cgi|pl|py|pht|shtml|sh|bat)$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "(?i)\.(php|phtml|php3|php4|php5|php7|php8|phps|phar|inc|cgi|pl|py|pht|shtml|sh|bat)$">
+        Order Deny,Allow
+        Deny from all
+    </FilesMatch>
+</IfModule>
+
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+
+<IfModule mod_mime.c>
+    RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .php8 .phps .phar .inc .cgi .pl .py .pht .shtml
+    RemoveType .php .phtml .php3 .php4 .php5 .php7 .php8 .phps .phar .inc .cgi .pl .py .pht .shtml
+</IfModule>

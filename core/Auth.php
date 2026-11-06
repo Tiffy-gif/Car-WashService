@@ -10,16 +10,20 @@ class Auth {
 
     public static function startSession(): void {
         if (session_status() === PHP_SESSION_NONE && !headers_sent()) {
-            $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443);
+            $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+                || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443)
+                || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower((string)$_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https');
+
             @ini_set('session.cookie_httponly', '1');
             @ini_set('session.use_only_cookies', '1');
             @ini_set('session.cookie_samesite', 'Strict');
             @ini_set('session.use_strict_mode', '1');
+
             session_set_cookie_params([
                 'lifetime' => 0,
-                'path' => '/',
-                'domain' => '',
-                'secure' => $isHttps,
+                'path'     => '/',
+                'domain'   => '',
+                'secure'   => $isHttps,
                 'httponly' => true,
                 'samesite' => 'Strict'
             ]);
@@ -27,6 +31,40 @@ class Auth {
             session_name('carwash_sess');
             @session_start();
         }
+    }
+
+    /**
+     * Check if client IP is currently throttled due to repeated failed logins.
+     */
+    public static function checkIpLockout(?string $ip = null): ?array {
+        $ip = $ip ?? AuditLogger::getClientIp();
+        $isLocalhost = in_array($ip, ['127.0.0.1', '::1'], true);
+        $maxAttempts = (defined('APP_ENV') && APP_ENV === 'development') || $isLocalhost ? 50 : 10;
+        $windowMins = 15;
+        $since = date('Y-m-d H:i:s', time() - ($windowMins * 60));
+
+        try {
+            $pdo = Database::getInstance();
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*) FROM audit_logs
+                WHERE ip_address = ?
+                  AND action IN ('LOGIN_FAILED', 'LOGIN_LOCKED')
+                  AND created_at >= ?
+            ");
+            $stmt->execute([$ip, $since]);
+            $failedCount = (int)$stmt->fetchColumn();
+
+            if ($failedCount >= $maxAttempts) {
+                return [
+                    'locked'            => true,
+                    'remaining_minutes' => $windowMins,
+                    'failed_attempts'   => $failedCount,
+                ];
+            }
+        } catch (Throwable $t) {
+            // Fail open gracefully if audit_logs table is unavailable during initialization
+        }
+        return null;
     }
 
     public static function getLastError(): ?string {
@@ -55,6 +93,18 @@ class Auth {
 
         $username = trim($username);
         $pin = trim($pin);
+
+        // 0. Check IP rate-limiting lockout
+        $ipLock = self::checkIpLockout();
+        if ($ipLock !== null) {
+            self::$lastError = 'ip_locked';
+            self::$lastErrorData = [
+                'remaining_minutes' => $ipLock['remaining_minutes'],
+                'failed_attempts'   => $ipLock['failed_attempts']
+            ];
+            AuditLogger::log('IP_LOGIN_THROTTLED', "Login blocked due to IP throttle limit ({$ipLock['failed_attempts']} attempts)", 'auth');
+            return false;
+        }
 
         if ($username === '' || $pin === '') {
             self::$lastError = 'invalid_credentials';

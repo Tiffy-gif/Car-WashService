@@ -51,18 +51,85 @@ if (!empty($appTimezone)) {
 }
 
 // Set JSON headers and CORS for POS app client
+// CORS Origin Validation: Never use wildcard '*'
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+$isAllowedOrigin = false;
+
+if (!empty($origin)) {
+    $originHost = strtolower((string)parse_url($origin, PHP_URL_HOST));
+    $currentHost = strtolower((string)parse_url('http://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'), PHP_URL_HOST));
+
+    // Check if origin is loopback, matching host, or private RFC1918 LAN IP
+    $isLoopback = in_array($originHost, ['localhost', '127.0.0.1', '::1'], true);
+    $isMatchingHost = ($originHost !== '' && $originHost === $currentHost);
+    $isIp = filter_var($originHost, FILTER_VALIDATE_IP) !== false;
+    $isPrivateLan = $isIp && (filter_var($originHost, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false);
+
+    if ($isLoopback || $isMatchingHost || $isPrivateLan) {
+        $isAllowedOrigin = true;
+    }
+}
+
 if (!headers_sent()) {
     header('Content-Type: application/json; charset=utf-8');
-    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Device-Key, X-Device-UID, X-Idempotency-Key');
+    header('Vary: Origin');
+
+    if ($isAllowedOrigin) {
+        header('Access-Control-Allow-Origin: ' . $origin);
+        header('Access-Control-Allow-Credentials: true');
+        header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+        header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Device-Key, X-Device-UID, X-Idempotency-Key, X-Staff-Token');
+        header('Access-Control-Expose-Headers: X-Staff-Token');
+    }
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
-    http_response_code(200);
+    if (!empty($origin) && !$isAllowedOrigin) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'FORBIDDEN_CORS_ORIGIN']);
+        exit;
+    }
+    http_response_code(204);
+    exit;
+}
+
+if (!empty($origin) && !$isAllowedOrigin) {
+    http_response_code(403);
+    echo json_encode([
+        'success' => false,
+        'error' => 'FORBIDDEN_CORS_ORIGIN',
+        'message' => 'Cross-origin requests from external web origins are prohibited.'
+    ]);
     exit;
 }
 
 $pdo = Database::getInstance();
+
+// Rate limiting on device key authentication failures
+$clientIp = class_exists('AuditLogger') ? AuditLogger::getClientIp() : ($_SERVER['REMOTE_ADDR'] ?? '127.0.0.1');
+try {
+    $sinceTenMins = date('Y-m-d H:i:s', time() - 600);
+    $checkFail = $pdo->prepare("
+        SELECT COUNT(*) FROM audit_logs
+        WHERE ip_address = ?
+          AND action = 'POS_DEVICE_AUTH_FAILED'
+          AND created_at >= ?
+    ");
+    $checkFail->execute([$clientIp, $sinceTenMins]);
+    $isLocalhost = in_array($clientIp, ['127.0.0.1', '::1'], true);
+    $maxDeviceAttempts = (defined('APP_ENV') && APP_ENV === 'development') || $isLocalhost ? 200 : 20;
+    if ((int)$checkFail->fetchColumn() >= $maxDeviceAttempts) {
+        http_response_code(429);
+        echo json_encode([
+            'success' => false,
+            'error' => 'RATE_LIMIT_EXCEEDED',
+            'message' => 'Too many failed device authentication attempts. Please try again later.'
+        ]);
+        exit;
+    }
+} catch (Throwable $t) {
+    // Fail open safely if table busy
+}
 
 // 1. Authenticate POS Device
 // Read API Key from Header: X-Device-Key or Authorization: Bearer <key>
@@ -100,6 +167,9 @@ $devStmt->execute([$keyHash]);
 $device = $devStmt->fetch();
 
 if (!$device) {
+    if (class_exists('AuditLogger')) {
+        AuditLogger::log('POS_DEVICE_AUTH_FAILED', 'Unrecognized POS device key attempted from IP ' . $clientIp, 'device');
+    }
     http_response_code(403);
     echo json_encode([
         'success' => false,
@@ -212,6 +282,7 @@ if ($action === 'ping' || $action === 'health') {
 // ========================================================
 $DEVICE_ONLY_ACTIONS = [
     'staff_login',
+    'get_web_session',
     'sync_catalog',
     'get_day_lock_status',
     'ping',
@@ -234,8 +305,41 @@ if (!in_array($action, $DEVICE_ONLY_ACTIONS, true)) {
         }
     }
     $staffToken = trim((string)$staffToken);
+    $tokenHash = null;
 
+    // If staffToken header is missing, check if request is authenticated via web session cookie
     if ($staffToken === '') {
+        if (class_exists('Auth')) {
+            Auth::startSession();
+            if (Auth::check()) {
+                $webUserId = (int)Auth::getUserId();
+                $nowStr = date('Y-m-d H:i:s');
+                $checkSess = $pdo->prepare("
+                    SELECT s.id, s.token_hash 
+                    FROM pos_sessions s
+                    WHERE s.user_id = ? AND s.device_id = ? AND s.expires_at > ?
+                    ORDER BY s.id DESC LIMIT 1
+                ");
+                $checkSess->execute([$webUserId, (int)$device['id'], $nowStr]);
+                $existingSess = $checkSess->fetch(PDO::FETCH_ASSOC);
+
+                if ($existingSess && !empty($existingSess['token_hash'])) {
+                    $tokenHash = $existingSess['token_hash'];
+                } else {
+                    $rawToken = bin2hex(random_bytes(32));
+                    $tokenHash = hash('sha256', $rawToken);
+                    $expiresAtStr = date('Y-m-d H:i:s', time() + 12 * 3600);
+                    $insSess = $pdo->prepare("INSERT INTO pos_sessions (token_hash, user_id, device_id, created_at, last_seen_at, expires_at, ip) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                    $insSess->execute([$tokenHash, $webUserId, (int)$device['id'], $nowStr, $nowStr, $expiresAtStr, $clientIp]);
+                    if (!headers_sent()) {
+                        header('X-Staff-Token: ' . $rawToken);
+                    }
+                }
+            }
+        }
+    }
+
+    if ($staffToken === '' && empty($tokenHash)) {
         http_response_code(401);
         echo json_encode([
             'success' => false,
@@ -245,10 +349,12 @@ if (!in_array($action, $DEVICE_ONLY_ACTIONS, true)) {
         exit;
     }
 
-    $tokenHash = hash('sha256', $staffToken);
+    if (empty($tokenHash)) {
+        $tokenHash = hash('sha256', $staffToken);
+    }
     $sessStmt = $pdo->prepare("
         SELECT s.id AS session_id, s.token_hash, s.user_id, s.device_id, s.created_at, s.last_seen_at, s.expires_at,
-               u.username, u.full_name, u.role, u.status AS user_status
+               u.id AS id, u.username, u.full_name, u.role, u.status AS user_status
         FROM pos_sessions s
         JOIN users u ON u.id = s.user_id
         WHERE s.token_hash = ?
@@ -325,6 +431,8 @@ if (!in_array($action, $DEVICE_ONLY_ACTIONS, true)) {
 
     // Overwrite staff_id, user_id, cashier_id with verified user id and unset client staff_role
     $verifiedUserId = (int)$session['user_id'];
+    $session['id'] = $verifiedUserId;
+    $session['user_id'] = $verifiedUserId;
     $sessionUser = $session;
     $GLOBALS['sessionUser'] = $session;
     $GLOBALS['authUserId'] = $verifiedUserId;
@@ -688,6 +796,70 @@ if ($action === 'staff_login') {
         'exchange_rate' => get_exchange_rate(),
         'settings' => $settings,
         'shop' => $shopData
+    ]);
+    exit;
+}
+
+// ========================================================
+// 1a-2. ACTION: get_web_session
+// Bridge active Back Office web session (cookie) to POS staff session token
+// ========================================================
+if ($action === 'get_web_session') {
+    Auth::startSession();
+    if (!Auth::check()) {
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'error' => 'NO_WEB_SESSION',
+            'message' => 'No active authenticated web session.'
+        ]);
+        exit;
+    }
+
+    $webUserId = (int)Auth::getUserId();
+    $uStmt = $pdo->prepare("SELECT id, username, full_name, role, phone, commission_type, commission_rate, status, is_sample_account FROM users WHERE id = ?");
+    $uStmt->execute([$webUserId]);
+    $user = $uStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$user || $user['status'] !== 'active') {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'USER_INACTIVE',
+            'message' => 'Staff account is inactive or not found.'
+        ]);
+        exit;
+    }
+
+    unset($user['password_hash']);
+    $roleDetails = Auth::getUserRoleDetails((int)$user['id']);
+    $user['role_code'] = $roleDetails['role_code'] ?? $user['role'];
+    $user['role_name_en'] = $roleDetails['role_name_en'] ?? ucfirst($user['role']);
+    $user['role_name_km'] = $roleDetails['role_name_km'] ?? $user['role'];
+    $user['permissions'] = Auth::getPermissionsByUserId((int)$user['id']);
+
+    $rawToken = bin2hex(random_bytes(32));
+    $tokenHash = hash('sha256', $rawToken);
+    $expiresIn = 12 * 3600; // 12 hours
+    $nowStr = date('Y-m-d H:i:s');
+    $expiresAtStr = date('Y-m-d H:i:s', time() + $expiresIn);
+
+    $sessStmt = $pdo->prepare("INSERT INTO pos_sessions (token_hash, user_id, device_id, created_at, last_seen_at, expires_at, ip) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $sessStmt->execute([$tokenHash, (int)$user['id'], (int)$device['id'], $nowStr, $nowStr, $expiresAtStr, $clientIp]);
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'Web session bridged to POS staff session',
+        'session_token' => $rawToken,
+        'expires_in' => $expiresIn,
+        'idle_timeout' => 3600,
+        'user' => $user,
+        'device' => [
+            'id' => $device['id'],
+            'device_name' => $device['device_name'],
+            'device_uid' => $device['device_uid'],
+            'location' => $device['location']
+        ]
     ]);
     exit;
 }
@@ -1370,12 +1542,13 @@ if ($action === 'create_order') {
                 ]);
                 exit;
             }
-            if ($creatorStaffUser && ($creatorStaffUser['role'] ?? '') !== 'owner' && !Auth::userHasPermission((int)$creatorStaffUser['id'], 'pos.discount')) {
+            $creatorId = !empty($creatorStaffUser['id']) ? (int)$creatorStaffUser['id'] : (!empty($creatorStaffUser['user_id']) ? (int)$creatorStaffUser['user_id'] : (int)$orderCreatedBy);
+            if ($creatorStaffUser && ($creatorStaffUser['role'] ?? '') !== 'owner' && $creatorId > 0 && !Auth::userHasPermission($creatorId, 'pos.discount')) {
                 http_response_code(403);
                 echo json_encode([
                     'success' => false,
                     'error' => 'PERMISSION_DENIED',
-                    'message' => "Original order creator (ID {$creatorStaffUser['id']}) did not have permission to apply discounts."
+                    'message' => "Original order creator (ID {$creatorId}) did not have permission to apply discounts."
                 ]);
                 exit;
             }
@@ -1493,12 +1666,13 @@ if ($action === 'create_order') {
                 ]);
                 exit;
             }
-            if ($creatorStaffUser && ($creatorStaffUser['role'] ?? '') !== 'owner' && !Auth::userHasPermission((int)$creatorStaffUser['id'], 'pos.pay_order')) {
+            $creatorId = !empty($creatorStaffUser['id']) ? (int)$creatorStaffUser['id'] : (!empty($creatorStaffUser['user_id']) ? (int)$creatorStaffUser['user_id'] : (int)$orderCreatedBy);
+            if ($creatorStaffUser && ($creatorStaffUser['role'] ?? '') !== 'owner' && $creatorId > 0 && !Auth::userHasPermission($creatorId, 'pos.pay_order')) {
                 http_response_code(403);
                 echo json_encode([
                     'success' => false,
                     'error' => 'PERMISSION_DENIED',
-                    'message' => "Original order creator (ID {$creatorStaffUser['id']}) did not have permission to process payments."
+                    'message' => "Original order creator (ID {$creatorId}) did not have permission to process payments."
                 ]);
                 exit;
             }

@@ -43,6 +43,7 @@ class PosApi {
 
         const fetchOptions = {
             method: 'POST',
+            credentials: 'include',
             headers,
             body: JSON.stringify(bodyData)
         };
@@ -54,6 +55,12 @@ class PosApi {
 
             const response = await fetch(endpoint, fetchOptions);
             clearTimeout(timeoutId);
+
+            // Capture refreshed or bridged X-Staff-Token from server header
+            const respStaffToken = response.headers ? response.headers.get('X-Staff-Token') : null;
+            if (respStaffToken && typeof PosStorage !== 'undefined') {
+                PosStorage.setSessionToken(respStaffToken);
+            }
 
             const json = await response.json().catch(() => null);
 
@@ -165,6 +172,13 @@ class PosApi {
                 error: reason
             };
         }
+    }
+
+    /**
+     * Bridge active Back Office web session (cookie) to POS staff session token
+     */
+    static async getWebSession() {
+        return await this.request('get_web_session');
     }
 
     /**
@@ -544,6 +558,24 @@ class PosApi {
         });
     }
 
+    /**
+     * Customer Arrived: Cashier marks vehicle arrived (joins queue)
+     */
+    static async markCustomerArrived(orderId, plateNumber = '') {
+        const user = PosStorage.getUser();
+        return await this.request('customer_arrived', {
+            order_id: orderId,
+            plate_number: plateNumber,
+            staff_id: user?.id || null
+        });
+    }
+
+    /**
+     * Live Bays & Queue Summary
+     */
+    static async getBaysAndQueue() {
+        return await this.request('get_bays_and_queue');
+    }
 
     /**
      * Washer Screen: Fetch washer jobs, bays, and queue

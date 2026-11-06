@@ -32,6 +32,12 @@ if (!defined('API_BASE_URL')) {
     define('API_BASE_URL', $protocol . '://' . $host . APP_URL);
 }
 
+// Demo 1-Click Login Security Switch:
+// Strictly disabled by default (false). Neutralizes 1-click passwordless logins and demo credentials.
+if (!defined('ALLOW_DEMO_LOGIN')) {
+    define('ALLOW_DEMO_LOGIN', false);
+}
+
 // Optional list of extra client IPs allowed to use demo one-click login for testing (e.g. ['192.168.1.50'])
 if (!defined('DEMO_ALLOWED_IPS')) {
     define('DEMO_ALLOWED_IPS', []);

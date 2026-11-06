@@ -70,7 +70,7 @@ $demoMode = get_setting('demo_mode', '0');
     </style>
 </head>
 <body>
-<?php if ($demoMode === '1'): ?>
+<?php if ($demoMode === '1' && defined('ALLOW_DEMO_LOGIN') && ALLOW_DEMO_LOGIN && defined('APP_ENV') && APP_ENV !== 'production'): ?>
 <div style="background: #dc2626; color: #ffffff; padding: 10px 16px; text-align: center; font-weight: 700; font-size: 13px; letter-spacing: 0.5px; z-index: 99999; box-shadow: 0 2px 4px rgba(0,0,0,0.2); width: 100%;">
     <i class="fa-solid fa-triangle-exclamation" style="margin-right: 8px;"></i> DEMO MODE ON - turn off before going live
 </div>
@@ -130,6 +130,13 @@ $demoMode = get_setting('demo_mode', '0');
                     <strong>Test Mode Disabled:</strong> The Shop Owner has disabled Test Mode. 1-Click demo logins and sample accounts are turned off. Real staff credentials are required.
                 </div>
             </div>
+        <?php elseif ($error === 'ip_locked'): ?>
+            <div style="background: var(--danger-bg); color: var(--danger); padding: 12px 16px; border-radius: var(--radius-md); font-size: 13px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
+                <i class="fa-solid fa-hand"></i>
+                <div>
+                    <strong>Rate Limit Exceeded:</strong> Too many failed login attempts from your IP address. Please wait <?= $remMins ?> minutes before trying again.
+                </div>
+            </div>
         <?php elseif ($error === 'account_inactive'): ?>
             <div style="background: var(--danger-bg); color: var(--danger); padding: 12px 16px; border-radius: var(--radius-md); font-size: 14px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
                 <i class="fa-solid fa-ban"></i>
@@ -173,7 +180,7 @@ $demoMode = get_setting('demo_mode', '0');
             </button>
         </form>
 
-        <?php if ($demoMode === '1'): ?>
+        <?php if ($demoMode === '1' && defined('ALLOW_DEMO_LOGIN') && ALLOW_DEMO_LOGIN && defined('APP_ENV') && APP_ENV !== 'production'): ?>
         <!-- Quick 1-Click Demo Login for Back Office Roles (Active in Test Mode) -->
         <div class="demo-box">
             <div style="display: flex; justify-content: space-between; align-items: center;">

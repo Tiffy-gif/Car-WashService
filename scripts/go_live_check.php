@@ -9,6 +9,7 @@ if (php_sapi_name() !== 'cli') {
 
 require_once dirname(__DIR__) . '/config/app.php';
 require_once dirname(__DIR__) . '/core/Database.php';
+require_once dirname(__DIR__) . '/core/Helpers.php';
 
 echo "====================================================\n";
 echo "   Car-WashService Go-Live Pre-Flight Verification   \n";

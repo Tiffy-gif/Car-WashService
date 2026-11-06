@@ -81,7 +81,11 @@ function app_log(string $level, string $message, array $context = []): void {
 
 function csrf_token(): string {
     if (session_status() !== PHP_SESSION_ACTIVE) {
-        @session_start();
+        if (class_exists('Auth')) {
+            Auth::startSession();
+        } else {
+            @session_start();
+        }
     }
     if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -95,7 +99,11 @@ function csrf_field(): string {
 
 function verify_csrf(?string $providedToken = null): bool {
     if (session_status() !== PHP_SESSION_ACTIVE) {
-        @session_start();
+        if (class_exists('Auth')) {
+            Auth::startSession();
+        } else {
+            @session_start();
+        }
     }
     $token = $providedToken ?? $_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
     $sessionToken = $_SESSION['csrf_token'] ?? '';

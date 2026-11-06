@@ -7,33 +7,73 @@
 Options -Indexes -MultiViews
 
 # 2. Block Hidden Files & Dotfiles (.git, .env, .htaccess, etc.)
-<FilesMatch "^\.">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
+<IfModule mod_authz_core.c>
+    <FilesMatch "^\.">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "^\.">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
 
 # 3. Block Direct Web Access to Sensitive File Formats
-<FilesMatch "\.(sql|log|md|bat|sh|jsonl|ini|yml|yaml|env)$">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
+<IfModule mod_authz_core.c>
+    <FilesMatch "\.(sql|log|md|bat|sh|jsonl|ini|yml|yaml|env)$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "\.(sql|log|md|bat|sh|jsonl|ini|yml|yaml|env)$">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
 
 # 4. Block Direct Web Execution of Automated Test Files
-<FilesMatch "^test_.*\.php$">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
+<IfModule mod_authz_core.c>
+    <FilesMatch "^test_.*\.php$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "^test_.*\.php$">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
 
 # 5. Block Direct Web Access to Demo Accounts File
-<FilesMatch "^demo_accounts\.php$">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
+<IfModule mod_authz_core.c>
+    <FilesMatch "^demo_accounts.*\.php$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "^demo_accounts.*\.php$">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
 
-# 5. Block Access to Internal Folders (Only needed folders open to web)
+# 6. Block Access to Internal Folders and Hidden Directories (.git, graphify-out, etc.)
 # Web should only directly access: index.php, tv.php, public/, and api/
-RewriteEngine On
-RewriteRule ^(config|core|database|storage|tests|docs|bin|scripts)/ - [F,L,NC]
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block any path component starting with a dot (.git, .env, .cache, etc.)
+    RewriteRule (^|/)\. - [F,L,NC]
+
+    # Block internal folders and analysis artifacts
+    RewriteRule ^(config|core|database|storage|tests|docs|bin|scripts|graphify-out)/ - [F,L,NC]
+</IfModule>
+
+# Fallback directory protection (when mod_rewrite is disabled)
+RedirectMatch 403 (^|/)\.
+RedirectMatch 403 ^/(config|core|database|storage|tests|docs|bin|scripts|graphify-out)(/.*)?$
+
 
 # 6. Security Headers (Safe Cookies, Clickjacking, MIME, CSP)
 <IfModule mod_headers.c>

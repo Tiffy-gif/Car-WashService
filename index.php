@@ -57,8 +57,16 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// 3. Handle Demo 1-Click Login (Works only when Test Mode in Settings is ON and from allowed local IPs)
+// 3. Handle Demo 1-Click Login (Strictly disabled by default; only permitted when ALLOW_DEMO_LOGIN is explicitly true)
 if ($action === 'demo_login') {
+    if (!defined('ALLOW_DEMO_LOGIN') || !ALLOW_DEMO_LOGIN || (defined('APP_ENV') && APP_ENV === 'production')) {
+        if (class_exists('AuditLogger')) {
+            AuditLogger::log('DEMO_LOGIN_BLOCKED', 'Demo login attempt rejected: disabled by security configuration', 'auth');
+        }
+        header('Location: ' . APP_URL . '/index.php?view=login&error=demo_disabled');
+        exit;
+    }
+
     $demoMode = get_setting('demo_mode', '0');
     if ($demoMode !== '1') {
         header('Location: ' . APP_URL . '/index.php?view=login&error=demo_disabled');
@@ -76,23 +84,26 @@ if ($action === 'demo_login') {
     $demoAccountsFile = __DIR__ . '/config/demo_accounts.php';
     $credentials = file_exists($demoAccountsFile) ? require $demoAccountsFile : [];
 
-    if (isset($credentials[$roleKey])) {
-        if (Auth::login($credentials[$roleKey]['username'], $credentials[$roleKey]['pin'])) {
-            if (Auth::mustChangePin()) {
-                header('Location: ' . APP_URL . '/index.php?view=change_pin');
-                exit;
-            }
-            $defaultView = Auth::getDefaultViewForUser();
-            $targetUrl = ($defaultView === 'pos' && defined('POS_UI') && POS_UI === 'new')
-                ? APP_URL . '/pos/index.html#pos'
-                : APP_URL . '/index.php?view=' . $defaultView;
-            header('Location: ' . $targetUrl, true, 302);
-            exit;
-        } else {
-            $err = Auth::getLastError() ?? '1';
-            header('Location: ' . APP_URL . '/index.php?view=login&error=' . urlencode($err));
+    if (empty($credentials) || !isset($credentials[$roleKey])) {
+        header('Location: ' . APP_URL . '/index.php?view=login&error=demo_disabled');
+        exit;
+    }
+
+    if (Auth::login($credentials[$roleKey]['username'], $credentials[$roleKey]['pin'])) {
+        if (Auth::mustChangePin()) {
+            header('Location: ' . APP_URL . '/index.php?view=change_pin');
             exit;
         }
+        $defaultView = Auth::getDefaultViewForUser();
+        $targetUrl = ($defaultView === 'pos' && defined('POS_UI') && POS_UI === 'new')
+            ? APP_URL . '/pos/index.html#pos'
+            : APP_URL . '/index.php?view=' . $defaultView;
+        header('Location: ' . $targetUrl, true, 302);
+        exit;
+    } else {
+        $err = Auth::getLastError() ?? '1';
+        header('Location: ' . APP_URL . '/index.php?view=login&error=' . urlencode($err));
+        exit;
     }
 }
 

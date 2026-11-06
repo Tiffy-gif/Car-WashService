@@ -174,7 +174,6 @@ class BayManager {
             // Ensure skill_tags on existing rows if not set
             $pdo->exec("UPDATE bays SET skill_tag = 'wash_only' WHERE (skill_tag IS NULL OR skill_tag = '') AND bay_type = 'wash'");
             $pdo->exec("UPDATE bays SET skill_tag = 'oil_only' WHERE (skill_tag IS NULL OR skill_tag = '') AND bay_type = 'oil_change'");
-            $pdo->exec("UPDATE bays SET status = 'free' WHERE (status = 'available' OR status = '' OR status IS NULL) AND (current_order_id IS NULL OR current_order_id = 0)");
             $pdo->exec("UPDATE bays SET last_freed_at = COALESCE(last_freed_at, updated_at, CURRENT_TIMESTAMP) WHERE status = 'free' AND last_freed_at IS NULL");
         }
 
@@ -956,7 +955,7 @@ class BayManager {
             $upBay = $pdo->prepare("
                 UPDATE bays 
                 SET status = 'busy', current_order_id = ?, occupied_at = ?, updated_at = ? 
-                WHERE id = ? AND status IN ('free', 'available') AND is_active = 1
+                WHERE id = ? AND status = 'free' AND is_active = 1
             ");
             $upBay->execute([$orderId, $now, $now, $bayId]);
 
