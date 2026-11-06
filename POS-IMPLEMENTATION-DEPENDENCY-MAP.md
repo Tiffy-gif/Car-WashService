@@ -293,21 +293,43 @@ graph TD
         │     │           Refund wash service ($3.00)
         │     │           Cancel Stage 2 queue ticket
         │     │
-        │     ├── Record Discrete Refund in Ledger (Supports multiple partial refunds & settlement tracking):
-        │     │     ├── Step 1 (Authorization):
-        │     │     │     INSERT INTO order_refunds (order_id, refund_seq, amount_usd, reason, cashier_id, manager_user_id, settlement_status='authorized_pending', attestation_status='cashier_attested', recorded_at=NOW())
-        │     │     │     (CRITICAL: Authorization documents administrative approval; it is an informational liability,
-        │     │     │      NOT physical cash returned or bank settlement. It does NOT reduce drawer cash or settled revenue yet)
+        │     ├── Record Discrete Refund in Ledger (Supports multiple partial refunds, settlement tracking & concurrency locks):
+        │     │     ├── Step 1 (Authorization & Cumulative Ceiling Verification):
+        │     │     │     Verify (total_refunded_to_date + new_refund) <= total_paid
+        │     │     │     INSERT INTO order_refunds (order_id, refund_seq, amount_usd, reason, cashier_id, manager_user_id, 
+        │     │     │                               settlement_status='authorized_pending', attestation_status='cashier_attested', recorded_at=NOW())
+        │     │     │     AuditLogger::log('REFUND_AUTHORIZED', "Manager authorized refund seq #... amount $...", ...)
+        │     │     │     (CRITICAL: Authorization is an informational liability, NOT cash returned or settled revenue. Does NOT reduce drawer cash)
         │     │     │
-        │     │     └── Step 2 (Physical Cash Disbursement or Bank Reversal):
-        │     │           ├── If Cash: Cashier pays customer from drawer ->
-        │     │           │     UPDATE order_refunds SET settlement_status = 'cash_disbursed', disbursed_at = NOW() WHERE id = ?
-        │     │           │     (Deducts from active drawer cash balance and net settled revenue)
-        │     │           └── If Bank Reversal: POS dispatches reversal request or awaits bank processing ->
-        │     │                 UPDATE order_refunds SET settlement_status = 'bank_reversal_pending' WHERE id = ?
-        │     │                 Upon confirmed bank gateway credit ->
-        │     │                 UPDATE order_refunds SET settlement_status = 'settled', settled_at = NOW(), provider_event_at = ? WHERE id = ?
-        │     │                 (Deducts from net settled revenue upon bank confirmation)
+        │     │     ├── Step 2A (Physical Cash Disbursement - Concurrency Protected):
+        │     │     │     Cashier pays customer banknotes from drawer ->
+        │     │     │     UPDATE order_refunds SET settlement_status = 'cash_disbursed', disbursed_at = NOW() 
+        │     │     │     WHERE id = ? AND settlement_status = 'authorized_pending'
+        │     │     │     (If rowCount == 0, abort with HTTP 409 Conflict: Already disbursed or cancelled!)
+        │     │     │     Trigger drawer pulse ESC p 0 25 250 ONLY if rowCount == 1
+        │     │     │     AuditLogger::log('REFUND_CASH_DISBURSED', "Cash disbursed from till ...", ...)
+        │     │     │     (Deducts from active drawer cash balance and net settled revenue)
+        │     │     │
+        │     │     ├── Step 2B (Digital Bank Reversal Dispatch & Lifecycle):
+        │     │     │     POS sends reversal request to bank gateway ->
+        │     │     │     UPDATE order_refunds SET settlement_status = 'bank_reversal_pending', bank_reversal_ref = ? 
+        │     │     │     WHERE id = ? AND settlement_status = 'authorized_pending'
+        │     │     │     ├── Case Success: Confirmed bank webhook (HMAC/RSA verified) ->
+        │     │     │     │     UPDATE order_refunds SET settlement_status = 'settled', settled_at = NOW(), provider_event_at = ? 
+        │     │     │     │     WHERE id = ? AND settlement_status = 'bank_reversal_pending'
+        │     │     │     │     AuditLogger::log('REFUND_BANK_SETTLED', "Bank credited reversal ...", ...)
+        │     │     │     │     (Deducts from net settled revenue upon bank confirmation; cash till unaffected)
+        │     │     │     └── Case Failure: Bank gateway rejects reversal ->
+        │     │     │           UPDATE order_refunds SET settlement_status = 'failed', failure_reason = ? 
+        │     │     │           WHERE id = ? AND settlement_status = 'bank_reversal_pending'
+        │     │     │           AuditLogger::log('REFUND_BANK_FAILED', "Reversal rejected by bank: ...", ...)
+        │     │     │           (Alerts cashier/manager; manager can retry with retry_count++ or cancel)
+        │     │     │
+        │     │     └── Step 2C (Cancellation Prior to Payout):
+        │     │           Customer leaves or void aborted before disbursement ->
+        │     │           UPDATE order_refunds SET settlement_status = 'cancelled', cancelled_at = NOW() 
+        │     │           WHERE id = ? AND settlement_status IN ('authorized_pending', 'failed')
+        │     │           AuditLogger::log('REFUND_CANCELLED', "Refund voided before disbursement", ...)
         │     │
         │     ├── Update Cached Order Summaries:
         │     │     UPDATE orders SET 
@@ -411,13 +433,17 @@ erDiagram
         int amount_khr
         int exchange_rate "Frozen historical rate at refund moment"
         string refund_method "cash, bank_reversal, store_credit"
-        string settlement_status "authorized_pending, cash_disbursed, bank_reversal_pending, settled"
+        string settlement_status "authorized_pending, cash_disbursed, bank_reversal_pending, settled, failed, cancelled"
+        string bank_reversal_ref "Unique bank reversal reference UK"
+        string failure_reason "Bank gateway rejection details"
+        int retry_count "Reversal retry counter"
         string reason
         int cashier_id FK
         int manager_user_id FK
         string attestation_status "cashier_attested (Administrative attestation)"
         datetime disbursed_at "Cash handover timestamp"
         datetime settled_at "Bank settlement timestamp"
+        datetime cancelled_at "Manager cancellation timestamp"
         datetime provider_event_at "Bank reversal event timestamp (NULL if manual cash)"
         datetime recorded_at "Local server authorization timestamp"
         datetime created_at "Record creation timestamp"
@@ -443,7 +469,7 @@ erDiagram
 | :--- | :--- | :--- | :--- |
 | **`orders`** | `INSERT`, `UPDATE`, `SELECT` | `idempotency_key`, `status`, `payment_status`, `payment_provider`, `merchant_account_id`, `payment_ref`, `refunded_amount`, `receipt_number`, `receipt_issued_at` | Operational entity; client idempotency unique constraint `UNIQUE(idempotency_key)`. `payment_status` & `refunded_amount` serve as cached summary aggregates. |
 | **`order_payments`** | `INSERT`, `SELECT` | `order_id`, `payment_seq`, `amount_usd`, `amount_khr`, `exchange_rate`, `payment_method`, `payment_provider`, `merchant_account_id`, `payment_ref`, `cashier_id`, `provider_event_at`, `recorded_at` | **Authoritative Payment Transaction Ledger.** Composite unique deduplication index `UNIQUE(payment_provider, merchant_account_id, payment_ref)` with strictly `NOT NULL` columns. Unique key `(order_id, payment_seq)`. `recorded_at` governs shift drawers. `provider_event_at` stores authentic bank timestamp without invention. |
-| **`order_refunds`** | `INSERT`, `UPDATE`, `SELECT` | `order_id`, `refund_seq`, `amount_usd`, `amount_khr`, `exchange_rate`, `refund_method`, `settlement_status`, `disbursed_at`, `settled_at`, `provider_event_at`, `reason`, `cashier_id`, `manager_user_id`, `attestation_status`, `recorded_at` | Discrete refund transaction ledger supporting multiple partial refunds. Unique key `(order_id, refund_seq)`. `settlement_status` tracks lifecycle (`authorized_pending` -> `cash_disbursed` / `settled`). Pending refunds are non-deducted liabilities. |
+| **`order_refunds`** | `INSERT`, `UPDATE`, `SELECT` | `order_id`, `refund_seq`, `amount_usd`, `amount_khr`, `exchange_rate`, `refund_method`, `settlement_status`, `bank_reversal_ref`, `failure_reason`, `retry_count`, `disbursed_at`, `settled_at`, `cancelled_at`, `provider_event_at`, `reason`, `cashier_id`, `manager_user_id`, `attestation_status`, `recorded_at` | Discrete refund transaction ledger supporting multiple partial refunds. Unique key `(order_id, refund_seq)` and `(payment_id, bank_reversal_ref)`. `settlement_status` tracks lifecycle (`authorized_pending` -> `cash_disbursed` / `bank_reversal_pending` -> `settled` / `failed` / `cancelled`). Atomic conditional updates prevent double cash handouts or duplicate reversal credits. Cumulative ceiling enforced. |
 | **`system_settings`** | `INSERT`, `UPDATE`, `SELECT` | `setting_key`, `setting_value`, `updated_at` | Holds `receipt_v2_cutover_timestamp`. Must be deployed with `ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()` to prevent stale/corrupt cutover timestamps from persisting silently. Mandatory parameter in reporting queries. |
 | **`webhook_events`** | `INSERT`, `SELECT` | `provider`, `event_id`, `payment_ref`, `bank_timestamp`, `processing_status` | Idempotency & replay defense log. Unique constraint on `(provider, event_id)`. Replays inside 5-min window and duplicate deliveries caught here without duplicate payment creation. Drift check rejects `|bank_ts - NOW()| > 300s`. |
 | **`order_items`** | `INSERT`, `SELECT` | `order_id`, `item_type`, `service_id`, `product_id`, `qty`, `price_usd` | Standard transactional insert inside order creation transaction. |
@@ -466,31 +492,27 @@ Revenue reports must calculate financial performance strictly using actual payme
 > Recording a refund in the POS (`attestation_status = 'cashier_attested'`) documents administrative approval by the cashier and manager. It does NOT constitute physical proof that currency was handed to the customer or that an interbank reversal settled. Net cash balancing requires physical drawer reconciliation; digital reversals require monthly bank statement audits.
 
 ```sql
--- Certified Two-Tier Financial Revenue Aggregation Query:
--- 1. Uses mandatory :cutover_ts parameter passed by PHP after fail-closed validation.
---    (If receipt_v2_cutover_timestamp is missing/invalid, PHP throws SystemConfigurationException and halts).
--- 2. Uses exact event recording timestamps: p.recorded_at for payments, r.recorded_at for refunds.
---    Authoritative for shift and cash drawer balancing. External provider_event_at preserved for bank reconciliation.
--- 3. Supports cross-cutover transactions: Tier 1 queries transactions without parent order creation date restriction.
--- 4. Separates pending refund liabilities from settled refunds. Net Settled Revenue deducts settled refunds only.
--- 5. Tier 2 strictly excludes any legacy order that already has rows in order_payments or order_refunds (NOT EXISTS).
+-- Certified Two-Tier Financial Revenue Query for views/owner/reports.php
+-- :cutover_ts is passed as a mandatory validated parameter from PHP (fails closed if unconfigured)
+-- Uses exact event timestamps: payments report on payment date, refunds report on refund date.
+-- Supports dual-currency reporting, split payments, multiple refunds, and cross-cutover periods.
 
-WITH Tier1_LedgerTransactions AS (
+WITH Tier1_Ledger AS (
     SELECT 
-        'tier1_ledger' AS reporting_tier,
+        'ledger_tier' AS reporting_tier,
         
-        -- Gross Payments Collected: filtered strictly by payment recording timestamp
+        -- 1. Gross Payments Collected: filtered strictly by payment recording timestamp (p.recorded_at)
         COALESCE((
             SELECT SUM(p.amount_usd + (p.amount_khr / p.exchange_rate))
             FROM order_payments p
             WHERE p.recorded_at BETWEEN :start_date AND :end_date
-        ), 0) AS gross_payments_collected_usd,
+        ), 0.00) AS gross_payments_collected_usd,
 
         COALESCE((
             SELECT SUM(p.amount_usd)
             FROM order_payments p
             WHERE p.recorded_at BETWEEN :start_date AND :end_date
-        ), 0) AS gross_payments_usd_native,
+        ), 0.00) AS gross_payments_usd_native,
 
         COALESCE((
             SELECT SUM(p.amount_khr)
@@ -498,39 +520,39 @@ WITH Tier1_LedgerTransactions AS (
             WHERE p.recorded_at BETWEEN :start_date AND :end_date
         ), 0) AS gross_payments_khr_native,
 
-        -- Settled / Disbursed Refunds: actual cash disbursed from drawer or settled by bank
-        -- ONLY settled refunds reduce gross cash/settled revenue
+        -- 2. Settled & Disbursed Refunds: Cash physically handed out or bank reversal cleared
+        -- ONLY settled/disbursed refunds deduct from Gross Payments!
         COALESCE((
             SELECT SUM(r.amount_usd + (r.amount_khr / r.exchange_rate))
             FROM order_refunds r
-            WHERE r.recorded_at BETWEEN :start_date AND :end_date
-              AND r.settlement_status IN ('cash_disbursed', 'settled')
-        ), 0) AS settled_refunds_usd,
+            WHERE r.settlement_status IN ('cash_disbursed', 'settled')
+              AND r.recorded_at BETWEEN :start_date AND :end_date
+        ), 0.00) AS settled_refunds_usd,
 
         COALESCE((
             SELECT SUM(r.amount_usd)
             FROM order_refunds r
-            WHERE r.recorded_at BETWEEN :start_date AND :end_date
-              AND r.settlement_status IN ('cash_disbursed', 'settled')
-        ), 0) AS settled_refunds_usd_native,
+            WHERE r.settlement_status IN ('cash_disbursed', 'settled')
+              AND r.recorded_at BETWEEN :start_date AND :end_date
+        ), 0.00) AS settled_refunds_usd_native,
 
         COALESCE((
             SELECT SUM(r.amount_khr)
             FROM order_refunds r
-            WHERE r.recorded_at BETWEEN :start_date AND :end_date
-              AND r.settlement_status IN ('cash_disbursed', 'settled')
+            WHERE r.settlement_status IN ('cash_disbursed', 'settled')
+              AND r.recorded_at BETWEEN :start_date AND :end_date
         ), 0) AS settled_refunds_khr_native,
 
-        -- Pending Unsettled Refunds: authorized by manager, awaiting drawer payout or bank gateway
-        -- Informational liability; NOT deducted from settled revenue
+        -- 3. Pending Authorized Refunds: Manager approved, awaiting cash disbursement or bank clearing
+        -- Reported as informational liability; DOES NOT deduct from settled revenue
         COALESCE((
             SELECT SUM(r.amount_usd + (r.amount_khr / r.exchange_rate))
             FROM order_refunds r
-            WHERE r.recorded_at BETWEEN :start_date AND :end_date
-              AND r.settlement_status IN ('authorized_pending', 'bank_reversal_pending')
-        ), 0) AS pending_unsettled_refunds_usd,
+            WHERE r.settlement_status IN ('authorized_pending', 'bank_reversal_pending')
+              AND r.recorded_at BETWEEN :start_date AND :end_date
+        ), 0.00) AS pending_refunds_usd,
 
-        -- Unpaid Voids (Operational cancellations without money transfer)
+        -- 4. Unpaid Voids post-cutover
         COALESCE((
             SELECT SUM(o.total_usd) 
             FROM orders o
@@ -538,35 +560,71 @@ WITH Tier1_LedgerTransactions AS (
               AND o.created_at BETWEEN :start_date AND :end_date
               AND o.status = 'cancelled' 
               AND o.payment_status = 'unpaid'
-        ), 0) AS unpaid_voids_usd
+        ), 0.00) AS unpaid_voids_usd
 ),
 
-Tier2_PreCutoverFallback AS (
+Tier2_PreCutover AS (
     SELECT 
-        'tier2_historical_fallback' AS reporting_tier,
+        'pre_cutover_fallback' AS reporting_tier,
 
-        -- Gross payments for historical orders with no ledger entries
-        COALESCE(SUM(CASE 
-            WHEN o.payment_status IN ('paid', 'partially_refunded', 'refunded') 
-            THEN o.total_usd ELSE 0 END), 0) AS gross_payments_collected_usd,
+        -- 1. Gross Historical Payments (Decoupled from refunds; accounts for split payments)
+        COALESCE(SUM(
+            CASE 
+                WHEN COALESCE(o.paid_at, o.created_at) BETWEEN :start_date AND :end_date
+                 AND COALESCE(o.paid_at, o.created_at) < :cutover_ts
+                 AND o.payment_status IN ('paid', 'partially_refunded', 'refunded')
+                THEN 
+                    CASE 
+                        -- Case A: No ledger payments exist -> Full total_usd was historical payment
+                        WHEN NOT EXISTS (SELECT 1 FROM order_payments p WHERE p.order_id = o.id)
+                        THEN o.total_usd
+                        -- Case B: Split payment -> Remainder not in ledger was historical
+                        ELSE GREATEST(0.00, o.total_usd - COALESCE(
+                            (SELECT SUM(p.amount_usd + (p.amount_khr / p.exchange_rate)) 
+                             FROM order_payments p WHERE p.order_id = o.id), 0.00))
+                    END
+                ELSE 0.00
+            END
+        ), 0.00) AS gross_payments_collected_usd,
 
-        -- Historical refunds (assumed settled in legacy system)
-        COALESCE(SUM(CASE 
-            WHEN o.payment_status = 'refunded' THEN COALESCE(o.refunded_amount, o.total_usd)
-            WHEN o.payment_status = 'partially_refunded' THEN COALESCE(o.refunded_amount, 0)
-            ELSE 0 END), 0) AS settled_refunds_usd,
+        -- 2. Settled Historical Refunds (Decoupled from payments; accounts for multiple partial refunds)
+        COALESCE(SUM(
+            CASE 
+                WHEN COALESCE(o.cancelled_at, o.created_at) BETWEEN :start_date AND :end_date
+                 AND COALESCE(o.cancelled_at, o.created_at) < :cutover_ts
+                 AND o.payment_status IN ('refunded', 'partially_refunded')
+                THEN 
+                    GREATEST(0.00, 
+                        (CASE 
+                            WHEN o.payment_status = 'refunded' THEN COALESCE(o.refunded_amount, o.total_usd)
+                            ELSE COALESCE(o.refunded_amount, 0.00)
+                         END)
+                        - 
+                        COALESCE((SELECT SUM(r.amount_usd + (r.amount_khr / r.exchange_rate)) 
+                                  FROM order_refunds r 
+                                  WHERE r.order_id = o.id 
+                                    AND r.settlement_status IN ('cash_disbursed', 'settled')), 0.00)
+                    )
+                ELSE 0.00
+            END
+        ), 0.00) AS settled_refunds_usd,
 
-        0.00 AS pending_unsettled_refunds_usd,
+        0.00 AS pending_refunds_usd,
 
-        COALESCE(SUM(CASE 
-            WHEN o.status = 'cancelled' AND (o.payment_status = 'unpaid' OR o.payment_status IS NULL)
-            THEN o.total_usd ELSE 0 END), 0) AS unpaid_voids_usd
+        -- 3. Historical Unpaid Voids
+        COALESCE(SUM(
+            CASE 
+                WHEN o.created_at BETWEEN :start_date AND :end_date
+                 AND o.created_at < :cutover_ts
+                 AND o.status = 'cancelled' 
+                 AND (o.payment_status = 'unpaid' OR o.payment_status IS NULL)
+                THEN o.total_usd
+                ELSE 0.00
+            END
+        ), 0.00) AS unpaid_voids_usd
+
     FROM orders o
     WHERE o.created_at < :cutover_ts
-      AND o.created_at BETWEEN :start_date AND :end_date
-      -- Anti-Double-Counting Guard: Strictly exclude legacy orders that have new discrete ledger rows
-      AND NOT EXISTS (SELECT 1 FROM order_payments p WHERE p.order_id = o.id)
-      AND NOT EXISTS (SELECT 1 FROM order_refunds r WHERE r.order_id = o.id)
 )
 
 -- Unified Executive Financial Statement
@@ -574,23 +632,19 @@ SELECT
     (t1.gross_payments_collected_usd + t2.gross_payments_collected_usd) AS gross_payments_collected_usd,
     t1.gross_payments_usd_native AS gross_payments_usd_native,
     t1.gross_payments_khr_native AS gross_payments_khr_native,
-    (t1.settled_refunds_usd + t2.settled_refunds_usd) AS settled_refunds_usd,
+    (t1.settled_refunds_usd + t2.settled_refunds_usd) AS total_settled_refunds_usd,
     t1.settled_refunds_usd_native AS settled_refunds_usd_native,
     t1.settled_refunds_khr_native AS settled_refunds_khr_native,
-    t1.pending_unsettled_refunds_usd AS pending_unsettled_refunds_usd,
-    
-    -- Net Settled Revenue: Gross Payments MINUS Settled/Disbursed Refunds (Authoritative Cash/Bank Inflow)
+    t1.pending_refunds_usd AS pending_unsettled_refunds_usd,
+    -- Net Settled Revenue: Actual money retained in drawer/bank
     ((t1.gross_payments_collected_usd + t2.gross_payments_collected_usd) - 
      (t1.settled_refunds_usd + t2.settled_refunds_usd)) AS net_settled_revenue_usd,
-     
-    -- Net Realizable Revenue: Net Settled MINUS Pending Refund Liabilities
+    -- Net Realizable Revenue: Projected net if all pending authorized refunds disburse
     ((t1.gross_payments_collected_usd + t2.gross_payments_collected_usd) - 
-     (t1.settled_refunds_usd + t2.settled_refunds_usd) - 
-     t1.pending_unsettled_refunds_usd) AS net_realizable_revenue_usd,
-
+     (t1.settled_refunds_usd + t2.settled_refunds_usd) - t1.pending_refunds_usd) AS net_realizable_revenue_usd,
     (t1.unpaid_voids_usd + t2.unpaid_voids_usd) AS unpaid_voids_usd
-FROM Tier1_LedgerTransactions t1
-CROSS JOIN Tier2_PreCutoverFallback t2;
+FROM Tier1_Ledger t1
+CROSS JOIN Tier2_PreCutover t2;
 ```
 
 ### 4.2 Washer Job Board & OrderGate Decoupling (`views/washer/jobs.php`)

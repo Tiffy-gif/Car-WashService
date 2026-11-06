@@ -3,7 +3,13 @@
 **Document ID:** POS-REV-2026-004  
 **Project:** Car-WashService  
 **Date:** November 6, 2026  
-**Status:** Authoritative Specifications Complete – Awaiting Management Authorization to Implement  
+**Status:** Superseded by Round 5 – See [POS-FINAL-REVIEW-CHANGELOG-5.md](file:///C:/xampp/htdocs/Car-WashService/POS-FINAL-REVIEW-CHANGELOG-5.md)  
+
+---
+
+> [!NOTE]
+> **Round 5 Audit Update:**  
+> Final legacy payment reporting decoupling and refund lifecycle integrity specifications have been formalized in Round 5. For the latest authoritative specifications, please refer to [POS-FINAL-REVIEW-CHANGELOG-5.md](file:///C:/xampp/htdocs/Car-WashService/POS-FINAL-REVIEW-CHANGELOG-5.md).
 
 ---
 
