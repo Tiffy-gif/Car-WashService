@@ -4,60 +4,61 @@
 **Project:** Car-WashService  
 **Scope:** Comparative Workflow Analysis & Scenario Verification  
 **Audit Type:** Operational & Technical Specification  
-**Date:** November 2026  
+**Date:** November 2026 (Revised with Management Decisions)  
 **Status:** Complete – Awaiting Management Approval  
+
+---
+
+## Management Revision Summary
+
+This document has been revised to incorporate the following confirmed management decisions:
+1. **Pay Later / Pay at Exit Completely Removed:** All counter sales require **payment BEFORE service**. A vehicle must never enter the wash queue or bay without confirmed payment ("No Payment, No Service", "No Receipt, No Wash").
+2. **Strict KHQR Verification:** QR generation, customer phone screenshots, or blind cashier button clicks are **not accepted** as proof of payment. Verification must be validated via the shop's merchant device (push notification, bank SMS, Telegram merchant bot, or official bank payment gateway webhook).
+3. **No Unapproved Discount Limits:** Existing role-based permission (`pos.discount`) and manager PIN override rules are preserved without inventing new percentage tiers.
+4. **Multi-Stage Bay Routing & Atomic Concurrency:** Combined jobs (Wash + Lube) execute via structured Stage 1 $\rightarrow$ Stage 2 sequencing with atomic database locks on bay assignments.
+5. **Customer Registration Optional:** Fast plate entry without forced multi-field modal forms.
 
 ---
 
 ## 1. Step-by-Step Behavioral Comparison
 
-The following table contrasts each individual step of the checkout journey between the current implementation and the proposed single-page cashier workflow.
-
 | # | Workflow Step | Current Behavior & Metrics | Identified Problem | Proposed Behavior | Expected Improvement | Required Backend Changes | Risks & Dependencies |
 | :-: | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1** | **Customer Identification & Vehicle Intake** | **3–8 clicks, 1–2 modals.**<br>Cashier searches plate. If not found, clicks "Add Customer" opening 8-field modal (`modalCustomer`). If "Walk-in" is clicked, system auto-generates a fake plate (e.g. `W-4821`). If omitted, checkout is interrupted by `modalPromptPlate`. | Real walk-in cars get assigned dummy numbers washers cannot match. Registering a real customer requires phone, name, car model, color, and marketing consent. | **1–2 keystrokes/clicks.**<br>Single rapid input: cashier types plate (e.g., `2BC-1234`). As they type, auto-suggest shows matches. If not found, hitting `Tab` or selecting a service keeps the plate as a walk-in without opening any modal. Phone number is optional inline. | **75% faster intake.**<br>Zero modals. Real plate is always captured for bay staff. No forced customer registration. | Ensure `api/pos/index.php` accepts unregistered plate strings without requiring pre-created customer or vehicle IDs. | Duplicate plates with different owners; handled via prompt if phone mismatch. |
-| **2** | **Vehicle Category Selection** | **1 click.**<br>Row of 4 buttons (`motorbike`, `small_car`, `suv_pickup`, `van_truck`) across top. Default is `small_car`. | Cashiers forget to change vehicle size before picking services, resulting in undercharging large SUVs or trucks. | **Integrated 1-tap pills.**<br>Prominent vehicle category buttons positioned directly above the service matrix. System auto-remembers the vehicle type for returning license plates. | **Zero pricing mistakes.**<br>Default auto-adapts to recognized plate; highly visible size indicators prevent undercharging. | None; vehicle category mapping exists in `pricing_matrix`. | Correct pricing matrices must exist in DB for each category. |
-| **3** | **Service & Package Selection** | **2–4 clicks, 1 potential modal.**<br>Categories are in a narrow vertical strip on the far right. Product/service cards have magnifier icons that trigger image preview modals. Upsell rules trigger popup modals. | Cashier eye tracking jumps all over screen. Accidental taps trigger image lightbox modals. Aggressive upsell popups interrupt transaction flow. | **Clear Category Tabs + Direct 1-Tap Grid.**<br>Horizontal category tabs at top (`Car Wash`, `Detailing`, `Oil & Lube`, `Drinks & Accessories`). Large touch-friendly service tiles showing dual currency ($ / ៛). 1-tap immediately adds to bill. Optional extras appear as clean toggle chips directly beneath items. | **50% fewer clicks.**<br>No lightbox popups. Upsells presented as subtle, non-blocking suggestions rather than disruptive modal prompts. | Add category ordering / priority flag to `categories` table if needed. | Large service catalogs require responsive scrolling grids. |
-| **4** | **Bay Assignment at Intake** | **4 clicks, 1 screen switch, 1 modal.**<br>Order is created with no bay. Cashier must click main nav "Queue", find order, click "Assign Bay", choose bay in `modalChooseBay`. | Disconnected workflow. Cars sit idling on apron while cashier switches tabs or washers cherry-pick easy cars. | **Inline 1-Click Bay Selector.**<br>Directly on the checkout screen, live bay status chips (`Bay 1: Free`, `Bay 2: Busy 10m`, `Bay 3: Free`) are visible. Cashier clicks desired bay directly during order creation, or checks "Auto-Assign". | **Eliminates tab switching.**<br>Direct bay dispatch immediately upon order confirmation. | Extend `create_order` payload in `api/pos/index.php` to accept optional `bay_id`. | Concurrency if another cashier assigns the same bay simultaneously; handled via atomic DB check. |
+| **1** | **Customer Intake & Vehicle Identification** | **3–8 clicks, 1–2 modals.**<br>Cashier searches plate. If not found, clicks "Add Customer" opening 8-field modal (`modalCustomer`). If "Walk-in" is clicked, system auto-generates a fake plate (`W-4821`). | Real walk-in cars get assigned dummy numbers washers cannot match. Registering a real customer requires phone, name, car model, color, and SMS marketing consent. | **1–2 keystrokes/clicks.**<br>Single rapid input: cashier types plate (e.g., `2BC-1234`). Auto-suggest matches returning cars. If new, typing plate directly assigns it to the bill. Customer registration is strictly optional; phone and name can be added inline. | **75% faster intake.**<br>Zero modals. Real plate is always captured for bay staff. Zero forced customer registration. | Ensure `api/pos/index.php` accepts unregistered plate strings without requiring pre-created customer or vehicle IDs. | Typos in plate handled by live autocomplete lookup. |
+| **2** | **Vehicle Category Selection** | **1 click.**<br>Row of 4 buttons (`motorbike`, `small_car`, `suv_pickup`, `van_truck`) across top. Default is `small_car`. | Cashiers forget to change vehicle size before picking services, resulting in undercharging large SUVs or trucks. | **Auto-Assisted Category Chips.**<br>Prominent vehicle category buttons positioned directly above the service matrix. System auto-remembers the vehicle type for returning license plates. | **Zero pricing mistakes.**<br>Default auto-adapts to recognized plate; highly visible size indicators prevent undercharging. | None; vehicle category mapping exists in `pricing_matrix`. | Correct pricing matrices must exist in DB for each category. |
+| **3** | **Service & Package Selection** | **2–4 clicks, 1 potential modal.**<br>Categories are in a narrow vertical strip on the far right. Product/service cards have magnifier icons that trigger image preview modals. Upsell rules trigger popup modals. | Cashier eye tracking jumps across screen. Accidental taps trigger image lightbox modals. Aggressive upsell popups interrupt transaction flow. | **Clear Category Tabs + Direct 1-Tap Grid.**<br>Horizontal category tabs at top (`Car Wash`, `Detailing`, `Oil & Lube`, `Drinks & Accessories`). Large touch-friendly service tiles showing dual currency ($ / ៛). 1-tap immediately adds to bill. Optional extras appear as clean toggle chips directly beneath items. | **50% fewer clicks.**<br>No lightbox popups. Upsells presented as subtle, non-blocking suggestions rather than disruptive modal prompts. | Add category ordering / priority flag to `categories` table if needed. | Large service catalogs require responsive scrolling grids. |
+| **4** | **Bay Assignment at Intake** | **4 clicks, 1 screen switch, 1 modal.**<br>Order is created with no bay. Cashier must click main nav "Queue", find order, click "Assign Bay", choose bay in `modalChooseBay`. | Disconnected workflow. Cars sit idling on apron while cashier switches tabs or washers cherry-pick easy cars. | **Inline 1-Click Bay Selector with Atomic Lock.**<br>Directly on the checkout screen, live bay status chips (`Bay 1: Free`, `Bay 2: Busy 10m`, `Bay 3: Free`) are visible. Cashier clicks desired bay directly during order creation, or checks "Auto-Assign Queue". | **Eliminates tab switching.**<br>Direct bay dispatch immediately upon order payment confirmation. | Extend `create_order` payload in `api/pos/index.php` to accept optional `bay_id` with atomic concurrency validation. | Concurrency if another cashier assigns the same bay simultaneously; handled via atomic DB check. |
 | **5** | **Order Summary & Crew Assignment** | **2–4 clicks in collapsed accordion.**<br>Worker dropdowns and mileage are tucked inside `<details class="cart-details-accordion">` on cart. Then dropdowns are repeated inside payment modal. | Data hidden; cashiers fail to assign washers, resulting in lost commission tracking. Redundant inputs confuse users. | **Always-Visible Itemized Summary.**<br>Right pane shows clear live bill. Duty washer is auto-selected based on active shift / bay queue or 1-tap selector. Mileage input is clean and visible only when oil services are in the cart. | **Zero duplicate inputs.**<br>Accurate washer and mechanic attribution on every ticket. | None; database schema already supports `cashier_id`, `order_washers`, `order_mechanics`. | Staff shift changes mid-day; handled by live active staff sync. |
-| **6** | **Discounts & Price Overrides** | **3 clicks, 1 modal.**<br>Cart discount pill opens modal. Modal lets any user enter 100% discount. Backend rejects with 403 at checkout if cashier lacks permission. | Cashier discovers discount is unauthorized only after completing the entire checkout process and hitting submit. | **Inline Quick Discounts with Immediate Manager PIN.**<br>Pre-set discount chips (5%, 10%, VIP) on cart. If cashier lacks `pos.discount`, a clean inline PIN prompt appears immediately. Reason for discount is logged. | **Zero transaction drop-offs.**<br>Immediate authorization feedback; prevents cashier embarrassment in front of customer. | Support inline manager verification in POS state without crashing order payload. | Manager availability on shop floor. |
-| **7** | **Payment Method Selection** | **2 clicks.**<br>Cashier clicks "Pay / Checkout", which opens `modalPayment`. Must click tab for Cash, ABA, or KHQR. | Unnecessary modal step. Extra clicks for high-frequency transactions. | **Unified Single-Screen Payment Area.**<br>Payment method buttons (`Cash`, `KHQR Scan`, `Pay Later / Exit`) are permanently visible on the bottom-right of the single checkout page. | **Instant checkout readiness.**<br>No modal popup required for payment method selection. | None. | Screen real estate on smaller 10-inch tablets. |
+| **6** | **Discounts & Price Overrides** | **3 clicks, 1 modal.**<br>Cart discount pill opens modal. Modal lets any user enter 100% discount. Backend rejects with 403 at checkout if cashier lacks permission. | Cashier discovers discount is unauthorized only after completing the entire checkout process and hitting submit. | **Inline Quick Discounts with Immediate Manager PIN.**<br>Pre-set discount chips on cart. If cashier lacks `pos.discount`, a clean inline PIN prompt appears immediately. Reason for discount is logged. Existing permission system strictly maintained. | **Zero transaction drop-offs.**<br>Immediate authorization feedback; prevents cashier embarrassment in front of customer. | Support inline manager verification in POS state without crashing order payload. | Manager availability on shop floor. |
+| **7** | **Payment Timing & Method** | **Upfront or Unpaid (Confusing).**<br>Cashier can click "Pay / Checkout" or "Pay Later", creating unpaid orders that enter the wash queue. | Unpaid drive-offs, unbilled parts, apron confusion. Contradicts "No Payment, No Service" rule. | **Mandatory Upfront Payment.**<br>Payment method buttons (`Cash`, `KHQR Scan`) are permanently visible on the single checkout page. "Pay Later" and "Pay at Exit" are **removed** from standard cashier workflow. Vehicle enters queue ONLY when paid. | **100% revenue security.**<br>No unpaid cars enter service queue. No unbilled services. | Remove `btnPayLater` endpoint from standard POS UI; enforce `payment_status = 'paid'` before bay queue entry. | High-value commercial fleet accounts (handled via separate dedicated corporate billing). |
 | **8** | **Cash Tender & Change** | **2–3 clicks in modal.**<br>Cashier enters tender amount or clicks quick cash button in `modalPayment`. Shows USD and KHR change. | Hidden inside modal. If cashier enters less than total, modal alert fires. | **Inline Smart Cash Pad.**<br>Large numerical tender box and quick bill buttons ($5, $10, $20, 50,000៛, Exact) directly on checkout page. Real-time dual-currency change display ($ and ៛). | **3x faster cash processing.**<br>Cashier can finalize cash sale in 2 seconds flat. | None; exchange rate calculation logic already mature. | Cashier miscounting cash; handled by clear change display. |
-| **9** | **KHQR / ABA Digital Payment** | **5 clicks, 1 modal, 1 camera action, Manager PIN required.**<br>Shows static QR stand. Forces cashier to photograph customer phone slip. Order marked `pending_verification`. Manager must manually approve in Back Office. | Apron gridlock. Cashiers cannot clear cars without manager intervention. Taking photos of customer phones causes privacy complaints and delays. | **Dynamic Customer-Facing KHQR + Instant Verification.**<br>Dynamic KHQR generated for exact order amount. Cashier verifies bank notification on counter tablet or bank app, or customer shows reference #. Manager PIN requirement for routine payments is removed. | **Eliminates manager bottleneck.**<br>Immediate verified payment without awkward phone photographing. | Add setting to allow cashier-verified digital payments; store transaction reference directly in order record. | Customer displaying forged screenshot; mitigated by checking counter bank phone/SMS notification. |
+| **9** | **KHQR Payment Verification** | **5 clicks, 1 camera action, Manager PIN required.**<br>Forces cashier to photograph customer phone slip. Order marked `pending_verification`. Manager must manually approve in Back Office. | Cashier unable to clear cars. Awkward webcam photography of customer phone screens. Apron gridlock. | **Verified Merchant-Side Confirmation.**<br>Dynamic KHQR generated for exact amount. Payment verified via store's dedicated merchant device (push notification, Telegram bot, soundbox) or bank gateway webhook. Customer screenshots or unverified clicks NOT accepted. | **Eliminates manager bottleneck while preventing fraud.**<br>Positive verification without awkward phone photographing. | Store transaction reference number in order record. Support dynamic KHQR payload generation. | Internet / cellular connectivity for merchant reception device. |
 | **10** | **Order Submission & Idempotency** | **1 click with duplicate vulnerability.**<br>Submits order to `api/pos/index.php`. Generates fresh UUID on every click, creating duplicate orders if cashier double-clicks during network lag. | Duplicate orders in DB; duplicated revenue numbers; customer charged twice. | **Cart-Locked Idempotency Token.**<br>Idempotency key is tied to the cart session. Checkout button immediately locks with visual spinner. Re-clicks send identical token, safely handled by backend replay. | **Zero duplicate orders.**<br>Guaranteed idempotency even over unstable LAN or Wi-Fi. | Backend already supports idempotent replay (`api/pos/index.php` L1294–1304); frontend must bind token to cart lifecycle. | Network timeout handling; solved by offline queue. |
-| **11** | **Receipt Printing** | **1 click in modal, hard gate.**<br>Receipt modal opens after payment. If printer fails, `OrderGate` blocks car from entering bay unless manager overrides. | Paper jams freeze the wash line. Extra modal requires dismissal. | **Silent Background Auto-Print + Printless Dispatch.**<br>Ticket prints directly to 80mm thermal printer silently. If paper runs out, car is NOT blocked; digital ticket appears on washer screen / TV screen. | **Zero bay blockades due to printer errors.**<br>Smooth transition from counter to wash lane. | Make `OrderGate::assertReceiptPrinted` configurable or advisory for wash bays. | Physical printer connectivity; handled by existing thermal printer fallback. |
+| **11** | **Receipt Printing & Queue Gate** | **1 click in modal, hard gate.**<br>Receipt modal opens after payment. If printer fails, `OrderGate` blocks car from entering bay unless manager overrides. | Paper jams freeze the wash line. Extra modal requires dismissal. | **Silent Background Auto-Print + Printless Dispatch.**<br>Ticket prints directly to 80mm thermal printer silently upon payment. If paper runs out, car is NOT blocked; digital ticket appears on washer screen / TV screen. | **Zero bay blockades due to printer errors.**<br>Smooth transition from counter to wash lane. | Make `OrderGate::assertReceiptPrinted` advisory for wash bays while requiring confirmed payment. | Physical printer connectivity; handled by existing thermal printer fallback. |
 
 ---
 
 ## 2. End-to-End Operational Scenarios
 
-### Scenario 1: Standard Walk-in Car Wash ($3.00 Cash)
-
 ```mermaid
 journey
-    title Scenario 1: Walk-in Car Wash ($3.00 Cash)
-    section Current Workflow (14 Clicks, 3 Modals)
-      Click Walk-in (generates W-4821): 2: Cashier
-      Click Small Car: 3: Cashier
-      Click Sedan Wash ($3.00): 4: Cashier
-      Click Pay / Checkout: 2: Cashier
-      Modal Prompt Plate pops up: 1: Cashier
-      Type real plate & confirm: 2: Cashier
-      Payment Modal opens: 3: Cashier
-      Click Exact Cash: 4: Cashier
-      Click Confirm Payment & Print: 3: Cashier
-      Receipt Modal opens, dismiss: 3: Cashier
-      Switch tab to Queue: 2: Cashier
-      Find car, click Assign Bay: 2: Cashier
-      Modal Choose Bay opens, click Bay 1: 3: Cashier
-    section Proposed Workflow (3 Clicks, 0 Modals)
-      Type Plate '2BC-1234' (auto-sets Small Car): 5: Cashier
-      Click Sedan Wash ($3.00): 5: Cashier
-      Click 'Exact Cash & Wash Bay 1': 5: Cashier
+    title Standard Upfront Payment & Dispatch Flow (3 Clicks, 0 Modals)
+    section Upfront Checkout
+      Type Plate '2BC-1234' (auto-sets vehicle size): 5: Cashier
+      Select Service (Sedan Wash $3.00): 5: Cashier
+      Tender Cash or Scan KHQR & Dispatch Bay 1: 5: Cashier
+    section Operational Fulfillment
+      Silent 80mm Ticket Prints: 5: Printer
+      Bay 1 Washer receives digital ticket on TV/Tablet: 5: Washer
+      Car washed & finished: 5: Washer
 ```
 
-#### Detailed Breakdown:
-- **Current Flow:**
+---
+
+### Scenario 1: Standard Walk-in Car Wash ($3.00 Cash Upfront)
+
+- **Operational Rule:** Upfront cash collection before vehicle enters wash apron. Customer registration is optional.
+- **Current Flow (14 Clicks, 3 Modals):**
   1. Cashier clicks "Walk-in Guest" button. System creates dummy customer with plate `W-8234`.
   2. Cashier clicks "Small Car".
   3. Cashier clicks "Exterior Wash $3.00".
@@ -70,189 +71,161 @@ journey
   10. Cashier clicks main navigation tab "Queue".
   11. Cashier locates `2BC-1234` on queue board. Clicks "Assign Bay".
   12. `modalChooseBay` opens. Cashier selects "Bay 1". Order moves to washing.
-  - **Metrics:** **14 clicks, 3 modals, 1 page navigation, ~45 seconds elapsed.**
-- **Proposed Flow:**
-  1. Cashier types `2BC-1234` in the plate input (vehicle defaults to Small Car).
-  2. Cashier taps `Sedan Wash ($3.00)`.
-  3. Cashier taps `Exact Cash & Dispatch (Bay 1)`.
-  - **Metrics:** **3 interactions, 0 modals, 0 tab switches, ~6 seconds elapsed.**
+- **Proposed Flow (3 Interactions, 0 Modals, ~6 Seconds):**
+  1. Cashier types `2BC-1234` in the fast plate input (vehicle defaults to Small Car).
+  2. Cashier taps `Sedan Normal Wash ($3.00)`.
+  3. Cashier taps `$5` on the integrated cash pad (displays `$2.00` change / `8,200 ៛`).
+  4. Cashier taps `Confirm & Dispatch (Bay 1)`.
+  - **Outcome:** Receipt prints silently, cash drawer opens, Bay 1 becomes occupied, Bay 1 washer tablet alerts new car. Zero popups.
 
 ---
 
-### Scenario 2: Registered Customer Car Wash (Loyalty Points / Tier)
+### Scenario 2: Registered Customer Car Wash (Loyalty Tier Discount Upfront)
 
+- **Operational Rule:** Returning customer identified by plate or phone; member benefits applied before payment.
 - **Current Flow:**
   1. Cashier types customer phone `012345678` in global search.
-  2. Dropdown appears with customer name and vehicle list. Cashier clicks customer.
-  3. Vehicle profile banner opens in cart showing loyalty points.
-  4. Cashier clicks "Exterior Wash".
-  5. If customer is eligible for loyalty reward, a reward banner appears (`cartLoyaltyRewardBanner`). Cashier clicks "Give Reward".
-  6. Cashier clicks "Pay / Checkout".
-  7. Payment modal opens. Cashier selects payment method.
-  8. Cashier submits payment and prints receipt.
-  9. Cashier switches to Queue tab to assign bay.
-  - **Metrics:** **11 clicks, 2 modals, 1 tab switch.**
-- **Proposed Flow:**
-  1. Cashier types `012345678` or plate `2A-9999`. Customer badge auto-populates with Tier (e.g. Gold) and active loyalty credit.
+  2. Dropdown appears. Cashier clicks customer.
+  3. Profile banner opens in cart. Cashier clicks "Exterior Wash".
+  4. Reward prompt banner appears. Cashier clicks "Give Reward".
+  5. Cashier clicks "Pay / Checkout". Modal opens. Cashier submits payment and prints receipt.
+  6. Cashier switches to Queue tab to assign bay.
+- **Proposed Flow (3 Clicks, 0 Modals):**
+  1. Cashier types `012345678` or plate `2A-9999`. Customer badge auto-populates with Tier (e.g. Gold) and vehicle size.
   2. 1-tap `Exterior Wash`. If loyalty wash is available, a "Redeem Free Wash (10 pts)" chip is already highlighted.
-  3. Cashier selects bay and completes checkout in 1 click.
-  - **Metrics:** **3 clicks, 0 modals, 0 tab switches.**
+  3. Cashier selects payment method (if balance > $0) and taps `Confirm & Dispatch (Bay 2)`.
+  - **Outcome:** Points updated, payment logged, car dispatched instantly to Bay 2.
 
 ---
 
-### Scenario 3: Car Wash Plus Detailing (Engine Bay & Clay Bar)
+### Scenario 3: Car Wash Plus Detailing (Engine Bay & Clay Bar – Upfront Payment)
 
+- **Operational Rule:** All detailing packages are quoted and paid upfront at the counter. (Any mid-service part add-ons require customer confirmation and separate supplementary billing).
 - **Current Flow:**
-  1. Cashier enters vehicle plate.
-  2. Cashier clicks "Exterior Wash".
-  3. Cashier must locate Detailing category on far-right vertical column.
-  4. Cashier clicks "Engine Bay Cleaning" and "Clay Bar Decontamination".
-  5. Upsell modal triggers warning about long wait time (`modalLongWaitWarning`). Cashier dismisses.
-  6. Cashier expands collapsed accordion in cart to select duty detailer / washer.
-  7. Cashier clicks "Pay Later" (since customer wants to inspect detailing before paying).
-  8. Order is saved as unpaid. Cashier goes to Queue tab to assign detail bay.
-  - **Metrics:** **13 clicks, 2 modals, 1 accordion expansion.**
-- **Proposed Flow:**
+  1. Cashier enters plate. Selects exterior wash.
+  2. Cashier navigates category sidebar to find Detailing.
+  3. Selects Engine Bay Cleaning and Clay Bar.
+  4. Long wait warning modal triggers. Dismissed.
+  5. Cashier clicks "Pay Later" (unpaid queue entry).
+  6. Cashier switches tabs to assign detailing bay.
+- **Proposed Flow (4 Clicks, 0 Modals):**
+  1. Enter plate `2BC-8888`.
+  2. Tap `Detailing` tab $\rightarrow$ Tap `Full Detailing Package` ($45.00).
+  3. Estimated time (75 mins) displays live. Cashier assigns Bay 3 (Detailing Bay).
+  4. Customer pays $45.00 (Cash or KHQR). Cashier verifies and taps `Confirm & Dispatch (Bay 3)`.
+  - **Outcome:** Full payment secured before detailing chemicals and labor are expended. Job card prints for detailing crew with itemized checklist.
+
+---
+
+### Scenario 4: Quick Oil Change Only (Upfront Payment with Mileage Tracking)
+
+- **Operational Rule:** Oil package and replacement filter selected and paid upfront. Current mileage captured for CRM oil sticker.
+- **Current Flow:**
+  1. Cashier enters plate, changes vehicle type to SUV.
+  2. Scrolls through catalog to find oil and filter items.
+  3. Opens cart accordion to type current mileage and adjust next reminder date.
+  4. Clicks checkout, pays in modal, switches to Queue tab to assign Bay 4.
+- **Proposed Flow (4 Clicks, 0 Modals):**
   1. Enter plate.
-  2. Tap `Exterior Wash`, tap `Engine Bay`, tap `Clay Bar` (all clearly visible under Detailing tab).
-  3. Total estimated time (e.g., 75 mins) updates live on screen.
-  4. Tap `Pay at Exit` -> Selects Detailing Bay. Ticket prints directly for detailing team.
-  - **Metrics:** **4 clicks, 0 modals.**
+  2. Tap `Oil Service` tab $\rightarrow$ Tap `Synthetic Oil Package (4L + Filter + Labor)` ($35.00).
+  3. Mileage input field appears inline right below package: cashier types `85000` (system auto-sets next reminder: `95000 km` / `3 months`).
+  4. Customer pays $35.00. Cashier selects `Bay 4 (Tech/Lift)` and taps `Confirm & Dispatch`.
+  - **Outcome:** Oil change sticker prints automatically alongside customer receipt. Lift bay notified.
 
 ---
 
-### Scenario 4: Quick Oil Change Only
+### Scenario 5: Car Wash Plus Oil Change (Multi-Stage Bay Routing)
 
-- **Current Flow:**
-  1. Cashier enters plate.
-  2. Cashier switches vehicle type to SUV.
-  3. Cashier scrolls through catalog to find Engine Oil (e.g. 5W-30 Synthetic 4L) and Oil Filter.
-  4. Cashier must expand cart accordion to type current mileage and adjust next oil due reminder.
-  5. Cashier clicks "Pay / Checkout".
-  6. Payment modal opens. Cashier inputs cash or ABA.
-  7. Cashier submits payment, prints receipt.
-  8. Cashier navigates to Queue to assign to Technical Bay (Bay 4).
-  - **Metrics:** **12 clicks, 2 modals, 1 accordion expansion.**
-- **Proposed Flow:**
-  1. Enter plate.
-  2. Tap `Oil Service` tab -> Quick Package: `Synthetic Oil Package (4L + Filter + Labor)` ($35.00).
-  3. Mileage input field appears inline right below package: types `85000` (auto-calculates next due: `95000 km` / `3 months`).
-  4. Tap `Tech Bay 4` -> Finalize payment or Pay Later.
-  - **Metrics:** **4 clicks, 0 modals.**
-
----
-
-### Scenario 5: Car Wash Plus Oil Change (Combined Multi-Service)
-
-- **Current Flow:**
-  1. Cashier enters customer and vehicle.
-  2. Selects Wash Service (`SUV Wash`).
-  3. Navigates categories to select Oil Service (`Mobil 1 5W-30`).
-  4. System marks order as mixed wash + repair.
-  5. Cashier opens accordion: assigns washer AND assigns mechanic. Enters mileage.
-  6. Cashier selects checkout. Pays or holds.
-  7. Bay assignment is problematic: does car go to Wash Bay first or Oil Bay first? System has no multi-stage bay routing in POS, forcing manual queue dragging.
-  - **Metrics:** **15+ clicks, high confusion regarding bay dispatch.**
-- **Proposed Flow:**
-  1. Enter plate.
-  2. Tap `Wash` + tap `Oil Package`.
-  3. Smart dispatch automatically assigns routing: `Step 1: Bay 4 (Oil Lube) -> Step 2: Bay 1 (Wash)`.
-  4. Cashier confirms with 1 click. Both mechanic and washer receive notifications on their respective job boards.
-  - **Metrics:** **4 clicks, automated multi-stage routing.**
+- **Operational Rule:** Combined mechanical and wash service paid upfront. System handles safe multi-stage bay sequencing: Stage 1 (Oil Lube Bay) followed by Stage 2 (Wash Bay).
+- **Physical Workflow:** Engine lube service must be performed on lift bay (Bay 4) while engine is accessible, followed by wash bay (Bay 1) to clean undercarriage and body.
+- **Current Flow (Confusing & Broken):**
+  - Cashier adds wash and oil. System allows only one bay assignment in `modalChooseBay`. Staff must manually track when the oil change finishes to manually re-assign the car to a wash bay.
+- **Proposed Flow (Safe Multi-Stage Sequencing):**
+  1. Enter plate `2BC-1234`. Tap `Sedan Normal Wash` ($3.00) + Tap `Synthetic Oil Package` ($35.00). Total: $38.00.
+  2. System detects multi-stage requirement:
+     - **Stage 1:** `Bay 4 (Tech/Lift)`
+     - **Stage 2:** `Bay 1 (Wash/Dry)` (Queued for Stage 2 entry)
+  3. Customer pays $38.00 upfront. Cashier confirms payment.
+  4. **Atomic Concurrency Check:** System executes an atomic check on Bay 4 availability. If Bay 4 is free, Stage 1 begins immediately.
+  5. Mechanic performs oil change. Upon tapping "Complete Oil Stage" on the workshop tablet:
+     - Bay 4 is released to `free`.
+     - Order automatically transitions to `Stage 2: Waiting Wash Bay`.
+     - Bay 1 displays next up: `2BC-1234 (From Oil Bay)`.
+  - **Outcome:** Zero lost tracking, separate mechanic and washer commissions recorded accurately, payment 100% secured upfront.
 
 ---
 
-### Scenario 6: Cash Payment with Change (e.g. $50 Bill for $14 Service)
+### Scenario 6: Cash Payment with Change ($50 Bill Tendered for $14 Service)
 
+- **Operational Rule:** Fast cash transaction with clear dual-currency change display ($ and ៛).
 - **Current Flow:**
-  1. Order items total $14.00 (57,400 ៛).
-  2. Cashier clicks "Pay / Checkout" -> `modalPayment` opens.
-  3. Cash tab is active. Cashier clicks `$50` button.
-  4. Change is calculated: `$36.00 (147,600 ៛)`.
-  5. Cashier clicks "Confirm Payment & Print".
-  6. Modal closes, receipt preview opens. Cashier closes preview.
-  - **Metrics:** **6 clicks, 2 modals.**
-- **Proposed Flow:**
-  1. Total $14.00 is displayed in large font on checkout panel.
-  2. Cashier taps `$50` chip directly on bottom-right cash pad.
-  3. Change displays prominently: **`Return: $36.00 (or 147,600 ៛)`**. Cash drawer fires automatically.
-  4. Receipt prints silently. Cart resets for next car.
-  - **Metrics:** **2 clicks, 0 modals.**
+  - Cashier clicks checkout. `modalPayment` opens. Clicks $50 button. Modal closes, receipt modal opens, cashier closes preview.
+- **Proposed Flow (2 Clicks, 0 Modals):**
+  1. Order total displays prominently: `$14.00 (57,400 ៛)`.
+  2. Cashier taps `$50` quick chip on integrated cash pad.
+  3. Prominent green display shows: **`CHANGE DUE: $36.00 (147,600 ៛)`**.
+  4. Cashier taps `Confirm & Dispatch (Bay 1)`. Cash drawer kicks open automatically. 80mm receipt prints silently.
+  - **Outcome:** Completed in 2 seconds. Zero modal popups.
 
 ---
 
-### Scenario 7: KHQR Mobile Banking Payment
+### Scenario 7: KHQR Mobile Banking Payment (Reliable Verification)
 
-- **Current Flow:**
-  1. Cashier clicks "Pay / Checkout" -> `modalPayment` opens.
-  2. Cashier clicks "KHQR ស្កេន" tab.
-  3. Modal displays static Stand QR image.
-  4. Customer scans and pays via Bakong / ABA app.
-  5. Customer shows phone screen to cashier.
-  6. Cashier clicks "Take Slip Photo" (`btnTriggerSlipCapture`), activating counter camera.
-  7. Cashier takes photo of customer screen.
-  8. Cashier clicks "Confirm Payment & Print".
-  9. Order is created as `pending_verification`.
-  10. Manager must log in to Back Office to verify slip and mark order paid.
-  - **Metrics:** **7 clicks, 1 camera capture, Manager login required.**
-- **Proposed Flow:**
-  1. Cashier taps `KHQR` payment button on checkout screen.
-  2. Customer-facing screen (or POS counter screen) generates dynamic KHQR code with exact amount ($14.00 / 57,400 ៛).
-  3. Customer scans and confirms on phone.
-  4. POS displays 6-digit transaction reference or cashier verifies counter notification.
-  5. Cashier clicks `Confirm & Print`. Order is marked `paid` (or verified digital payment) with cashier's user ID recorded. No manager PIN required for routine payments.
-  - **Metrics:** **2 clicks, 0 camera captures, 0 manager interruptions.**
+- **Operational Rule:** Strictly verified before service dispatch. Do NOT trust QR generation, customer phone screenshots, or blind cashier button clicks.
+- **Reliable Verification Standard:**
+  - **Merchant Soundbox / Audio Chime:** IoT soundbox at counter announces: *"Received 57,400 Riels via KHQR"*.
+  - **Merchant Notification Phone / Telegram Bot:** Store's dedicated device receives bank push notification or official Telegram alert showing matching amount ($14.00) and reference code.
+  - **Bank Gateway API Callback:** Direct webhook confirmation (where merchant account integration is active).
+- **Proposed Workflow (Strict Verification):**
+  1. Cashier taps `KHQR Scan` on the checkout screen.
+  2. Customer-facing screen (or counter display) generates dynamic KHQR code with exact amount ($14.00 / 57,400 ៛) and unique bill reference.
+  3. Customer scans and authorizes payment on their banking app.
+  4. **Verification Step:**
+     - Counter soundbox announces payment OR store counter phone receives bank notification.
+     - Cashier enters or matches the last 4 digits of the transaction reference number displayed on the store's notification.
+  5. Cashier taps `Confirm & Dispatch (Bay 1)`.
+  6. Order is recorded as `payment_status = 'paid'`, `payment_method = 'khqr'`, with `payment_ref` logged and cashier ID attributed.
+  - **Outcome:** Zero risk of fake customer screenshots; zero manager interruption; payment 100% confirmed before car enters bay.
 
 ---
 
-### Scenario 8: Discounted Order (e.g. 20% Opening Promotion)
+### Scenario 8: Discounted Order (Existing Permission & Inline Manager PIN)
 
-- **Current Flow:**
+- **Operational Rule:** Respect existing database permission `pos.discount`. Do not invent unauthorized discount percentage tiers. If cashier lacks permission, an inline Manager PIN must be provided.
+- **Proposed Workflow:**
   1. Items in cart: $25.00.
-  2. Cashier clicks "Discount" pill in cart footer.
-  3. `modalDiscount` opens. Cashier clicks "20%".
-  4. Modal calculates preview: -$5.00. New total: $20.00.
-  5. Cashier clicks "Apply Discount". Modal closes.
-  6. Cashier clicks "Pay / Checkout". Payment modal opens.
-  7. Cashier submits payment.
-  8. **Failure Case:** If cashier lacks `pos.discount` permission, backend crashes with 403 error. Cashier cannot proceed.
-  - **Metrics:** **7 clicks, 2 modals, catastrophic error if permission missing.**
-- **Proposed Flow:**
-  1. Items in cart: $25.00.
-  2. Cashier taps `20% Promo` chip directly in cart.
-  3. If cashier has permission: discount applies immediately (-$5.00, Total $20.00).
-  4. If cashier lacks permission: an inline 4-digit Manager PIN box appears right inside the discount chip. Manager enters PIN once; discount applies with manager's ID logged in `orders.discount_approved_by`.
-  5. Proceed to instant payment.
-  - **Metrics:** **2 clicks (or 1 click + PIN), 0 modals, zero checkout crashes.**
+  2. Cashier taps `Apply Discount` (or selects pre-configured discount reason).
+  3. **Permission Check:**
+     - If cashier has `pos.discount` permission: Discount applies directly.
+     - If cashier lacks `pos.discount`: An inline 4-digit Manager PIN field appears directly inside the discount box.
+  4. Manager inputs PIN `123456`. PIN is verified via `CashierControl::verifyManagerPin()`.
+  5. Discount is applied with `discount_approved_by = [ManagerID]` and reason recorded.
+  6. Cashier collects discounted total upfront and confirms order.
+  - **Outcome:** Full accountability; zero 403 crashes at checkout; no unauthorized discounts.
 
 ---
 
-### Scenario 9: Failed or Cancelled Payment (Drive-Off / Customer Abort)
+### Scenario 9: Failed or Cancelled Payment (Drive-Off / Payment Declined)
 
-- **Current Flow:**
-  1. Cashier created order. Car is in queue or bay. Customer decides not to wait or payment fails.
-  2. Cashier must find order in Orders or Queue tab.
-  3. Cashier clicks "Cancel Order" -> `modalCancelOrder` opens.
-  4. Cashier must enter cancellation reason (minimum 5 chars).
-  5. Cashier must enter Manager Username and Manager PIN.
-  6. System submits `cancel_order`. Reverses stock and commissions.
-  7. No cancellation receipt is printed.
-  - **Metrics:** **6 clicks, 1 modal, manual manager intervention.**
-- **Proposed Flow:**
-  1. From active checkout or live queue card, cashier clicks `Void / Abort`.
-  2. Reason picker appears (e.g., `Customer left - long wait`, `Declined payment`, `Wrong service selected`).
-  3. If before service started: Cashier can void with logged reason.
-  4. If after service started or already paid: Requires Manager PIN override.
-  5. System restores any deducted stock, voids transaction in ledger, logs audit event, and prints small "VOID TICKET" for cashier balancing.
-  - **Metrics:** **3 clicks, structured audit trail, clear cash drawer reconciliation.**
+- **Operational Rule:** If a customer's payment is declined or the customer aborts before paying, **the vehicle is never admitted to the wash queue or service bay**.
+- **Proposed Workflow:**
+  1. Cashier entered plate and services in cart ($15.00).
+  2. Customer's bank transfer fails or customer decides not to wait.
+  3. Cashier taps `✕ Void / Clear Cart (Esc)`.
+  4. The cart resets immediately.
+  5. **Result:** No order is inserted into `orders`; no bay is reserved; no stock is deducted; no washer is dispatched.
+  6. If a transaction was partially submitted and cancelled immediately, `api/pos/index.php?action=cancel_order` marks order `status = 'cancelled'`, logs reason, and ensures zero queue entry.
+  - **Outcome:** Washers never perform unpaid work. Business registers zero unbilled labor.
 
 ---
 
-## 3. Operational Risk & Dependency Assessment
+## 3. Operational Metrics Comparison
 
-| Change Area | Operational Risk | Technical Dependency | Mitigation Strategy |
-| :--- | :--- | :--- | :--- |
-| **Instant Unregistered Plate Entry** | Typo in plate number by cashier resulting in incorrect vehicle history. | API `create_order` must allow ad-hoc plate strings without failing foreign key constraints on `vehicles.id`. | Visual confirmation chip on screen; fuzzy search suggests existing plates as cashier types first 3 characters. |
-| **Removal of Bank Slip Photos** | Dishonest customer showing fake payment screenshot to cashier. | Counter tablet must receive instant bank push notification or cashier checks store phone. | High-value transactions (> $50) can retain reference number entry; daily reconciliation matches bank statement to POS digital report. |
-| **Inline Bay Assignment** | Two cashiers assign different cars to the same bay simultaneously. | Atomic database lock / transaction check in `BayManager::assignBay()`. | If bay becomes occupied during checkout, POS auto-alerts: "Bay 1 just occupied, redirecting to Bay 2 or Queue". |
-| **Removing Hard OrderGate Blockade** | Cars washed without cashier recording sale (cashier pocketing cash). | Physical receipt printing decoupled from software bay movement. | TV screen in bay shows active authorized jobs. Washers are trained to only wash vehicles listed on the digital bay queue board. |
+| Measurement | Current Workflow | Proposed Workflow | Improvement |
+| :--- | :---: | :---: | :---: |
+| **Walk-in Car Wash Duration** | 45–60 sec | **5–8 sec** | **85% faster** |
+| **Total Clicks / Taps** | 14–20 clicks | **2–4 clicks** | **75% reduction** |
+| **Modal Popups Encountered** | 3–4 modals | **0 modals** | **100% eliminated** |
+| **Unpaid Cars Entering Queue** | Possible via "Pay Later" | **0 (Strictly Blocked)** | **100% eliminated** |
+| **Fake Screenshot Vulnerability** | High (webcam photos) | **Zero (Merchant-verified)** | **Risk eliminated** |
+| **Multi-Stage Bay Routing** | Broken / Manual drag | **Automated (Atomic Lock)** | **Fully coordinated** |
