@@ -157,17 +157,18 @@ graph TD
         │
         ├── [api/pos/index.php Gateway Verification]
         │     ├── Rejects empty payment_ref (rejects synthetic TRX- strings)
-        │     ├── Enforces scoped duplicate protection: 
-        │     │     SELECT id FROM orders 
+        │     ├── Enforces scoped duplicate protection on authoritative ledger (order_payments): 
+        │     │     SELECT id FROM order_payments 
         │     │     WHERE payment_provider = 'aba_payway' 
         │     │       AND merchant_account_id = '001-234567' 
         │     │       AND payment_ref = '849201';
         │     │     If exists -> HTTP 409 DUPLICATE_PAYMENT_REFERENCE
-        │     │     (CRITICAL: payment_provider, merchant_account_id, and payment_ref are strictly NOT NULL;
+        │     │     (CRITICAL: payment_provider, merchant_account_id, and payment_ref are strictly NOT NULL on order_payments;
         │     │      in MySQL, composite UNIQUE treats NULL != NULL, so NOT NULL is mandatory to prevent bypass)
         │     ├── Note: Backend records cashier attestation; does NOT simulate external bank calls
-        │     │     (Automated Webhooks contrast: require bank onboarding, signature verification per bank spec,
-        │     │      timestamp drift rejection > 300s, and replay protection via webhook_events table)
+        │     │     (Automated Webhooks contrast: require official bank developer onboarding, signature verification per bank spec
+        │     │      [ABA parameter concatenation HMAC-SHA512 vs Bakong RSA-256], timestamp drift rejection > 300s,
+        │     │      and replay attack defense inside/outside 5-min window via webhook_events table)
         │     ├── Verify cashier authenticated session
         │     │
         │     ├── [TRANSACTION BEGIN]
@@ -184,10 +185,12 @@ graph TD
         │     │     receipt_number = 'REC-261106-0042',
         │     │     receipt_issued_at = NOW()
         │     │
-        │     ├── INSERT INTO order_payments:
-        │     │     (order_id, payment_seq=1, amount_usd, payment_method='khqr', 
-        │     │      payment_provider='aba_payway', merchant_account_id='001-234567', 
-        │     │      payment_ref='849201', cashier_id)
+        │     ├── INSERT INTO order_payments (Authoritative Ledger Entry):
+        │     │     (order_id, payment_seq=1, amount_usd, amount_khr, exchange_rate=4100,
+        │     │      payment_method='khqr', payment_provider='aba_payway', 
+        │     │      merchant_account_id='001-234567', payment_ref='849201', 
+        │     │      cashier_id, verified_at=NOW(), created_at=NOW())
+        │     │     (Collides with uq_payment_ledger_provider_ref if duplicate reference is injected)
         │     │
         │     ├── Atomically claim target bay or place in Priority Queue
         │     ├── OrderGate::assertAdmissibleToService($order) -> Passes electronic gate
@@ -376,13 +379,14 @@ erDiagram
         tinyint payment_seq "1, 2, ..."
         decimal amount_usd
         int amount_khr
+        int exchange_rate "Frozen historical rate at payment moment"
         string payment_method "cash, khqr, card"
         string payment_provider "NOT NULL"
         string merchant_account_id "NOT NULL"
-        string payment_ref "NOT NULL (Bank/Tender Ref)"
+        string payment_ref "NOT NULL (Bank/Tender Ref) UK"
         int cashier_id FK
         datetime verified_at
-        datetime created_at
+        datetime created_at "Payment event timestamp"
     }
 
     order_refunds {
@@ -392,38 +396,39 @@ erDiagram
         bigint payment_id FK "Optional link to specific tender"
         decimal amount_usd
         int amount_khr
+        int exchange_rate "Frozen historical rate at refund moment"
         string refund_method "cash, bank_reversal, store_credit"
         string reason
         int cashier_id FK
         int manager_user_id FK
         string attestation_status "cashier_attested (Administrative attestation)"
-        datetime created_at
+        datetime created_at "Refund event timestamp"
     }
 
     webhook_events {
         bigint id PK
         string provider "aba_payway, bakong"
-        string event_id UK "Unique bank event ID"
+        string event_id UK "Unique bank event ID (Replay defense)"
         string merchant_account_id
         string payment_ref
         decimal amount
         string currency "USD, KHR"
         datetime bank_timestamp
-        int drift_seconds "Must be < 300s"
-        string signature_hash
-        string processing_status "processed, rejected, duplicate"
+        int drift_seconds "Must be <= 300s"
+        string signature_hash "Bank-specific signature"
+        string processing_status "processed, duplicate, rejected"
         datetime received_at
     }
 ```
 
 | Table Name | Operations Performed | Critical Columns Impacted | Locking & Concurrency Standards |
 | :--- | :--- | :--- | :--- |
-| **`orders`** | `INSERT`, `UPDATE`, `SELECT` | `idempotency_key`, `status`, `payment_status`, `payment_provider`, `merchant_account_id`, `payment_ref`, `refunded_amount`, `receipt_number`, `receipt_issued_at` | Idempotency unique constraint; scoped unique index `UNIQUE(payment_provider, merchant_account_id, payment_ref)` with mandatory `NOT NULL` columns. `payment_status` & `refunded_amount` serve as cached aggregates. |
-| **`order_payments`** | `INSERT`, `SELECT` | `order_id`, `payment_seq`, `amount_usd`, `amount_khr`, `payment_method`, `payment_provider`, `merchant_account_id`, `payment_ref`, `cashier_id` | Immutable discrete payment transaction ledger. Unique key `(order_id, payment_seq)`. Scoped index `(payment_provider, merchant_account_id, payment_ref)`. |
-| **`order_refunds`** | `INSERT`, `SELECT` | `order_id`, `refund_seq`, `amount_usd`, `refund_method`, `reason`, `cashier_id`, `manager_user_id`, `attestation_status` | Discrete refund transaction ledger supporting multiple partial refunds. Unique key `(order_id, refund_seq)`. Records administrative attestation. |
-| **`webhook_events`** | `INSERT`, `SELECT` | `provider`, `event_id`, `payment_ref`, `bank_timestamp`, `processing_status` | Idempotency log for automated bank webhooks. Unique index on `(provider, event_id)`. Drift check rejects `|bank_ts - NOW()| > 300s`. |
+| **`orders`** | `INSERT`, `UPDATE`, `SELECT` | `idempotency_key`, `status`, `payment_status`, `payment_provider`, `merchant_account_id`, `payment_ref`, `refunded_amount`, `receipt_number`, `receipt_issued_at` | Operational entity; client idempotency unique constraint `UNIQUE(idempotency_key)`. `payment_status` & `refunded_amount` serve as cached summary aggregates. |
+| **`order_payments`** | `INSERT`, `SELECT` | `order_id`, `payment_seq`, `amount_usd`, `amount_khr`, `exchange_rate`, `payment_method`, `payment_provider`, `merchant_account_id`, `payment_ref`, `cashier_id`, `created_at` | **Authoritative Payment Transaction Ledger.** Composite unique deduplication index `UNIQUE(payment_provider, merchant_account_id, payment_ref)` with strictly `NOT NULL` columns. Unique key `(order_id, payment_seq)`. Client retries deduplicated via `orders.idempotency_key`. |
+| **`order_refunds`** | `INSERT`, `SELECT` | `order_id`, `refund_seq`, `amount_usd`, `amount_khr`, `exchange_rate`, `refund_method`, `reason`, `cashier_id`, `manager_user_id`, `attestation_status`, `created_at` | Discrete refund transaction ledger supporting multiple partial refunds. Unique key `(order_id, refund_seq)`. Records administrative attestation. Event timestamped. |
+| **`webhook_events`** | `INSERT`, `SELECT` | `provider`, `event_id`, `payment_ref`, `bank_timestamp`, `processing_status` | Idempotency & replay defense log. Unique constraint on `(provider, event_id)`. Replays inside 5-min window and duplicate deliveries caught here without duplicate payment creation. Drift check rejects `|bank_ts - NOW()| > 300s`. |
 | **`order_items`** | `INSERT`, `SELECT` | `order_id`, `item_type`, `service_id`, `product_id`, `qty`, `price_usd` | Standard transactional insert inside order creation transaction. |
-| **`bays`** | `SELECT`, `UPDATE` | `status`, `reservation_state`, `hold_expires_at`, `current_order_id`, `occupied_at`, `last_freed_at` | **Atomic conditional lock:** `UPDATE bays ... WHERE id = ? AND status = 'free'`. Never marks occupied bay as reserved. Never auto-releases busy bay by timeout. Expiry sweep strictly at 3 minutes with safety guard: `WHERE reservation_state = 'intake_reserved' AND status != 'busy' AND physical_occupancy = 'vacant' AND current_order_id IS NULL AND hold_expires_at < NOW()`. |
+| **`bays`** | `SELECT`, `UPDATE` | `status`, `reservation_state`, `hold_expires_at`, `current_order_id`, `occupied_at`, `last_freed_at` | **Atomic conditional lock:** `UPDATE bays ... WHERE id = ? AND status = 'free'`. Never marks occupied bay as reserved. Never auto-releases busy bay by timeout. Expiry sweep strictly at 3 minutes (180s) with boundary condition `hold_expires_at <= CURRENT_TIMESTAMP` and safety guards: `WHERE reservation_state = 'intake_reserved' AND status != 'busy' AND physical_occupancy = 'vacant' AND current_order_id IS NULL`. |
 | **`bay_history`** | `INSERT` | `order_id`, `bay_id`, `action`, `performed_by`, `performed_by_name`, `reason` | Append-only audit ledger for every bay movement. |
 | **`order_tasks`** | `INSERT`, `UPDATE` | `order_id`, `sequence`, `task_type`, `bay_id`, `status`, `started_at`, `completed_at` | Enforces single-execution stage completions via `WHERE sequence = ? AND status = 'waiting'`. |
 | **`order_washers`** | `INSERT`, `UPDATE` | `order_id`, `task_id`, `washer_id`, `commission_usd`, `commission_idempotency_key` | Unique constraint `UNIQUE(commission_idempotency_key)`. Key derived deterministically: `sha256("comm_v1_order_{$orderId}_task_{$taskId}_worker_{$workerId}")` ensuring retry safety and multi-task earnings. |
@@ -443,12 +448,14 @@ Revenue reports must calculate financial performance strictly using actual payme
 
 ```sql
 -- Certified Two-Tier Financial Revenue Aggregation Query:
--- Bridges historical legacy records and post-cutover transaction ledgers
+-- Uses exact event timestamps: payments report on payment date, refunds report on refund date.
+-- Supports dual-currency reporting and preserves frozen historical exchange rates.
 
 WITH CutoverSetting AS (
+    -- Fails closed: if unconfigured, defaults to epoch, ensuring new orders fail closed into ledger tier
     SELECT COALESCE(
         (SELECT setting_value FROM system_settings WHERE setting_key = 'receipt_v2_cutover_timestamp'),
-        '2099-12-31 23:59:59'
+        '1970-01-01 00:00:00'
     ) AS cutover_ts
 ),
 
@@ -456,23 +463,63 @@ WITH CutoverSetting AS (
 Tier1_PostCutover AS (
     SELECT 
         'post_cutover_ledger' AS reporting_tier,
+        
+        -- 1. Gross Payments Collected: filtered by payment event timestamp (p.created_at)
         COALESCE((
-            SELECT SUM(p.amount_usd) 
+            SELECT SUM(p.amount_usd + (p.amount_khr / p.exchange_rate))
             FROM order_payments p
             JOIN orders o ON p.order_id = o.id
             JOIN CutoverSetting c ON 1=1
             WHERE o.created_at >= c.cutover_ts
-              AND o.created_at BETWEEN :start_date AND :end_date
+              AND p.created_at BETWEEN :start_date AND :end_date
         ), 0) AS gross_payments_collected_usd,
 
         COALESCE((
-            SELECT SUM(r.amount_usd) 
+            SELECT SUM(p.amount_usd)
+            FROM order_payments p
+            JOIN orders o ON p.order_id = o.id
+            JOIN CutoverSetting c ON 1=1
+            WHERE o.created_at >= c.cutover_ts
+              AND p.created_at BETWEEN :start_date AND :end_date
+        ), 0) AS gross_payments_usd_native,
+
+        COALESCE((
+            SELECT SUM(p.amount_khr)
+            FROM order_payments p
+            JOIN orders o ON p.order_id = o.id
+            JOIN CutoverSetting c ON 1=1
+            WHERE o.created_at >= c.cutover_ts
+              AND p.created_at BETWEEN :start_date AND :end_date
+        ), 0) AS gross_payments_khr_native,
+
+        -- 2. Total Refunds Issued: filtered strictly by refund event timestamp (r.created_at)
+        -- An order created on Day 1 but refunded on Day 2 reports its refund on Day 2!
+        COALESCE((
+            SELECT SUM(r.amount_usd + (r.amount_khr / r.exchange_rate))
             FROM order_refunds r
             JOIN orders o ON r.order_id = o.id
             JOIN CutoverSetting c ON 1=1
             WHERE o.created_at >= c.cutover_ts
-              AND o.created_at BETWEEN :start_date AND :end_date
+              AND r.created_at BETWEEN :start_date AND :end_date
         ), 0) AS total_refunds_usd,
+
+        COALESCE((
+            SELECT SUM(r.amount_usd)
+            FROM order_refunds r
+            JOIN orders o ON r.order_id = o.id
+            JOIN CutoverSetting c ON 1=1
+            WHERE o.created_at >= c.cutover_ts
+              AND r.created_at BETWEEN :start_date AND :end_date
+        ), 0) AS total_refunds_usd_native,
+
+        COALESCE((
+            SELECT SUM(r.amount_khr)
+            FROM order_refunds r
+            JOIN orders o ON r.order_id = o.id
+            JOIN CutoverSetting c ON 1=1
+            WHERE o.created_at >= c.cutover_ts
+              AND r.created_at BETWEEN :start_date AND :end_date
+        ), 0) AS total_refunds_khr_native,
 
         COALESCE((
             SELECT SUM(o.total_usd) 
@@ -510,7 +557,11 @@ Tier2_PreCutover AS (
 -- Unified Executive Financial Statement
 SELECT 
     (t1.gross_payments_collected_usd + t2.gross_payments_collected_usd) AS gross_payments_collected_usd,
+    t1.gross_payments_usd_native AS gross_payments_usd_native,
+    t1.gross_payments_khr_native AS gross_payments_khr_native,
     (t1.total_refunds_usd + t2.total_refunds_usd) AS total_refunds_usd,
+    t1.total_refunds_usd_native AS total_refunds_usd_native,
+    t1.total_refunds_khr_native AS total_refunds_khr_native,
     ((t1.gross_payments_collected_usd + t2.gross_payments_collected_usd) - 
      (t1.total_refunds_usd + t2.total_refunds_usd)) AS net_retained_payments_usd,
     (t1.unpaid_voids_usd + t2.unpaid_voids_usd) AS unpaid_voids_usd

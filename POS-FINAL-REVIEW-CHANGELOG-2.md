@@ -3,7 +3,11 @@
 **Document ID:** POS-REV-2026-002  
 **Project:** Car-WashService  
 **Date:** November 6, 2026  
-**Status:** Complete Architectural Revision – Awaiting Management Approval  
+**Status:** Superseded by Round 3 Revisions ([POS-FINAL-REVIEW-CHANGELOG-3.md](file:///C:/xampp/htdocs/Car-WashService/POS-FINAL-REVIEW-CHANGELOG-3.md)) – Awaiting Management Approval  
+
+> [!NOTE]
+> **Round 3 Final Revisions Available:**  
+> For subsequent technical corrections concerning fail-closed cutover safety, event-timestamp revenue reporting, dual-currency and frozen exchange rate preservation, authoritative payment reference uniqueness on `order_payments`, bank webhook signature tests, and 5-minute replay defense, refer to **[POS-FINAL-REVIEW-CHANGELOG-3.md](file:///C:/xampp/htdocs/Car-WashService/POS-FINAL-REVIEW-CHANGELOG-3.md)**.
 
 ---
 
