@@ -3,7 +3,7 @@
 **Document ID:** POS-PLN-2026-FINAL
 **Project:** Car-WashService (Local Counter Terminal)
 **Scope:** Phased Engineering Roadmap, Technical Migration, Verification Plan, Release Governance
-**Date:** November 8, 2026 (Updated - Round 11)
+**Date:** November 8, 2026 (Updated - Round 12 Closure)
 **Status:** Engineering Proposal – Awaiting Separate Executive Authorization (NOT Production-Ready Until Released)
 
 ---
@@ -75,11 +75,11 @@ Phase 0 strictly prohibits and does not require:
   3. **Authentic Reference Capture:** Cashier reads the genuine bank transaction reference code (`payment_ref`) from the bank notification and enters it into the POS interface.
   4. **Customer Screen Rejection:** Smartphone screens presented by customers are strictly rejected as proof of payment.
   5. **No Synthetic TRX:** Backend generation of synthetic reference strings (`TRX-` via `uniqid()`) is prohibited.
-* **The MariaDB Nullable Column Vulnerability:**
+* **The MariaDB Nullable Column Vulnerability & Two-Table Solution:**
   - Under SQL standards, `NULL != NULL` in unique indexes. If composite columns (`provider`, `merchant_account_id`, `payment_ref`) allow `NULL`, multiple identical rows with `NULL` bypass duplicate protection.
-  - To enforce 100% database-level integrity, digital payments are separated from cash across two tables:
-    1. General Tender Ledger (`order_payments`): Records financial amounts for all tenders; cash payments carry zero digital reference requirements.
-    2. Dedicated Digital Ledger (`order_digital_payments`): Mandatory `NOT NULL` for `provider`, `merchant_account_id`, and `payment_ref`, enforced by `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)` with explicit foreign keys to `order_payments` and `orders`.
+  - To enforce 100% database-level integrity, digital payments are separated from cash across two tables with restrictive deletion (`ON DELETE RESTRICT`):
+    1. General Tender Ledger (`order_payments`): Primary key `(id, order_id)`. Records financial amounts for all tenders; cash payments carry zero digital reference requirements.
+    2. Dedicated Digital Ledger (`order_digital_payments`): Primary key `(payment_id)`. Composite foreign key `FOREIGN KEY (payment_id, order_id) REFERENCES order_payments(id, order_id) ON DELETE RESTRICT` guarantees that digital details **can never disagree with parent tender order assignments**. Mandatory `NOT NULL` for `provider`, `merchant_account_id`, and `payment_ref`, enforced by `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)`.
 * **Transaction Validation & Rollback Contract:**
   - Database constraints alone cannot verify that every `khqr` tender possesses a corresponding detail row. This is enforced via backend application transactions:
     * Each digital payment must have exactly one row in `order_digital_payments`.
@@ -92,7 +92,7 @@ Phase 0 strictly prohibits and does not require:
 
 ### 1.2 TD-2: Bank Reversal Outcomes, Timeout Safety & Unapproved Waiting Periods (UTD-3)
 * **Three Distinct Reversal Outcomes:**
-  1. *Definitive Bank Rejection:* Bank clearinghouse explicitly rejects the reversal request.
+  1. *Definitive Bank Rejection:* Bank clearinghouse explicitly rejects the reversal request. Requires verifiable external bank confirmation.
   2. *Request Timeout with Unknown Bank Outcome:* Network disconnect or gateway timeout occurs. **A timeout must NEVER be treated as a definitive rejection.**
   3. *Confirmed Bank Settlement:* Reversal cleared and credited to the customer.
 * **Safety Reality on Offline LAN Counter:**
@@ -121,6 +121,7 @@ Phase 0 strictly prohibits and does not require:
 * **Elimination of Unsupported Assumptions:**
   - Removed undefined flags (`is_initial_migration`) and non-existent fields (the schema in [init.php](database/init.php#L242-L280) possesses `total_usd`, `paid_at`, and `cancelled_at`, but **does NOT contain `orders.refunded_amount`**).
 * **Period-Aware Fallback Principles:**
+  - Differentiates cash received, revenue earned, and accounting-period recognition.
   - Payment recognition and refund recognition are evaluated independently within `[start_date, end_date)`.
   - Historical revenue is **never silently omitted** when an order has both historical payment information and subsequent ledger payments.
   - A subsequent ledger payment must **never be automatically added** to the full historical order total.
@@ -153,10 +154,10 @@ Phase 0 strictly prohibits and does not require:
 | Table Name | Operation | Proposed Columns / Modifications | Purpose |
 | :--- | :--- | :--- | :--- |
 | `orders` | Read / Update | `receipt_issued_at DATETIME NULL`<br/>`receipt_number VARCHAR(50) NULL`<br/>`discount_approved_by INT NULL` | Decouple electronic receipt from physical print; track manager discount authorization. |
-| `order_payments` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`payment_method ENUM('cash','khqr') NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`exchange_rate INT NOT NULL`<br/>`cashier_id INT NOT NULL`<br/>`recorded_at DATETIME NOT NULL`<br/>`CONSTRAINT fk_order_payments_order FOREIGN KEY (order_id) REFERENCES orders(id)`<br/>`INDEX idx_order_payments_order (order_id)`<br/>`INDEX idx_order_payments_recorded (recorded_at)` | General tender ledger for cash & digital payments; explicit foreign keys; cash carries no digital reference constraints. |
-| `order_digital_payments` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`payment_id INT NOT NULL UNIQUE`<br/>`order_id INT NOT NULL`<br/>`provider VARCHAR(50) NOT NULL`<br/>`merchant_account_id VARCHAR(50) NOT NULL`<br/>`payment_ref VARCHAR(100) NOT NULL`<br/>`provider_event_at DATETIME NULL`<br/>`created_at DATETIME NOT NULL`<br/>`CONSTRAINT fk_digital_payments_payment FOREIGN KEY (payment_id) REFERENCES order_payments(id) ON DELETE CASCADE`<br/>`CONSTRAINT fk_digital_payments_order FOREIGN KEY (order_id) REFERENCES orders(id)`<br/>`CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)` | Dedicated digital transaction ledger; mandatory non-null attributes enforce 100% duplicate protection without nullable loopholes. |
-| `order_refunds` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`payment_id INT NULL`<br/>`refund_seq INT NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`settlement_status ENUM('authorized_pending','cash_disbursed','bank_reversal_pending','settled','failed','bank_reversal_timeout','bank_reversal_blocked','cancelled')`<br/>`authorized_by INT NOT NULL`<br/>`disbursed_at DATETIME NULL`<br/>`settled_at DATETIME NULL`<br/>`bank_reversal_ref VARCHAR(100) NULL`<br/>`replaced_refund_id INT NULL`<br/>`CONSTRAINT fk_order_refunds_order FOREIGN KEY (order_id) REFERENCES orders(id)` | Finite state machine ledger for customer refunds and reversals. |
-| `order_refund_events` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`refund_id INT NOT NULL`<br/>`event_type VARCHAR(50) NOT NULL`<br/>`from_status VARCHAR(50) NOT NULL`<br/>`to_status VARCHAR(50) NOT NULL`<br/>`actor_id INT NOT NULL`<br/>`notes TEXT NULL`<br/>`created_at DATETIME NOT NULL`<br/>`CONSTRAINT fk_order_refund_events_refund FOREIGN KEY (refund_id) REFERENCES order_refunds(id) ON DELETE CASCADE` | Append-only audit history for refund state transitions. |
+| `order_payments` | Create (New Table) | `id INT AUTO_INCREMENT`<br/>`order_id INT NOT NULL`<br/>`payment_method ENUM('cash','khqr') NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`exchange_rate INT NOT NULL`<br/>`cashier_id INT NOT NULL`<br/>`recorded_at DATETIME NOT NULL`<br/>`PRIMARY KEY (id, order_id)`<br/>`CONSTRAINT fk_order_payments_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT`<br/>`INDEX idx_order_payments_order (order_id)`<br/>`INDEX idx_order_payments_recorded (recorded_at)` | General tender ledger for cash & digital payments; composite primary key enforces order alignment; restrictive deletion protects audit history. |
+| `order_digital_payments` | Create (New Table) | `payment_id INT NOT NULL PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`provider VARCHAR(50) NOT NULL`<br/>`merchant_account_id VARCHAR(50) NOT NULL`<br/>`payment_ref VARCHAR(100) NOT NULL`<br/>`provider_event_at DATETIME NULL`<br/>`created_at DATETIME NOT NULL`<br/>`CONSTRAINT fk_digital_tender FOREIGN KEY (payment_id, order_id) REFERENCES order_payments(id, order_id) ON DELETE RESTRICT`<br/>`CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)`<br/>`INDEX idx_digital_order (order_id)` | Dedicated digital transaction ledger; composite foreign key prevents order disagreement; mandatory non-null attributes enforce 100% duplicate protection without nullable loopholes. |
+| `order_refunds` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`payment_id INT NULL`<br/>`refund_seq INT NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`settlement_status ENUM('authorized_pending','cash_disbursed','bank_reversal_pending','settled','failed','bank_reversal_timeout','bank_reversal_blocked','cancelled')`<br/>`authorized_by INT NOT NULL`<br/>`disbursed_at DATETIME NULL`<br/>`settled_at DATETIME NULL`<br/>`bank_reversal_ref VARCHAR(100) NULL`<br/>`replaced_refund_id INT NULL`<br/>`CONSTRAINT fk_order_refunds_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT` | Finite state machine ledger for customer refunds and reversals; restrictive deletion. |
+| `order_refund_events` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`refund_id INT NOT NULL`<br/>`event_type VARCHAR(50) NOT NULL`<br/>`from_status VARCHAR(50) NOT NULL`<br/>`to_status VARCHAR(50) NOT NULL`<br/>`actor_id INT NOT NULL`<br/>`notes TEXT NULL`<br/>`created_at DATETIME NOT NULL`<br/>`CONSTRAINT fk_order_refund_events_refund FOREIGN KEY (refund_id) REFERENCES order_refunds(id) ON DELETE RESTRICT` | Append-only audit history for refund state transitions; restrictive deletion. |
 | `bays` | Update | Index on `(status, is_active)` | Atomic conditional reservation locks. |
 | `bay_tasks` | Update | `task_sequence INT NOT NULL DEFAULT 1`<br/>`status ENUM('waiting','in_progress','completed','pending_prereq')` | Enforce Lift First $\rightarrow$ Wash Second staging. |
 | `settings` | Read / Insert | `receipt_v2_cutover_timestamp DATETIME` | Authorized cutover date. |
@@ -235,7 +236,7 @@ WHERE o.created_at < (SELECT setting_value FROM settings WHERE setting_key = 're
 ### WP-4: Discrete Payment & Refund Ledgers
 * **Files:** [index.php](api/pos/index.php), [CashierControl.php](core/CashierControl.php).
 * **Specifications:**
-  1. Record incoming tenders across `order_payments` (financial amounts) and `order_digital_payments` (mandatory non-null provider/ref).
+  1. Record incoming tenders across `order_payments` (financial amounts) and `order_digital_payments` (mandatory non-null provider/ref) with `ON DELETE RESTRICT`.
   2. Implement refund finite state machine in `order_refunds`:
      - Manager PIN required for `authorized_pending`.
      - Atomic conditional disbursement lock (`rowCount === 1` opens cash drawer).
