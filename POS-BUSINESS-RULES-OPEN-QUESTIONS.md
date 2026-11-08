@@ -3,7 +3,7 @@
 **Document ID:** POS-OQ-2026-FINAL
 **Project:** Car-WashService
 **Scope:** Confirmed Executive Decisions, Source Harmonization, Phase 1 Technical Design Specifications, Unresolved Dependencies
-**Date:** November 8, 2026 (Updated - Round 9)
+**Date:** November 8, 2026 (Updated - Round 10)
 **Status:** Executive Decisions Confirmed by Business Owner – Technical Design & Dependencies Documented for Engineering Planning (Awaiting Separate Executive Authorization)
 
 ---
@@ -20,7 +20,7 @@ All six business policy questions are now **CLOSED** as executive policy. These 
 | **2** | **Receipt Printing Gate** | **Advisory Printing (Electronic Gate)** | Electronic receipt issuance (`receipt_issued_at`) and confirmed payment (`payment_status = 'paid'`) are the sole service gate pass. Thermal printer paper jams never block service. | **Approved Executive Policy** (Any physical-printing gate is an unapproved proposal) |
 | **3** | **Walk-In Identity & Schema** | **Default to `'Walk-in Guest'`** | Retains existing `customer_name VARCHAR(100) NOT NULL` in MariaDB schema without high-risk `ALTER TABLE`. Plate and vehicle category captured via existing cashier flow. | **Approved Executive Policy** |
 | **4** | **Historical Orders Reconciliation** | **Preserve Intact + Exceptions Tab** | Original records are preserved untouched (no blanket overwrites). A dedicated **"Historical Unreconciled Exceptions"** tab is added to owner reports for manual review. | **Approved Executive Policy** (Algorithm & schema limitations documented in UTD-1) |
-| **5** | **KHQR Verification Channel** | **Store Counter Phone + Soundbox** | POS counter operates 100% on local LAN using store counter phone notifications and soundbox. No public static IP or bank webhook onboarding in initial scope. | **Approved Executive Policy** (Reference uniqueness & format remain UTD-4) |
+| **5** | **KHQR Verification Channel** | **Store Counter Phone + Soundbox** | POS counter operates 100% on local LAN using store counter phone notifications and soundbox. No public static IP or bank webhook onboarding in initial scope. | **Approved Executive Policy** (Two-table schema & reference format remain UTD-4) |
 | **6** | **Financial Reporting Separation** | **Net Settled Revenue $\ne$ Net Operating Profit** | Reports strictly distinguish **Net Settled Revenue** (Cash tender inflow minus settled refunds) from **Net Operating Profit**. Missing COGS flagged, never assumed $0.00. | **Approved Executive Policy** (Timestamps & fallbacks documented in UTD-2 & UTD-1) |
 
 ---
@@ -135,7 +135,7 @@ While executive business decisions are confirmed, several technical design areas
 |  - UTD-1: Historical reporting limitations, period boundaries & exceptions    |
 |  - UTD-2: Reporting timestamp definitions & schema availability               |
 |  - UTD-3: Bank reversal finality & lack of automated external proof           |
-|  - UTD-4: Scoped digital reference uniqueness & nullable column risks         |
+|  - UTD-4: Two-table digital constraint schema & unverified reference formats  |
 +-------------------------------------------------------------------------------+
 ```
 
@@ -144,105 +144,124 @@ While executive business decisions are confirmed, several technical design areas
 ### UTD-1: Historical Financial Reporting, Schema Limits & Reconciliation Exceptions
 
 #### Problem Statement:
-Earlier proposals suffered from two critical defects:
-1. **Reliance on Non-Existent Source Fields:** The live MariaDB schema ([init.php](database/init.php#L242-L280)) does **NOT contain an `orders.refunded_amount` column**, nor does an `is_initial_migration` flag exist. Inventing these fields in reporting queries creates fatal SQL runtime errors.
-2. **Coupled All-or-Nothing Fallbacks:** Assuming that the presence of a post-cutover ledger row means historical fields can be ignored—or vice versa—causes valid transactions to disappear. For example, dropping a historical payment because a post-cutover partial refund exists, or omitting a historical payment because an additional post-cutover balance payment was recorded.
+Earlier proposals contained two fatal flaws:
+1. **Unsafe Fallback Omission:** If an order had both a historical payment record and a subsequent post-cutover ledger payment, earlier logic completely omitted the historical order from historical reports. This resulted in silent revenue loss during reporting periods.
+2. **Unsupported Schema Assumptions:** The live MariaDB schema ([init.php](database/init.php#L242-L280)) possesses `total_usd`, `paid_at`, `payment_status`, and `cancelled_at`, but **does NOT contain `orders.refunded_amount`**, nor does any payment ledger exist prior to cutover. Inventing unverified formulas or assuming historical refunds can be calculated from non-existent columns creates false financial reports.
 
-#### Analysis of Actual Source Fields ([init.php](database/init.php#L242-L280)):
-The existing `orders` table contains only:
-- `total_usd` (DECIMAL 10,2): The static total price of the order.
-- `payment_status` (VARCHAR 20): Status string (`'unpaid'`, `'paid'`, `'cancelled'`).
-- `paid_at` (DATETIME): Timestamp when marked paid.
-- `created_at` (DATETIME): Timestamp when order was created.
-- `cancelled_at` (DATETIME): Timestamp when order was cancelled.
-
-Notice what is **missing** from the source schema:
-- No discrete payment ledger exists prior to cutover (no historical payment transaction rows).
-- No historical refund amount column exists (`refunded_amount` is absent).
-- No record of historical cash disbursement vs. digital credit exists.
-
-#### Architectural Principles for Period-Aware Reporting:
-
+#### Reporting Principles for Historical Financials:
 1. **Independent Evaluation of Payments and Refunds:**
-   Payment recognition and refund recognition are completely decoupled. A refund recorded in `order_refunds` never alters, suppresses, or replaces an order's payment recognition, and a payment never suppresses a refund.
+   Payment recognition and refund recognition are evaluated completely independently. A post-cutover refund in `order_refunds` never causes a historical payment in `orders` to disappear, and a payment never suppresses a refund.
+2. **Strict Half-Open Period Boundaries:**
+   Every event is bounded strictly by `[:start_timestamp, :end_timestamp)`. Events occurring before the start date or on/after the end date are excluded from the period.
+3. **Confirmed vs. Unreconciled Exception Distinction:**
+   - **Confirmed Revenue:** Includes all new ledger payments in `order_payments` within the period, plus un-conflicted pre-cutover orders where `payment_status = 'paid'` and no subsequent ledger adjustments exist.
+   - **Unreconciled Historical Exceptions:** If a pre-cutover order has subsequent ledger payments or an unrecorded cancellation refund, the unreconstructable amount is **NEVER silently included in confirmed revenue** (which would risk double-counting) and **NEVER treated as zero or discarded** (which would understate assets). It is isolated into an explicit **"Unreconciled Historical Amount (Under Audit)"** metric and listed line-by-line on the Exceptions tab.
 
-2. **Strict Period Boundaries:**
-   Every event is evaluated strictly within a half-open interval `[:start_timestamp, :end_timestamp)`. Events occurring before `:start_timestamp` or on/after `:end_timestamp` are strictly excluded from the period's receipts.
+#### Realistic Historical Scenarios & Exact Handling:
 
-3. **Pre-Cutover Original Payments with No Ledger Records:**
-   For orders created before cutover (`orders.created_at < :cutover_ts`), if `orders.payment_status = 'paid'` and no records exist in `order_payments` for that order, the payment is recognized in the period matching `COALESCE(orders.paid_at, orders.created_at)`.
+##### Example 1: Fully Historical Paid Order (Unconflicted)
+* **Preconditions:** Order #101 created `2026-10-15 10:00:00`, `paid_at = '2026-10-15 10:02:00'`, `total_usd = 25.00`, `payment_status = 'paid'`. No records exist in `order_payments` or `order_refunds`.
+* **October 2026 Report:** Confirmed Historical Payment = +$25.00. Settled Refunds = $0.00. Net Settled Revenue = +$25.00.
+* **November 2026 Report:** Excluded by period boundary ($0.00).
+* **Audit Result:** 100% confirmed; zero exceptions.
 
-4. **Post-Cutover Payments on Pre-Cutover Orders (Split Payments):**
-   If an order created before cutover receives a payment after cutover, that payment is recorded as a discrete row in `order_payments` with `recorded_at >= :cutover_ts`. This payment belongs strictly to the reporting period of its `recorded_at`.
-   - *Double-Counting Safeguard & Exception Trigger:* If `orders.payment_status = 'paid'` was *already* set historically on that order, counting both historical `orders.total_usd` AND the new `order_payments.amount_usd` would double-count revenue across lifetime reports if `total_usd` already represented the full order value. Conversely, suppressing one would miss legitimately collected funds if `total_usd` was unpaid or partial.
-   - *Resolution:* Because the legacy schema cannot prove whether historical `total_usd` was partially or fully collected, any pre-cutover order with `payment_status = 'paid'` that receives subsequent payments in `order_payments` is flagged as an **Ambiguous Historical Split-Payment Exception** on the Exceptions tab for owner review, rather than guessing a mathematical formula.
+##### Example 2: Historical Order with Subsequent Partial Ledger Payment (Split Payment)
+* **Preconditions:** Order #102 created `2026-10-20 14:00:00`, `paid_at = '2026-10-20 14:05:00'`, `total_usd = 50.00`, `payment_status = 'paid'`. Cutover occurs on November 1. On November 10, an additional payment of $20.00 is recorded in `order_payments` (`recorded_at = '2026-11-10 09:00:00'`).
+* **Source Limitation:** The legacy schema has no deposit column. Was $50 the full total and $20 a late balance, or was $30 paid in October and $20 in November? The schema cannot prove this.
+* **November 2026 Report:** Confirmed Ledger Payment = +$20.00 (from `order_payments`).
+* **October 2026 Report / Lifetime Reconciliation:**
+  - Confirmed Revenue does NOT include the full $50 (prevents double-counting).
+  - Confirmed Revenue does NOT treat the historical payment as $0.00 (prevents silent omission).
+  - Order #102 is flagged as a **Historical Split-Payment Exception**: Confirmed Ledger = $20.00, Unreconciled Historical Amount = $50.00 (Under Audit). Displayed prominently on the Exceptions tab for executive write-off or confirmation.
 
-5. **Post-Cutover Refunds on Pre-Cutover Orders:**
-   A refund issued after cutover against a pre-cutover order is recorded in `order_refunds` with its own `disbursed_at` (cash) or `settled_at` (digital). It is recognized strictly in the post-cutover period of its disbursement/settlement timestamp. The pre-cutover payment remains intact in its historical period.
+##### Example 3: Historical Order with Multiple Post-Cutover Partial Refunds
+* **Preconditions:** Order #103 created `2026-10-05 08:00:00`, `paid_at = '2026-10-05 08:05:00'`, `total_usd = 60.00`, `payment_status = 'paid'`. Zero rows in `order_payments`. After cutover, two partial refunds are issued: Refund A for $10.00 on November 12 (`disbursed_at = '2026-11-12'`), and Refund B for $15.00 on November 15 (`disbursed_at = '2026-11-15'`).
+* **October 2026 Report:** Confirmed Historical Payment = +$60.00. Settled Refunds = $0.00. Net Settled Revenue = +$60.00. (The subsequent refunds do NOT cause the historical payment to disappear).
+* **November 2026 Report:** Historical Payments = $0.00. Settled Refunds = +$25.00 ($10 + $15 from `order_refunds`). Net Settled Revenue = -$25.00.
+* **Audit Result:** Payments and refunds are recognized independently in their respective event periods. Zero omission, zero double-counting.
 
-6. **Multiple Partial Refunds:**
-   Each partial refund is a discrete row in `order_refunds`. Each is recognized independently in the period containing its respective `disbursed_at` or `settled_at`.
-
-7. **Historical Pre-Cutover Cancellations:**
-   For pre-cutover orders with `cancelled_at IS NOT NULL` and `payment_status = 'paid'`, the actual money returned cannot be reconstructed because `refunded_amount` does not exist in the schema. The system **does not invent a refund value of $0.00 or total_usd**. These orders are classified as **Historical Unreconciled Cancellation Exceptions** and displayed on the Exceptions tab.
+##### Example 4: Historical Cancellation with No Reconstructable Refund Amount
+* **Preconditions:** Order #104 created `2026-10-18 11:00:00`, `paid_at = '2026-10-18 11:02:00'`, `total_usd = 40.00`, `payment_status = 'paid'`, `cancelled_at = '2026-10-18 11:30:00'`.
+* **Source Limitation:** `orders.refunded_amount` does not exist in the database. The system cannot verify whether the customer received $40 cash back, $20 partial refund, or zero.
+* **Accounting Treatment:** The system **does not invent a formula**. It does not assume $40 was retained (overstating revenue) and does not assume $40 was refunded (understating revenue).
+* **Audit Result:** Order #104 is excluded from Confirmed Revenue and recorded as a **Historical Unreconciled Cancellation Exception** with $40.00 flagged under audit for owner manual review.
 
 #### Pseudocode: Period-Aware Financial Query Logic
 ```
 FUNCTION GeneratePeriodReport(start_timestamp, end_timestamp, cutover_timestamp):
     // -------------------------------------------------------------
-    // 1. NEW LEDGER PAYMENTS (Tender collected within period)
+    // 1. CONFIRMED LEDGER PAYMENTS (Collected in period)
     // -------------------------------------------------------------
-    ledger_payments = SELECT SUM(amount_usd) FROM order_payments
-                      WHERE recorded_at >= start_timestamp
-                        AND recorded_at < end_timestamp;
+    confirmed_ledger_payments = SELECT COALESCE(SUM(amount_usd), 0.00)
+                                FROM order_payments
+                                WHERE recorded_at >= start_timestamp
+                                  AND recorded_at < end_timestamp;
 
     // -------------------------------------------------------------
-    // 2. HISTORICAL PAYMENTS (Pre-cutover orders without ledger rows)
+    // 2. CONFIRMED UNCONFLICTED HISTORICAL PAYMENTS (Pre-cutover)
     // Evaluated only if the reporting window covers pre-cutover dates
     // -------------------------------------------------------------
-    historical_payments = 0;
+    confirmed_historical_payments = 0.00;
     IF start_timestamp < cutover_timestamp THEN
         historical_effective_end = MIN(end_timestamp, cutover_timestamp);
 
-        historical_payments = SELECT SUM(total_usd) FROM orders o
-                              WHERE o.created_at < cutover_timestamp
-                                AND o.payment_status = 'paid'
-                                AND COALESCE(o.paid_at, o.created_at) >= start_timestamp
-                                AND COALESCE(o.paid_at, o.created_at) < historical_effective_end
-                                // Exclude orders with post-cutover ledger payments to prevent double-counting
-                                AND NOT EXISTS (
-                                    SELECT 1 FROM order_payments op
-                                    WHERE op.order_id = o.id
-                                );
+        confirmed_historical_payments = SELECT COALESCE(SUM(total_usd), 0.00)
+                                        FROM orders o
+                                        WHERE o.created_at < cutover_timestamp
+                                          AND o.payment_status = 'paid'
+                                          AND o.cancelled_at IS NULL
+                                          AND COALESCE(o.paid_at, o.created_at) >= start_timestamp
+                                          AND COALESCE(o.paid_at, o.created_at) < historical_effective_end
+                                          // Exclude split orders with post-cutover ledger payments to prevent double-counting
+                                          AND NOT EXISTS (
+                                              SELECT 1 FROM order_payments op
+                                              WHERE op.order_id = o.id
+                                          );
     END IF;
 
     // -------------------------------------------------------------
-    // 3. SETTLED REFUNDS (Money disbursed or settled within period)
+    // 3. CONFIRMED SETTLED REFUNDS (Disbursed/Settled in period)
     // -------------------------------------------------------------
-    settled_refunds = SELECT SUM(amount_usd) FROM order_refunds
-                      WHERE ((settlement_status = 'cash_disbursed' AND disbursed_at >= start_timestamp AND disbursed_at < end_timestamp)
-                          OR (settlement_status = 'settled' AND settled_at >= start_timestamp AND settled_at < end_timestamp));
+    confirmed_settled_refunds = SELECT COALESCE(SUM(amount_usd), 0.00)
+                                FROM order_refunds
+                                WHERE ((settlement_status = 'cash_disbursed' AND disbursed_at >= start_timestamp AND disbursed_at < end_timestamp)
+                                    OR (settlement_status = 'settled' AND settled_at >= start_timestamp AND settled_at < end_timestamp));
 
     // -------------------------------------------------------------
-    // 4. NET SETTLED REVENUE FOR PERIOD
+    // 4. CONFIRMED NET SETTLED REVENUE
     // -------------------------------------------------------------
-    gross_period_revenue = ledger_payments + historical_payments;
-    net_settled_revenue = gross_period_revenue - settled_refunds;
+    gross_confirmed_revenue = confirmed_ledger_payments + confirmed_historical_payments;
+    net_settled_revenue = gross_confirmed_revenue - confirmed_settled_refunds;
 
     // -------------------------------------------------------------
-    // 5. IDENTIFY RECONCILIATION EXCEPTIONS (Flagged for Owner Tab)
+    // 5. UNRECONCILED HISTORICAL EXCEPTIONS (Flagged for Review Tab)
     // -------------------------------------------------------------
-    historical_exceptions = SELECT o.id, o.order_number, o.total_usd, 'Historical Split Payment' AS reason
-                            FROM orders o
-                            WHERE o.created_at < cutover_timestamp
-                              AND o.payment_status = 'paid'
-                              AND EXISTS (SELECT 1 FROM order_payments op WHERE op.order_id = o.id);
+    split_exceptions = SELECT o.id, o.order_number, o.total_usd,
+                              'Historical Split Payment' AS exception_type,
+                              (SELECT COALESCE(SUM(op.amount_usd), 0.00) FROM order_payments op WHERE op.order_id = o.id) AS post_cutover_ledger_paid
+                       FROM orders o
+                       WHERE o.created_at < cutover_timestamp
+                         AND o.payment_status = 'paid'
+                         AND EXISTS (SELECT 1 FROM order_payments op WHERE op.order_id = o.id);
+
+    cancellation_exceptions = SELECT o.id, o.order_number, o.total_usd,
+                                     'Unreconciled Historical Cancellation' AS exception_type,
+                                     0.00 AS post_cutover_ledger_paid
+                              FROM orders o
+                              WHERE o.created_at < cutover_timestamp
+                                AND o.payment_status = 'paid'
+                                AND o.cancelled_at IS NOT NULL;
 
     RETURN {
-        gross_revenue: gross_period_revenue,
-        settled_refunds: settled_refunds,
-        net_settled_revenue: net_settled_revenue,
-        exceptions: historical_exceptions
+        confirmed_metrics: {
+            gross_payments: gross_confirmed_revenue,
+            settled_refunds: confirmed_settled_refunds,
+            net_settled_revenue: net_settled_revenue
+        },
+        unreconciled_exceptions: {
+            split_orders: split_exceptions,
+            cancellations: cancellation_exceptions
+        }
     };
 ```
 
@@ -284,60 +303,77 @@ Financial reporting must distinguish three discrete event timestamps:
 ### UTD-3: Bank Reversal Finality & Limitations of Local Verification
 
 #### Problem Statement:
-Earlier proposals claimed that a manager verifying a bank statement snapshot or updating a local row to `'cancelled'` eliminates the risk of a delayed bank settlement. **This claim was false.**
 - In retail banking and clearing networks (e.g. Bakong / ABA PayWay), an electronic reversal request may be delayed in clearing queues.
 - Checking a mobile banking app at 2:00 PM and observing no debit **does not prove that the reversal cannot settle at 6:00 PM or the next business day**.
 - A local database status update to `'cancelled'` has zero influence over banking clearinghouse execution.
 
-#### Safe Operational Rules for Bank Reversals:
-1. **Preservation of Original Reversal Attempt:** The original failed reversal record must **never** be deleted or overwritten.
-2. **Append-Only Event History:** All state transitions, retry attempts, and manager notes are recorded in an append-only audit log (`order_refund_events`).
-3. **Never Treat Local Status as Proof:** A local database status of `'cancelled'` or `'failed'` is never evidence of bank-side cancellation.
-4. **Reliable External Evidence Required:** Before a replacement cash payout can even be considered, the manager must review and record definitive evidence of bank outcome:
-   - Official bank gateway reversal rejection code (e.g., `"Original transaction expired"` or `"Reversal rejected by clearinghouse"`), OR
-   - Formal written statement / confirmation from the merchant acquiring bank verifying that the reversal was discarded and will not settle.
-5. **Mandatory Payout Blockade if Uncertain:** If the external bank outcome cannot be verified definitively, or if the reversal status remains pending in clearing, **the replacement cash payout must remain strictly BLOCKED**.
-6. **Manager Authorization & Atomic Concurrency Lock:** When authorized, a replacement cash refund requires Manager PIN entry and an atomic conditional lock to prevent concurrent double-payouts.
-7. **Traceability Link:** The replacement cash refund row must maintain an explicit link `replaced_refund_id` pointing directly to the original failed reversal row.
+#### Unresolved Replacement Cash Process:
+Because the counter operates on an offline local LAN without real-time bank API integrations:
+- **No Automated Finality Mechanism Exists:** The POS cannot independently verify whether a bank has permanently dropped a pending reversal.
+- **Replacement Cash Payout is Strictly BLOCKED:** The POS cashier interface **must not provide an active replacement-cash payout button or automated workflow** while the bank outcome remains uncertain.
+- **Process Remains Unresolved:** The replacement cash refund workflow is classified as an **Unresolved Technical Dependency**. It requires an approved business operational procedure (e.g., mandatory 72-hour waiting period or signed bank clearance) before any technical implementation can be designed.
 
-> [!CAUTION]
-> **Status of UTD-3:**
-> On an offline or local LAN counter operating without direct bank gateway API integrations, **no automated mechanism exists to guarantee bank reversal finality**. Therefore, the replacement cash refund workflow remains **unresolved and requires an approved business operational procedure** (such as mandatory holding periods or formal merchant bank clearance) before implementation.
+#### Safe Operational Rules for Event Logging:
+If an operational procedure is formally approved by management in the future, the following architectural controls must be enforced:
+1. **Preservation of Original Reversal Attempt:** The original failed reversal record must **never** be deleted or overwritten.
+2. **Append-Only Event History:** All state transitions and manager notes are recorded in an append-only audit log (`order_refund_events`).
+3. **Never Treat Local Status as Proof:** A local database status of `'cancelled'` or `'failed'` is never evidence of bank-side cancellation.
+4. **Manager Authorization & Atomic Concurrency Lock:** Replacement payouts must require explicit Manager PIN entry and an atomic conditional lock to prevent concurrent double-payouts.
+5. **Traceability Link:** Any replacement refund row must maintain an explicit foreign key link `replaced_refund_id` pointing directly to the original failed reversal row.
 
 ---
 
-### UTD-4: Scoped KHQR Reference Uniqueness & Nullable Column Vulnerabilities
+### UTD-4: Two-Table Digital Constraint Schema & Scoped Reference Uniqueness
 
-#### The Nullable Column Problem in MariaDB/MySQL:
-Earlier proposals recommended:
-`UNIQUE KEY uq_digital_payment_ref (provider, merchant_account_id, payment_ref)`
-Under ANSI SQL standards and MySQL/MariaDB InnoDB implementation:
+#### The MariaDB Nullable Column Vulnerability:
+Earlier single-table proposals attempted to use:
+`UNIQUE (provider, merchant_account_id, payment_ref)`
+Under ANSI SQL and MySQL/MariaDB InnoDB rules:
 - **`NULL != NULL` in UNIQUE constraints.**
-- If any column in a composite unique index is `NULL`, MySQL allows **multiple rows with identical values**!
-- If `merchant_account_id` is nullable, multiple payments with `provider = 'khqr'` and `payment_ref = '123456'` can be inserted without triggering a duplicate error.
-- If cash payments share the same table and have `payment_ref = NULL`, they do not collide, but any digital payment with missing fields silently bypasses duplicate protection.
+- If `payment_ref` or `merchant_account_id` allow `NULL`, multiple identical rows with `NULL` bypass duplicate protection completely.
+- If cash payments share the table and use `NULL` for digital references, they avoid collisions, but any digital transaction with missing data also bypasses uniqueness.
 
-#### Architectural Requirements for Digital Payment Uniqueness:
-1. **Mandatory Fields for Verified Digital Payments:**
-   For all digital transactions, the following three attributes must be strictly `NOT NULL`:
-   - `provider` (VARCHAR 50 NOT NULL): Specific acquiring channel (e.g. `'khqr_bakong'`, `'khqr_aba'`).
-   - `merchant_account_id` (VARCHAR 50 NOT NULL): Receiving merchant identifier (e.g. `'store_counter_01'`).
-   - `payment_ref` (VARCHAR 100 NOT NULL): Genuine bank reference captured from the bank notification.
-2. **Separation of Cash Payments:**
-   Cash transactions must **never** be subjected to bank reference validation. Cash payments must either:
-   - Reside in a separate tender table, or
-   - Use a dedicated digital payment ledger table (`order_digital_payments`) where `(provider, merchant_account_id, payment_ref)` are strictly `NOT NULL` and enforced by a database `UNIQUE` index.
-3. **No Assumption of Global 4-8 Digit Uniqueness:**
-   A 4-to-8 digit bank reference code (often an internal bank trace or rollover transaction sequence) is **not globally unique**. It can repeat across different days, different merchant accounts, or different banking institutions.
-4. **Idempotency Safeguards on Local LAN:**
-   Because official bank reference formats and rollover rules vary between ABA PayWay and NBC Bakong, the counter terminal enforces multi-layered idempotency:
-   - Cart session `idempotency_key` (UUID v4) prevents duplicate submissions from cashier double-clicks.
-   - Scoped database uniqueness `(provider, merchant_account_id, payment_ref)` where applicable.
-   - Cashier attribution (`cashier_id`) and counter merchant phone visual matching.
+#### Two-Table Architectural Solution:
+To enforce 100% database-level integrity without nullable loopholes, digital payments are decoupled from cash payments across two normalized tables:
+
+```sql
+-- 1. General Tender Ledger (Cash & Digital Payments)
+CREATE TABLE IF NOT EXISTS order_payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NOT NULL,
+    payment_method ENUM('cash','khqr') NOT NULL,
+    amount_usd DECIMAL(10,2) NOT NULL,
+    amount_khr INT NOT NULL,
+    exchange_rate INT NOT NULL,
+    cashier_id INT NOT NULL,
+    recorded_at DATETIME NOT NULL,
+    INDEX idx_order_payments_order (order_id),
+    INDEX idx_order_payments_recorded (recorded_at)
+) ENGINE=InnoDB;
+
+-- 2. Dedicated Digital Transaction Ledger (Strictly Non-Null Attributes)
+CREATE TABLE IF NOT EXISTS order_digital_payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    payment_id INT NOT NULL UNIQUE,           -- 1:1 Foreign Key to order_payments
+    order_id INT NOT NULL,
+    provider VARCHAR(50) NOT NULL,            -- e.g. 'khqr_bakong', 'khqr_aba'
+    merchant_account_id VARCHAR(50) NOT NULL, -- e.g. 'counter_phone_01'
+    payment_ref VARCHAR(100) NOT NULL,        -- Genuine bank transaction reference
+    provider_event_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref),
+    INDEX idx_digital_order (order_id)
+) ENGINE=InnoDB;
+```
+
+#### Why This Resolves the Contradiction:
+1. **Cash Transactions:** Inserted into `order_payments` with `payment_method = 'cash'`. They do not create rows in `order_digital_payments`, eliminating any requirement for fake sentinels or digital references.
+2. **Verified Digital Transactions:** Inserted into both `order_payments` and `order_digital_payments`. Because `provider`, `merchant_account_id`, and `payment_ref` are all **strictly `NOT NULL`**, the unique constraint `uq_digital_bank_ref` is 100% airtight and cannot be bypassed.
+3. **No Assumption of Global 4-8 Digit Uniqueness:** A 4-to-8 digit reference code is **not globally unique**. Uniqueness is scoped strictly to `(provider, merchant_account_id, payment_ref)`.
 
 > [!WARNING]
 > **Status of UTD-4:**
-> The exact bank reference structure, length, character set, and rollover cycle have not been verified against official NBC Bakong / ABA PayWay technical documentation. Scoped digital reference uniqueness and validation rules remain an **Unresolved Technical Dependency** pending merchant bank documentation.
+> The exact reference format, character set, length, and rollover cycle have not been verified against official NBC Bakong / ABA PayWay technical documentation. Scoped digital reference uniqueness and validation rules remain an **Unresolved Technical Dependency** pending merchant bank documentation.
 
 ---
 

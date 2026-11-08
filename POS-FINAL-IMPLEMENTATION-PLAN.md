@@ -3,7 +3,7 @@
 **Document ID:** POS-PLN-2026-FINAL
 **Project:** Car-WashService (Local Counter Terminal)
 **Scope:** Phased Engineering Roadmap, Technical Migration, Verification Plan, Release Governance
-**Date:** November 8, 2026 (Updated - Round 9)
+**Date:** November 8, 2026 (Updated - Round 10)
 **Status:** Engineering Proposal – Awaiting Separate Executive Authorization (NOT Production-Ready Until Released)
 
 ---
@@ -29,7 +29,7 @@ The implementation roadmap is organized into six sequential phases (Phases 0 thr
 
 ```mermaid
 flowchart TD
-    P0["Phase 0: Strictly Read-Only Inspection\n(Source files, git status, runtime versions, log review)"] --> P1["Phase 1: Technical Design & Unresolved Dependencies\n(Scoped KHQR matching, reversal finality, timestamps, fallbacks)"]
+    P0["Phase 0: Strictly Read-Only Inspection\n(Source files, git status, runtime versions, log review)"] --> P1["Phase 1: Technical Design & Unresolved Dependencies\n(Two-table KHQR schema, reversal finality, timestamps, fallbacks)"]
     P1 --> P2["Phase 2: Data & Domain Design Review\n(Schema impact, non-destructive migrations, exceptions view)"]
     P2 --> P3["Phase 3: Implementation Work Packages\n(WP-1 Gate, WP-2 Bays, WP-3 UI, WP-4 Ledgers, WP-5 Reports)"]
     P3 --> P4["Phase 4: Planned Test & Acceptance Execution\n(58 Test Matrix specifications, hardware testing, concurrency stress)"]
@@ -43,85 +43,54 @@ flowchart TD
 ### 0.1 Objective
 Establish an uncompromised, verified baseline of the local execution environment using strictly read-only inspection methods. Phase 0 contains **inspection only**.
 
-### 0.2 Explicit Boundaries & Prohibitions
+### 0.2 Explicit Prohibitions & Safety Boundaries
 Phase 0 strictly prohibits and does not require:
-- Starting a stopped database service (`net start`, `service start`).
-- Repairing an unstable or damaged database (`REPAIR TABLE`, `mysqlcheck`).
-- Creating a database (`CREATE DATABASE`).
-- Restoring database data or running database dumps (`mysqldump`).
-- Any schema migration or filesystem write operation.
-
-*Inspection Protocol if Database is Stopped:* If the MariaDB service is stopped, offline, or inaccessible, Phase 0 inspects the service status, configuration files (`my.ini`), and system event logs, reporting the status in the inspection log without attempting to start, recover, or repair the database.
+- **Never start a stopped database service** (`net start`, `service start`).
+- **Never repair or modify an unstable database** (`REPAIR TABLE`, `mysqlcheck`).
+- **Never create databases, dumps, or restores** (`CREATE DATABASE`, `mysqldump`, `mysql < dump.sql`).
+- **Never clean, reset, stash, or overwrite existing user changes** in the Git working tree.
+- **Inspect and report existing service status only.** If the MariaDB service is stopped, offline, or inaccessible, Phase 0 inspects the service status, configuration files (`my.ini`), and system event logs, reporting the status in the inspection log without attempting to start, recover, or repair the database.
+- **Phase 0 must remain strictly read-only and separately authorized.**
 
 ### 0.3 Inspection Activities & Validation Checklist
 
 | Inspection Domain | Inspection Target | Read-Only Method | Success Criteria |
 | :--- | :--- | :--- | :--- |
-| **Source Integrity** | Working tree & branch state | `git status` | Clean working tree on `main`; zero untracked code files; zero uncommitted diffs. |
+| **Source Integrity** | Working tree & branch state | `git status` (without resets/stashes) | Inspect clean working tree on `main` or active changes; zero unapproved file modifications. |
 | **PHP Runtime** | CLI & Web PHP modules | `php -v` & `php -m` (non-intrusive) | PHP 8.2+ verified; PDO_MySQL, OpenSSL, mbstring, and GD loaded. |
-| **Database Server** | MariaDB version & status | Non-mutating status / service check | MariaDB 10.4+ / MySQL 8.0+ version verified; InnoDB storage engine verified if service is active. |
+| **Database Server** | MariaDB version & status | Non-mutating status / service check | MariaDB 10.4+ / MySQL 8.0+ version inspected; service status reported as-is. |
 | **Web Server** | Apache port binding | `netstat -ano \| findstr :80` | Port 80 bound locally; virtual host routes to local project root. |
 | **Configuration Files** | Database credentials & paths | File inspection without credential exposure | Connection parameters verified against local instance; no secrets logged. |
 | **System Logs** | Apache & PHP error logs | Log file inspection (`tail` / view) | Zero critical startup errors, segmentation faults, or permission blocks. |
 | **Backup Documentation** | Disaster recovery documentation | Review existing operational runbooks | Existing backup SOP reviewed; risk items identified for Phase 5 staging. |
 
-### 0.4 Future Backup/Restore Validation Prerequisite
-Validation of database backup and restoration procedures is explicitly deferred to **Phase 5 (Release Readiness & Staging Prerequisites)**. When authorized, backup/restore validation must:
-1. Be executed as a separately authorized task.
-2. Utilize an isolated test copy of the database (`carwash_restore_test`).
-3. Make **zero changes** to the original MariaDB production data directory.
-4. Include a fully documented recovery and rollback plan.
-
 ---
 
 ## Phase 1: Technical Design Specifications & Unresolved Dependencies
 
-### 1.1 TD-1: Scoped KHQR Reference Uniqueness & Nullable Column Protection (UTD-4)
+### 1.1 TD-1: Scoped KHQR Reference Uniqueness & Two-Table Schema (UTD-4)
 * **Operational Flow:** The counter terminal utilizes an IoT soundbox and merchant smartphone bank app.
   1. **Primary Alert:** Soundbox chime alerts cashier to incoming funds.
   2. **Phone App Match:** If multiple customers are checking out simultaneously or amounts are identical, the soundbox chime alone is insufficient; the cashier **must match the transaction on the counter merchant phone**.
   3. **Authentic Reference Capture:** Cashier reads the genuine 4-to-8 digit bank transaction reference code (`payment_ref`) from the bank notification and enters it into the POS interface.
   4. **Customer Screen Rejection:** Smartphone screens presented by customers are strictly rejected as proof of payment.
   5. **No Synthetic TRX:** Backend generation of synthetic reference strings (`TRX-` via `uniqid()`) is prohibited.
-* **The Nullable Column Vulnerability in MariaDB/MySQL:**
+* **The MariaDB Nullable Column Vulnerability:**
   - Under SQL standards, `NULL != NULL` in unique indexes. If composite columns (`provider`, `merchant_account_id`, `payment_ref`) allow `NULL`, multiple identical rows with `NULL` bypass duplicate protection.
-  - Therefore, for verified digital payments, `provider`, `merchant_account_id`, and `payment_ref` must be strictly `NOT NULL`.
-  - Cash transactions must be kept strictly separate from digital reference validation (e.g. via separate tender tables or dedicated digital transaction ledgers).
-  - A 4-to-8 digit reference is **not globally unique**; it can repeat across banks, accounts, or rollover cycles.
+  - To enforce 100% database-level integrity, digital payments are separated from cash across two tables:
+    1. General Tender Ledger (`order_payments`): Records financial amounts for all tenders; cash payments carry zero digital reference requirements.
+    2. Dedicated Digital Ledger (`order_digital_payments`): Mandatory `NOT NULL` for `provider`, `merchant_account_id`, and `payment_ref`, enforced by `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)`.
 * **Unresolved Technical Dependency (UTD-4):**
+  - A 4-to-8 digit bank code is **not globally unique**; it can repeat across banks, accounts, or rollover cycles.
   - Official reference formats, lengths, character sets, and uniqueness scopes from ABA PayWay and NBC Bakong must be confirmed with merchant bank technical documentation prior to finalizing database constraints.
 
-### 1.2 TD-2: Bank Reversal Finality & Limitations of Local Verification (UTD-3)
-* **Problem Statement:** A local status update to `'cancelled'` does **not** stop external bank clearinghouse processing. Furthermore, inspecting a bank mobile app or statement at a single point in time **does not guarantee that a delayed reversal cannot settle later**.
-* **Resolution Workflow:**
-  ```mermaid
-  sequenceDiagram
-      autonumber
-      actor Cashier
-      actor Manager
-      participant POS as POS Client
-      participant Bank as Merchant Bank App / Statement
-      participant DB as MariaDB Ledger
-      Cashier->>Manager: Report Digital Reversal Failed / Timed Out
-      Manager->>Bank: Review Formal Reversal Rejection Code / Bank Clearance
-      alt Bank Outcome Ambiguous or Reversal In Clearing
-          Manager-->>Cashier: STOP. Cash Payout Blocked Pending Formal Reconciliation
-      else Bank Outcome Verified: Gateway Rejection Code / Written Bank Clearance
-          Manager->>POS: Authorize Replacement Cash Refund + Enter Manager PIN
-          POS->>DB: Atomic Update on Failed Attempt
-          Note over DB: Append-only audit log in order_refund_events;<br/>Preserve failed reversal row
-          POS->>DB: Insert New Cash Refund Row (authorized_pending, replaced_refund_id = [failed_id])
-          Cashier->>POS: Execute Cash Payout
-          POS->>DB: UPDATE order_refunds SET settlement_status = 'cash_disbursed', disbursed_at = NOW()<br/>WHERE id = [new_id] AND settlement_status = 'authorized_pending'
-          DB-->>POS: rowCount === 1
-          POS-->>Cashier: Hardware Kick Pulse (Cash Drawer Opens)
-      end
-  ```
-* **Mandatory Safeguards:**
-  1. Cash replacement is strictly **blocked** if the bank outcome cannot be verified through formal gateway rejection codes or written bank confirmation.
-  2. Original reversal attempts are preserved in an append-only audit trail (`order_refund_events`).
-  3. Replacement cash refunds maintain an explicit foreign key link `replaced_refund_id`.
-  4. On an offline LAN counter lacking bank gateway API integration, **no automated bank finality mechanism exists**. The replacement refund process remains an **unresolved process requiring an approved operational procedure**.
+### 1.2 TD-2: Bank Reversal Finality & Blockade Reality (UTD-3)
+* **Problem Statement:** A local status update to `'cancelled'` does **not** stop external bank clearinghouse processing. Furthermore, inspecting a bank mobile app or statement snapshot at a single point in time **does not guarantee that a delayed reversal cannot settle later**.
+* **Safety Reality on Offline LAN Counter:**
+  - On an offline local LAN counter operating without direct bank gateway API integrations, **no automated mechanism exists to guarantee bank reversal finality**.
+  - **Replacement Cash Payout is Strictly BLOCKED:** The POS cashier interface **must not provide an active replacement-cash payout button or automated workflow** while the bank outcome remains uncertain.
+  - **Process Remains Unresolved:** The replacement cash refund workflow is classified as an **Unresolved Technical Dependency**. It requires an approved business operational procedure (e.g. mandatory 72-hour holding period or written bank clearance) before any technical implementation can be designed.
+* **Archival Controls:** If an operational procedure is formally approved in the future, it must enforce Manager PIN entry, an atomic conditional lock, append-only event logging (`order_refund_events`), and foreign key linking via `replaced_refund_id`.
 
 ### 1.3 TD-3: Reporting Timestamps & Period Bounding (UTD-2)
 * **Timestamp Distinctions:**
@@ -141,15 +110,19 @@ Validation of database backup and restoration procedures is explicitly deferred 
 ### 1.4 TD-4: Decoupled Period-Aware Historical Fallback Architecture (UTD-1)
 * **Elimination of Unsupported Assumptions:**
   - Removed undefined flags (`is_initial_migration`) and non-existent fields (the schema in [init.php](database/init.php#L242-L280) possesses `total_usd`, `paid_at`, and `cancelled_at`, but **does NOT contain `orders.refunded_amount`**).
-* **Period-Aware Rules:**
+* **Period-Aware Fallback Principles:**
   - Payment recognition and refund recognition are evaluated independently within `[start_date, end_date)`.
-  - Pre-cutover orders with an original payment recorded on `orders` and a post-cutover refund in `order_refunds` recognize the payment in the pre-cutover period and the refund in the post-cutover period.
-  - Post-cutover payments on pre-cutover orders recognize each payment at its own `recorded_at` timestamp.
-  - Multiple partial refunds each appear in their respective disbursement/settlement periods.
-  - Events outside the selected reporting window are strictly excluded.
-* **Double-Counting Defense & Reconciliation Exceptions:**
-  - If a pre-cutover order has `payment_status = 'paid'` and subsequently receives post-cutover ledger payments, the legacy schema cannot prove whether `total_usd` was partially or fully paid. To prevent double-counting or omissions, these orders are flagged as **Historical Split-Payment Reconciliation Exceptions** on the Exceptions tab.
-  - Pre-cutover cancellations with `payment_status = 'paid'` lack refund amounts in the schema and are classified as **Historical Unreconciled Cancellation Exceptions**.
+  - Historical revenue is **not silently omitted** when an order has both historical payment information and subsequent ledger payments.
+  - The existence of a subsequent ledger payment must not automatically exclude the entire historical order amount.
+  - Split payments must not be double-counted.
+  - Unreconstructable amounts are classified as **Historical Reconciliation Exceptions**, reported under audit, and **never silently included in confirmed revenue or treated as zero**.
+
+#### Realistic Historical Scenarios:
+1. **Fully Historical Paid Order (Unconflicted):** Order #101 created pre-cutover, `paid_at = '2026-10-15'`, `total_usd = 25.00`, `payment_status = 'paid'`. Zero rows in `order_payments` or `order_refunds`. Recognized in Oct 2026 as Confirmed Historical Payment = +$25.00. 100% confirmed.
+2. **Historical Order with Subsequent Partial Ledger Payment (Split Payment):** Order #102 created pre-cutover, `total_usd = 50.00`, `payment_status = 'paid'`. After cutover, a partial payment of $20.00 is recorded in `order_payments` (`recorded_at = '2026-11-10'`). Confirmed Ledger in Nov = +$20.00. Historical $50.00 cannot be proved to be partial or complete without double-counting; it is isolated as a **Historical Split-Payment Exception** ($50.00 under audit on Exceptions tab) rather than guessing a formula.
+3. **Historical Order with Multiple Post-Cutover Partial Refunds:** Order #103 created pre-cutover, `total_usd = 60.00`, `payment_status = 'paid'`. Two partial refunds occur post-cutover: Refund A for $10 on Nov 12, Refund B for $15 on Nov 15. In Oct 2026, Confirmed Payment = +$60.00. In Nov 2026, Settled Refunds = +$25.00 ($10 + $15). Payments and refunds recognized independently in respective periods without disappearing.
+4. **Historical Cancellation with No Reconstructable Refund Amount:** Order #104 created pre-cutover, `total_usd = 40.00`, `payment_status = 'paid'`, `cancelled_at = '2026-10-18'`. `orders.refunded_amount` does not exist in schema. Excluded from Confirmed Revenue and classified as a **Historical Unreconciled Cancellation Exception** ($40.00 under audit) for owner manual review.
+
 * **Status:** The reporting algorithm is **not complete** until demonstrated against actual source fields and realistic examples during Phase 2.
 
 ### 1.5 TD-5: Unrecorded COGS Handling in Operating Profit
@@ -169,8 +142,9 @@ Validation of database backup and restoration procedures is explicitly deferred 
 | Table Name | Operation | Proposed Columns / Modifications | Purpose |
 | :--- | :--- | :--- | :--- |
 | `orders` | Read / Update | `receipt_issued_at DATETIME NULL`<br/>`receipt_number VARCHAR(50) NULL`<br/>`discount_approved_by INT NULL` | Decouple electronic receipt from physical print; track manager discount authorization. |
-| `order_payments` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`provider VARCHAR(50) NOT NULL`<br/>`merchant_account_id VARCHAR(50) NOT NULL`<br/>`payment_method ENUM('cash','khqr') NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`exchange_rate INT NOT NULL`<br/>`payment_ref VARCHAR(100) NULL`<br/>`cashier_id INT NOT NULL`<br/>`provider_event_at DATETIME NULL`<br/>`recorded_at DATETIME NOT NULL`<br/>`UNIQUE KEY uq_digital_payment_ref (provider, merchant_account_id, payment_ref)` | Discrete transaction ledger for incoming tenders; scoped non-null digital uniqueness; frozen exchange rates. (Cash payments store distinct sentinel / handled separately). |
-| `order_refunds` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`payment_id INT NULL`<br/>`refund_seq INT NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`settlement_status ENUM('authorized_pending','cash_disbursed','bank_reversal_pending','settled','failed','bank_verified_failed','cancelled')`<br/>`authorized_by INT NOT NULL`<br/>`disbursed_at DATETIME NULL`<br/>`settled_at DATETIME NULL`<br/>`bank_reversal_ref VARCHAR(100) NULL`<br/>`replaced_refund_id INT NULL` | Finite state machine ledger for customer refunds and reversals. |
+| `order_payments` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`payment_method ENUM('cash','khqr') NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`exchange_rate INT NOT NULL`<br/>`cashier_id INT NOT NULL`<br/>`recorded_at DATETIME NOT NULL`<br/>`INDEX idx_order_payments_order (order_id)`<br/>`INDEX idx_order_payments_recorded (recorded_at)` | General tender ledger for cash & digital payments; frozen exchange rates; cash carries no digital reference constraints. |
+| `order_digital_payments` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`payment_id INT NOT NULL UNIQUE`<br/>`order_id INT NOT NULL`<br/>`provider VARCHAR(50) NOT NULL`<br/>`merchant_account_id VARCHAR(50) NOT NULL`<br/>`payment_ref VARCHAR(100) NOT NULL`<br/>`provider_event_at DATETIME NULL`<br/>`created_at DATETIME NOT NULL`<br/>`CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)` | Dedicated digital transaction ledger; mandatory non-null attributes enforce 100% duplicate protection without nullable loopholes. |
+| `order_refunds` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`payment_id INT NULL`<br/>`refund_seq INT NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`settlement_status ENUM('authorized_pending','cash_disbursed','bank_reversal_pending','settled','failed','bank_reversal_blocked','cancelled')`<br/>`authorized_by INT NOT NULL`<br/>`disbursed_at DATETIME NULL`<br/>`settled_at DATETIME NULL`<br/>`bank_reversal_ref VARCHAR(100) NULL`<br/>`replaced_refund_id INT NULL` | Finite state machine ledger for customer refunds and reversals. |
 | `order_refund_events` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`refund_id INT NOT NULL`<br/>`event_type VARCHAR(50) NOT NULL`<br/>`from_status VARCHAR(50) NOT NULL`<br/>`to_status VARCHAR(50) NOT NULL`<br/>`actor_id INT NOT NULL`<br/>`notes TEXT NULL`<br/>`created_at DATETIME NOT NULL` | Append-only audit history for refund state transitions. |
 | `bays` | Update | Index on `(status, is_active)` | Atomic conditional reservation locks. |
 | `bay_tasks` | Update | `task_sequence INT NOT NULL DEFAULT 1`<br/>`status ENUM('waiting','in_progress','completed','pending_prereq')` | Enforce Lift First $\rightarrow$ Wash Second staging. |
@@ -250,11 +224,11 @@ WHERE o.created_at < (SELECT setting_value FROM settings WHERE setting_key = 're
 ### WP-4: Discrete Payment & Refund Ledgers
 * **Files:** [index.php](api/pos/index.php), [CashierControl.php](core/CashierControl.php).
 * **Specifications:**
-  1. Record incoming tenders in `order_payments` with frozen exchange rate, cashier ID, and scoped bank reference (for KHQR).
+  1. Record incoming tenders across `order_payments` (financial amounts) and `order_digital_payments` (mandatory non-null provider/ref).
   2. Implement refund finite state machine in `order_refunds`:
      - Manager PIN required for `authorized_pending`.
      - Atomic conditional disbursement lock (`rowCount === 1` opens cash drawer).
-     - Bank reversal resolution requires verified external bank outcome before cash replacement authorization; links via `replaced_refund_id`.
+     - Bank reversal replacement payout remains BLOCKED pending an approved operational procedure.
      - Append-only event history in `order_refund_events`.
      - Enforce cumulative refund ceiling ($\sum \text{Refunds} \le \text{Total Payments}$).
 
@@ -262,12 +236,11 @@ WHERE o.created_at < (SELECT setting_value FROM settings WHERE setting_key = 're
 * **Files:** [reports.php](views/owner/reports.php).
 * **Specifications:**
   1. Two-Tier period-aware reporting queries bounded by `[:start_timestamp, :end_timestamp)`.
-  2. Payment and refund fallback calculations evaluated independently per period without all-or-nothing omission.
+  2. Confirmed metrics separated from Unreconciled Historical Exceptions (split payments and pre-cutover cancellations reported under audit on separate tab).
   3. Separate dashboard metrics:
      - **Net Settled Revenue:** Gross Confirmed Payments minus Settled Refunds.
      - **Net Operating Profit:** Net Settled Revenue minus (COGS + Commissions + Expenses).
   4. Untracked Cost Alert displayed when line items lack COGS data.
-  5. Dedicated **Historical Unreconciled Exceptions** review tab.
 
 ---
 
@@ -280,8 +253,8 @@ The 58 test specifications defined in [POS-IMPLEMENTATION-TEST-MATRIX.md](POS-IM
 | :--- | :--- | :--- | :--- |
 | **Payment Before Service Gate** | TC-01 to TC-08 | Verify unpaid orders cannot enter bays; electronic receipt issuance gates apron. | Planned (Unexecuted) |
 | **Receipt Decoupling & Printing** | TC-09 to TC-14 | Verify printer paper-out does not block service; verify reprint read-only safety. | Planned (Unexecuted) |
-| **KHQR Scoped Matching** | TC-15 to TC-22 | Verify phone/soundbox matching; reject customer screenshots; test scoped ref uniqueness. | Planned (Unexecuted) |
-| **Refund Safety & Finality** | TC-23 to TC-32 | Verify atomic disbursement lock; test bank outcome verification before cash replacement. | Planned (Unexecuted) |
+| **KHQR Scoped Matching** | TC-15 to TC-22 | Verify phone/soundbox matching; reject customer screenshots; test two-table constraint. | Planned (Unexecuted) |
+| **Refund Safety & Finality** | TC-23 to TC-32 | Verify atomic disbursement lock; verify replacement payout blocked without procedure. | Planned (Unexecuted) |
 | **Period-Aware Financial Reporting** | TC-33 to TC-42 | Verify decoupled fallbacks; multi-refund orders; reporting period boundary isolation. | Planned (Unexecuted) |
 | **Multi-Stage Lift-First Dispatch** | TC-43 to TC-50 | Verify Bay 4 lift executes before wash; verify deferred wash bay reservation. | Planned (Unexecuted) |
 | **Walk-in Guest & Concurrency** | TC-51 to TC-58 | Verify blank customer name defaults to `'Walk-in Guest'`; verify idempotency under double-clicks. | Planned (Unexecuted) |
@@ -304,18 +277,27 @@ The 58 test specifications defined in [POS-IMPLEMENTATION-TEST-MATRIX.md](POS-IM
 
 ---
 
-## Phase 5: Controlled Release Readiness & Staging Prerequisites
+## Phase 5: Controlled Release Readiness, Recovery & Rollback Safety
 
-### 5.1 Isolated Backup & Restore Validation (Staging Prerequisite)
-Prior to production deployment, backup and restore validation must be executed under separately authorized testing conditions:
-1. Generate logical database dump to an isolated staging directory.
-2. Restore the dump into a separate temporary database (`carwash_restore_test`).
-3. Verify 100% record parity, table schemas, and auto-increment sequences.
-4. Verify that **zero modifications** were made to the original MariaDB data files.
+### 5.1 Recovery and Rollback Safety Principles
+Recovery must strictly separate Application Code Rollback from Database Disaster Recovery:
+
+1. **Separation of Concerns:**
+   - **Application Code Rollback:** Reverting modified PHP, JavaScript, CSS, or HTML files to the pre-deployment Git release tag. This is a non-destructive application action that does not alter database state.
+   - **Database Recovery:** A catastrophic, high-risk operational recovery action that requires separate, explicit executive authorization.
+
+2. **Database Recovery Risks & Data Loss Assessment:**
+   - Restoring a cold backup **destroys all transactional data created after the backup timestamp** (e.g. newly admitted vehicles, completed wash jobs, and cash drawer balances).
+   - Recovery requires explicit, separate executive authorization.
+   - The recovery point objective (RPO) and potential transaction loss must be formally assessed before executing any restore.
+   - The backup integrity must be verified prior to recovery.
+   - Restore validation must use an isolated test environment (`carwash_restore_test`).
+   - **Never restore over the original production database without separate explicit authorization.**
+   - Do not promise an unverified "five-minute recovery or rollback time"; actual recovery duration depends on dump size and must be demonstrated through approved staging tests.
 
 ### 5.2 Pre-Deployment Operational Runbook
 1. **Pre-Cutover Checklist:**
-   - [ ] Staging backup/restore verification completed successfully.
+   - [ ] Staging backup/restore verification completed successfully in isolated test database.
    - [ ] Counter hardware (printer, drawer, soundbox, LAN router) online and tested.
    - [ ] `receipt_v2_cutover_timestamp` set in `settings` to scheduled go-live hour.
    - [ ] Cashier floats verified and logged in [CashierControl.php](core/CashierControl.php).
@@ -336,18 +318,7 @@ Prior to production deployment, backup and restore validation must be executed u
 - **Service Flow Training:**
   - Inform technicians that mixed lube + wash cars proceed to Bay 4 Lift first, then wash bays second.
 
-### 5.4 Rapid Rollback Plan
-If an unresolvable defect arises during go-live:
-1. **Rollback Trigger Conditions:**
-   - Inability to checkout vehicles during rush hour.
-   - Cash drawer fails to respond to confirmed cash transactions.
-   - Database deadlocks on bay assignments.
-2. **Rollback Steps (< 5 Minutes):**
-   - Revert PHP and JS files to pre-cutover Git commit / snapshot.
-   - Restore database from cold dump if schema alterations caused instability.
-   - Verify counter terminal operational on legacy workflow.
-
-### 5.5 Executive Authorization Gate
+### 5.4 Executive Authorization Gate
 > [!IMPORTANT]
 > **Executive Sign-Off Requirement:**
 > This implementation plan, its associated work packages, and the proposed deployment timeline are **subject to separate executive authorization by the business owner**. Under strict project governance rules, the software must NOT be described as "production-ready" until Phase 4 acceptance testing is completed on the staging counter and formal deployment sign-off is granted.
