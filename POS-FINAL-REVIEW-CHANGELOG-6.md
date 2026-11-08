@@ -3,7 +3,21 @@
 **Document ID:** POS-REV-2026-006  
 **Project:** Car-WashService  
 **Date:** November 7, 2026  
-**Status:** Business Rules Finalization Complete – Ready for Executive Review  
+**Status:** Business Rules Finalization Complete – Executive Decisions Confirmed by Business Owner (Nov 8, 2026)  
+
+---
+
+## Round 7 Addendum: Executive Decisions Confirmed (November 8, 2026)
+
+On November 8, 2026, the business owner reviewed [POS-BUSINESS-RULES-OPEN-QUESTIONS.md](file:///C:/xampp/htdocs/Car-WashService/POS-BUSINESS-RULES-OPEN-QUESTIONS.md) and approved all six operational decisions:
+1. **Decision 1 (Mixed Services Sequence):** Standardized as **Lift First $\rightarrow$ Wash Second** (Bay 4 Mechanical Lift work finishes before Exterior Wash & Dry). Earlier option lettering ambiguity resolved.
+2. **Decision 2 (Receipt Printing Gate):** Physical printing is advisory; electronic receipt issuance (`receipt_issued_at`) and payment confirmation (`payment_status = 'paid'`) constitute the service gate pass.
+3. **Decision 3 (Walk-In Customer Identity):** Preserves `customer_name VARCHAR(100) NOT NULL` in MariaDB schema; defaults to `'Walk-in Guest'` when no customer name is provided. Vehicle plate and type captured via existing flow.
+4. **Decision 4 (Historical Orders Reconciliation):** Original historical records preserved intact; a dedicated **"Historical Unreconciled Exceptions"** report tab is provided for owner review.
+5. **Decision 5 (KHQR Verification Channel):** Rely on store counter merchant smartphone notification and soundbox on local LAN. No public IP or commercial bank API/webhook onboarding in initial scope.
+6. **Decision 6 (Financial Reporting Terminology):** Strict separation of **Net Settled Revenue** (`Gross Payments - Settled Refunds`) from **Net Operating Profit** (`Net Settled Revenue - (COGS + Commissions + Logged Expenses)`). Unrecorded COGS flagged rather than assumed $0.00.
+
+All specifications were incorporated into [POS-FINAL-BUSINESS-RULES.md](file:///C:/xampp/htdocs/Car-WashService/POS-FINAL-BUSINESS-RULES.md) and the comprehensive [POS-FINAL-IMPLEMENTATION-PLAN.md](file:///C:/xampp/htdocs/Car-WashService/POS-FINAL-IMPLEMENTATION-PLAN.md).
 
 ---
 
