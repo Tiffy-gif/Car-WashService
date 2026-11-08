@@ -3,7 +3,7 @@
 **Document ID:** POS-BR-2026-FINAL
 **Project:** Car-WashService
 **Scope:** Counter Cashier Workflow, Payment Governance, Refund State Machine, Accounting & Reporting Standards, Queue & Bay Management
-**Date:** November 8, 2026 (Updated - Round 10)
+**Date:** November 8, 2026 (Updated - Round 11)
 **Status:** Authoritative Business Rules & Technical Design Specifications – Subject to Separate Executive Authorization (NOT Production-Ready Until Released)
 
 ---
@@ -95,7 +95,7 @@ The cashier interface operates on a unified single-page layout divided into thre
 3. **Cash Drawer Pulse:**
    - Upon cash confirmation, an ESC/POS hardware kick pulse (`ESC p 0 25 250`) is dispatched to open the counter cash drawer.
 
-### Rule 3.2: Anti-Fraud KHQR & Digital Bank Verification (Owner Decision 5)
+### Rule 3.2: Anti-Fraud KHQR & Two-Table Digital Architecture (UTD-4)
 1. **Positive Verification Requirement:**
    - A customer's smartphone screen showing a "successful transfer" screenshot is **strictly rejected as proof of payment**. Screenshots can be doctored, reused from previous visits, or cancelled before broadcast.
    - Dynamic QR generation is **not proof of payment**; it is merely an invitation to pay.
@@ -107,15 +107,20 @@ The cashier interface operates on a unified single-page layout divided into thre
    - *Soundbox Ambiguity Safeguard:* An audible chime alone alerts the cashier, but if multiple customers are paying simultaneously or amounts are identical, the soundbox chime alone is insufficient; the cashier **must match the transaction on the counter merchant phone**.
 3. **Genuine Bank Transaction References (No Synthetic TRX):**
    - The backend must **never** generate fake reference strings (e.g., `TRX-` via `uniqid()`) to represent bank transactions.
-   - The cashier captures the genuine 4-to-8 digit bank transaction reference code (`payment_ref`) from the merchant bank notification.
-4. **Database Constraint Consistency & Two-Table Schema (UTD-4):**
-   - Under SQL and MariaDB InnoDB rules, `NULL != NULL` in unique constraints. If composite fields are nullable, multiple rows with identical values bypass duplicate protection.
-   - To resolve this contradiction cleanly, digital payments are separated from cash across two tables:
-     1. General Tender Ledger (`order_payments`): Records financial amounts for all tenders; cash payments carry zero digital reference requirements.
-     2. Dedicated Digital Ledger (`order_digital_payments`): Mandatory `NOT NULL` for `provider`, `merchant_account_id`, and `payment_ref`, enforced by `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)`.
-   - A 4-to-8 digit reference is **not globally unique**; it can repeat across banks, accounts, or rollover cycles.
-   - *Unresolved Technical Dependency:* The exact reference format, character set, length, and rollover cycle must be confirmed with official bank documentation or verified merchant procedures before finalizing database constraints.
-5. **Unconfirmed Transfers Hold Protocol:**
+   - The cashier captures the genuine bank transaction reference code (`payment_ref`) from the merchant bank notification.
+4. **Two-Table Schema & Transaction Logic:**
+   - To eliminate nullable unique constraint loopholes in MariaDB (`NULL != NULL`), digital transactions are normalized across two tables:
+     1. `order_payments` (Tender Ledger): Records financial amounts for all tenders; cash payments carry zero digital reference requirements.
+     2. `order_digital_payments` (Digital Detail Ledger): Dedicated strictly to verified digital payments with non-null `provider`, `merchant_account_id`, and `payment_ref`, protected by `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)`.
+   - **Application Transaction Contract:**
+     * Each digital payment must have exactly one detail row in `order_digital_payments`.
+     * Cash tenders must **never** have a row in `order_digital_payments`.
+     * If digital insertion fails (duplicate reference or missing field), the entire database transaction is rolled back atomically.
+5. **Provisional Format & Scoped Uniqueness:**
+   - Describing references as "4 to 8 digits" is provisional and not an assumed universal standard.
+   - References are **not globally unique**; uniqueness is scoped strictly to `(provider, merchant_account_id, payment_ref)`.
+   - Exact formats and rollover cycles remain an **Unresolved Technical Dependency** pending official merchant bank documentation.
+6. **Unconfirmed Transfers Hold Protocol:**
    - If a customer claims payment was sent but no merchant alert arrives within 60 seconds (interbank latency), the vehicle is **held at the counter apron**. The car is never dispatched to a wash bay until funds are confirmed.
 
 ### Rule 3.3: Dual-Currency Accounting & Frozen Exchange Rates
@@ -150,10 +155,11 @@ stateDiagram-v2
     authorized_pending --> cancelled: Cancelled Prior to Payout
 
     bank_reversal_pending --> settled: Bank Reconciliation Confirmed (settled_at)
-    bank_reversal_pending --> failed: Bank Rejection / Timeout
+    bank_reversal_pending --> bank_reversal_timeout: Network / Gateway Timeout
+    bank_reversal_pending --> failed: Definitive Bank Rejection
 
-    failed --> bank_reversal_pending: Manager Retries Reversal (retry_count++)
-    failed --> bank_reversal_blocked: External Outcome Uncertain (Payout Blocked)
+    bank_reversal_timeout --> bank_reversal_blocked: Outcome Uncertain (Payout Blocked)
+    failed --> bank_reversal_blocked: Awaiting Approved Operational Procedure
 
     cash_disbursed --> [*]: Terminal (Cash Drawer Reduced)
     settled --> [*]: Terminal (Bank Account Reduced)
@@ -166,16 +172,16 @@ stateDiagram-v2
    - `authorized_pending` $\rightarrow$ `bank_reversal_pending`: POS registers digital reversal request.
    - `authorized_pending` $\rightarrow$ `cancelled`: Void aborted before currency leaves the till.
    - `bank_reversal_pending` $\rightarrow$ `settled`: Confirmed credit reversal from bank reconciliation.
-   - `bank_reversal_pending` $\rightarrow$ `failed`: Bank rejects reversal (account closed, invalid card, timeout).
-   - `failed` $\rightarrow$ `bank_reversal_pending`: Manager retries with incremented `retry_count`.
-   - `failed` $\rightarrow$ `bank_reversal_blocked`: Bank finality cannot be verified; replacement cash payout remains blocked.
+   - `bank_reversal_pending` $\rightarrow$ `bank_reversal_timeout`: Gateway timeout; outcome uncertain.
+   - `bank_reversal_pending` $\rightarrow$ `failed`: Definitive external rejection confirmed.
+   - `bank_reversal_timeout` $\rightarrow$ `bank_reversal_blocked`: Payout remains blocked while bank outcome is uncertain.
 2. **Terminal States (Strictly Irreversible):**
    - `cash_disbursed`: Terminal. Banknotes handed to customer cannot be digitally retracted.
    - `settled`: Terminal. Bank credit cannot be reversed inside the POS.
    - `cancelled`: Terminal. Once voided, a refund cannot be revived; a new refund must be created.
    - Skipping intermediate verification (`authorized_pending` $\rightarrow$ `settled`) is strictly forbidden.
 
-### Rule 4.3: Concurrency Protection & Bank Reversal Finality (UTD-3)
+### Rule 4.3: Concurrency Protection & Bank Reversal Timeout Safety (UTD-3)
 1. **Atomic Conditional Lock for Cash Disbursement:**
    ```sql
    UPDATE order_refunds
@@ -184,12 +190,19 @@ stateDiagram-v2
    ```
    - If `rowCount === 0`, execution is aborted with HTTP 409 Conflict (`REFUND_ALREADY_DISBURSED_OR_CANCELLED`).
    - The hardware drawer kick pulse fires **only** if `rowCount === 1`. Rapid double-tapping cannot dispense money twice.
-2. **Bank Reversal Finality & Blockade Rule:**
-   - **Local Status is Not Proof:** A local database status update alone must **never** be treated as proof of external bank cancellation. Changing a failed reversal row to `'cancelled'` does not stop bank clearinghouse processing.
-   - **Statement Snapshots Are Not Finality:** Inspecting a bank mobile app or bank statement snapshot at one point in time **does not guarantee that a delayed transaction cannot settle later**.
-   - **Mandatory Blockade:** If bank finality cannot be verified, **replacement cash payout remains strictly BLOCKED**.
-   - **No Automated Replacement Cash Flow:** The POS does NOT provide an active replacement-cash workflow for failed digital reversals. The replacement process remains **unresolved and requires an owner-approved operational procedure** before any implementation.
-   - **Archival Controls:** If an operational procedure is formally approved in the future, it must enforce Manager PIN entry, an atomic conditional lock, append-only event logging (`order_refund_events`), and foreign key linking via `replaced_refund_id`.
+2. **Three Distinct Reversal Outcomes & Timeout Safety:**
+   - *Definitive Bank Rejection:* Bank clearinghouse explicitly rejects the request.
+   - *Request Timeout with Unknown Bank Outcome:* Network disconnect or gateway timeout occurs. **A timeout must NEVER be treated as a definitive rejection.**
+   - *Confirmed Bank Settlement:* Reversal cleared and settled.
+3. **No Automatic Retry on Timeout:**
+   - An uncertain reversal must **never be automatically retried**, as retrying in-flight requests risks duplicate debits on the banking network.
+4. **Replacement Cash Payout Strictly Blocked:**
+   - When the bank outcome is uncertain or timed out, **replacement cash payout is strictly BLOCKED**.
+   - A local status update to `'cancelled'` does NOT stop external bank clearing.
+   - A bank statement snapshot is NOT proof that a delayed transaction cannot settle later.
+   - Any mention of a "72-hour waiting period" is strictly an **unapproved operational example requiring bank and owner validation**; 72 hours does not prove bank finality and does not permit automatic cash payouts.
+5. **Archival Controls:**
+   - If an operational procedure is formally approved in the future, it must enforce Manager PIN entry, an atomic conditional lock, append-only event logging (`order_refund_events`), and foreign key linking via `replaced_refund_id`.
 
 ### Rule 4.4: Cumulative Refund Ceiling & Multi-Refunds
 1. **Payment Balance Ceiling:**
@@ -228,22 +241,22 @@ Financial reporting distinguishes three distinct event timestamps:
 | **Cash Refund** | `disbursed_at` | Subtracted from Gross Payments to arrive at Net Settled Revenue. |
 | **Settled Digital Refund** | `settled_at` | Subtracted from Gross Payments to arrive at Net Settled Revenue. |
 | **Authorized Pending Refund** | None (Informational) | Displayed as Pending Liability; zero impact on Net Settled Revenue. |
-| **Failed Reversal** | None (Informational) | Displayed as Operational Alert; zero financial impact. |
+| **Failed / Blocked Reversal** | None (Informational) | Displayed as Operational Alert; zero financial impact. |
 | **Cancelled Refund** | None (Informational) | Terminal; zero financial impact. |
 
 > [!NOTE]
 > **Schema Design Dependency:**
 > In the existing MariaDB schema ([init.php](database/init.php)), `orders` possesses only `paid_at`, `created_at`, and `cancelled_at`. Discrete columns `provider_event_at`, `recorded_at`, `disbursed_at`, and `settled_at` belong to the proposed `order_payments` and `order_refunds` schema and require implementation during Phase 2.
 
-### Rule 5.3: Decoupled Period-Aware Reporting & Historical Fallback Architecture (UTD-1)
+### Rule 5.3: Decoupled Period-Aware Reporting & Historical Split Accounting (UTD-1)
 1. **Strict Period Boundaries:**
    - All reporting queries must bound **both** start and end using a half-open interval:
      `event_timestamp >= :start_timestamp AND event_timestamp < :end_timestamp`
 2. **Handling Delayed Notifications:**
    - Transactions recorded or settled after a period boundary belong to the subsequent reporting period based on their effective recognition timestamp, ensuring closed historical periods remain immutable.
-3. **Decoupled, Period-Aware Historical Fallback (No All-or-Nothing Logic):**
-   - Payment fallback and refund fallback are evaluated independently and per reporting period.
-   - The existence of a subsequent ledger payment must **never** automatically cause the entire historical payment to disappear.
+3. **Decoupled, Period-Aware Historical Accounting:**
+   - Payment fallback and refund fallback are evaluated independently per reporting period.
+   - The existence of a subsequent ledger payment must **never** automatically cause the historical order to be excluded, nor is it automatically added to the historical total.
    - Post-cutover refunds do not suppress historical payments, and payments do not suppress refunds.
 4. **Confirmed Totals vs. Historical Reconciliation Exceptions:**
    - Pre-cutover orders with subsequent ledger payments (split payments) cannot have their historical paid total deduced without risk of double-counting.

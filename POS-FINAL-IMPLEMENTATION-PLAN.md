@@ -3,7 +3,7 @@
 **Document ID:** POS-PLN-2026-FINAL
 **Project:** Car-WashService (Local Counter Terminal)
 **Scope:** Phased Engineering Roadmap, Technical Migration, Verification Plan, Release Governance
-**Date:** November 8, 2026 (Updated - Round 10)
+**Date:** November 8, 2026 (Updated - Round 11)
 **Status:** Engineering Proposal – Awaiting Separate Executive Authorization (NOT Production-Ready Until Released)
 
 ---
@@ -72,25 +72,35 @@ Phase 0 strictly prohibits and does not require:
 * **Operational Flow:** The counter terminal utilizes an IoT soundbox and merchant smartphone bank app.
   1. **Primary Alert:** Soundbox chime alerts cashier to incoming funds.
   2. **Phone App Match:** If multiple customers are checking out simultaneously or amounts are identical, the soundbox chime alone is insufficient; the cashier **must match the transaction on the counter merchant phone**.
-  3. **Authentic Reference Capture:** Cashier reads the genuine 4-to-8 digit bank transaction reference code (`payment_ref`) from the bank notification and enters it into the POS interface.
+  3. **Authentic Reference Capture:** Cashier reads the genuine bank transaction reference code (`payment_ref`) from the bank notification and enters it into the POS interface.
   4. **Customer Screen Rejection:** Smartphone screens presented by customers are strictly rejected as proof of payment.
   5. **No Synthetic TRX:** Backend generation of synthetic reference strings (`TRX-` via `uniqid()`) is prohibited.
 * **The MariaDB Nullable Column Vulnerability:**
   - Under SQL standards, `NULL != NULL` in unique indexes. If composite columns (`provider`, `merchant_account_id`, `payment_ref`) allow `NULL`, multiple identical rows with `NULL` bypass duplicate protection.
   - To enforce 100% database-level integrity, digital payments are separated from cash across two tables:
     1. General Tender Ledger (`order_payments`): Records financial amounts for all tenders; cash payments carry zero digital reference requirements.
-    2. Dedicated Digital Ledger (`order_digital_payments`): Mandatory `NOT NULL` for `provider`, `merchant_account_id`, and `payment_ref`, enforced by `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)`.
-* **Unresolved Technical Dependency (UTD-4):**
-  - A 4-to-8 digit bank code is **not globally unique**; it can repeat across banks, accounts, or rollover cycles.
-  - Official reference formats, lengths, character sets, and uniqueness scopes from ABA PayWay and NBC Bakong must be confirmed with merchant bank technical documentation prior to finalizing database constraints.
+    2. Dedicated Digital Ledger (`order_digital_payments`): Mandatory `NOT NULL` for `provider`, `merchant_account_id`, and `payment_ref`, enforced by `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)` with explicit foreign keys to `order_payments` and `orders`.
+* **Transaction Validation & Rollback Contract:**
+  - Database constraints alone cannot verify that every `khqr` tender possesses a corresponding detail row. This is enforced via backend application transactions:
+    * Each digital payment must have exactly one row in `order_digital_payments`.
+    * Cash payments must **never** create a row in `order_digital_payments`.
+    * If digital insertion fails (duplicate bank reference or null attribute), the entire transaction rolls back atomically.
+* **Provisional Reference Format Notice:**
+  - Describing references as "4 to 8 digits" is **provisional** and not a confirmed universal standard.
+  - References are **not globally unique**; uniqueness is scoped strictly to `(provider, merchant_account_id, payment_ref)`.
+  - Official ABA PayWay and NBC Bakong documentation must be reviewed before finalizing format rules.
 
-### 1.2 TD-2: Bank Reversal Finality & Blockade Reality (UTD-3)
-* **Problem Statement:** A local status update to `'cancelled'` does **not** stop external bank clearinghouse processing. Furthermore, inspecting a bank mobile app or statement snapshot at a single point in time **does not guarantee that a delayed reversal cannot settle later**.
+### 1.2 TD-2: Bank Reversal Outcomes, Timeout Safety & Unapproved Waiting Periods (UTD-3)
+* **Three Distinct Reversal Outcomes:**
+  1. *Definitive Bank Rejection:* Bank clearinghouse explicitly rejects the reversal request.
+  2. *Request Timeout with Unknown Bank Outcome:* Network disconnect or gateway timeout occurs. **A timeout must NEVER be treated as a definitive rejection.**
+  3. *Confirmed Bank Settlement:* Reversal cleared and credited to the customer.
 * **Safety Reality on Offline LAN Counter:**
   - On an offline local LAN counter operating without direct bank gateway API integrations, **no automated mechanism exists to guarantee bank reversal finality**.
+  - **No Automatic Retry on Timeout:** An uncertain reversal request must **never be automatically retried**, as retrying in-flight requests risks duplicate debits on the banking network.
   - **Replacement Cash Payout is Strictly BLOCKED:** The POS cashier interface **must not provide an active replacement-cash payout button or automated workflow** while the bank outcome remains uncertain.
-  - **Process Remains Unresolved:** The replacement cash refund workflow is classified as an **Unresolved Technical Dependency**. It requires an approved business operational procedure (e.g. mandatory 72-hour holding period or written bank clearance) before any technical implementation can be designed.
-* **Archival Controls:** If an operational procedure is formally approved in the future, it must enforce Manager PIN entry, an atomic conditional lock, append-only event logging (`order_refund_events`), and foreign key linking via `replaced_refund_id`.
+  - **Unapproved 72-Hour Example Clarification:** Any mention of a "72-hour waiting period" is strictly an **unapproved operational example requiring bank and owner validation**. A 72-hour delay does NOT prove bank finality and does NOT permit automatic cash payouts.
+  - **Process Remains Unresolved:** The replacement cash refund workflow is classified as an **Unresolved Technical Dependency**, requiring an owner-approved operational procedure before any technical implementation can be designed.
 
 ### 1.3 TD-3: Reporting Timestamps & Period Bounding (UTD-2)
 * **Timestamp Distinctions:**
@@ -112,14 +122,15 @@ Phase 0 strictly prohibits and does not require:
   - Removed undefined flags (`is_initial_migration`) and non-existent fields (the schema in [init.php](database/init.php#L242-L280) possesses `total_usd`, `paid_at`, and `cancelled_at`, but **does NOT contain `orders.refunded_amount`**).
 * **Period-Aware Fallback Principles:**
   - Payment recognition and refund recognition are evaluated independently within `[start_date, end_date)`.
-  - Historical revenue is **not silently omitted** when an order has both historical payment information and subsequent ledger payments.
-  - The existence of a subsequent ledger payment must not automatically exclude the entire historical order amount.
+  - Historical revenue is **never silently omitted** when an order has both historical payment information and subsequent ledger payments.
+  - A subsequent ledger payment must **never be automatically added** to the full historical order total.
+  - The existence of a subsequent ledger payment must not automatically exclude the historical order amount.
   - Split payments must not be double-counted.
   - Unreconstructable amounts are classified as **Historical Reconciliation Exceptions**, reported under audit, and **never silently included in confirmed revenue or treated as zero**.
 
 #### Realistic Historical Scenarios:
 1. **Fully Historical Paid Order (Unconflicted):** Order #101 created pre-cutover, `paid_at = '2026-10-15'`, `total_usd = 25.00`, `payment_status = 'paid'`. Zero rows in `order_payments` or `order_refunds`. Recognized in Oct 2026 as Confirmed Historical Payment = +$25.00. 100% confirmed.
-2. **Historical Order with Subsequent Partial Ledger Payment (Split Payment):** Order #102 created pre-cutover, `total_usd = 50.00`, `payment_status = 'paid'`. After cutover, a partial payment of $20.00 is recorded in `order_payments` (`recorded_at = '2026-11-10'`). Confirmed Ledger in Nov = +$20.00. Historical $50.00 cannot be proved to be partial or complete without double-counting; it is isolated as a **Historical Split-Payment Exception** ($50.00 under audit on Exceptions tab) rather than guessing a formula.
+2. **Historical Order with Subsequent Partial Ledger Payment (Split Payment):** Order #102 created pre-cutover, `total_usd = 50.00`, `payment_status = 'paid'`. After cutover, a partial payment of $20.00 is recorded in `order_payments` (`recorded_at = '2026-11-10'`). Confirmed Ledger in Nov = +$20.00. The historical database cannot prove whether the $20.00 is part of the $50.00 or additional to it; the historical order is isolated as a **Historical Split-Payment Exception** ($50.00 under audit on Exceptions tab) rather than guessing an allocation formula.
 3. **Historical Order with Multiple Post-Cutover Partial Refunds:** Order #103 created pre-cutover, `total_usd = 60.00`, `payment_status = 'paid'`. Two partial refunds occur post-cutover: Refund A for $10 on Nov 12, Refund B for $15 on Nov 15. In Oct 2026, Confirmed Payment = +$60.00. In Nov 2026, Settled Refunds = +$25.00 ($10 + $15). Payments and refunds recognized independently in respective periods without disappearing.
 4. **Historical Cancellation with No Reconstructable Refund Amount:** Order #104 created pre-cutover, `total_usd = 40.00`, `payment_status = 'paid'`, `cancelled_at = '2026-10-18'`. `orders.refunded_amount` does not exist in schema. Excluded from Confirmed Revenue and classified as a **Historical Unreconciled Cancellation Exception** ($40.00 under audit) for owner manual review.
 
@@ -142,10 +153,10 @@ Phase 0 strictly prohibits and does not require:
 | Table Name | Operation | Proposed Columns / Modifications | Purpose |
 | :--- | :--- | :--- | :--- |
 | `orders` | Read / Update | `receipt_issued_at DATETIME NULL`<br/>`receipt_number VARCHAR(50) NULL`<br/>`discount_approved_by INT NULL` | Decouple electronic receipt from physical print; track manager discount authorization. |
-| `order_payments` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`payment_method ENUM('cash','khqr') NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`exchange_rate INT NOT NULL`<br/>`cashier_id INT NOT NULL`<br/>`recorded_at DATETIME NOT NULL`<br/>`INDEX idx_order_payments_order (order_id)`<br/>`INDEX idx_order_payments_recorded (recorded_at)` | General tender ledger for cash & digital payments; frozen exchange rates; cash carries no digital reference constraints. |
-| `order_digital_payments` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`payment_id INT NOT NULL UNIQUE`<br/>`order_id INT NOT NULL`<br/>`provider VARCHAR(50) NOT NULL`<br/>`merchant_account_id VARCHAR(50) NOT NULL`<br/>`payment_ref VARCHAR(100) NOT NULL`<br/>`provider_event_at DATETIME NULL`<br/>`created_at DATETIME NOT NULL`<br/>`CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)` | Dedicated digital transaction ledger; mandatory non-null attributes enforce 100% duplicate protection without nullable loopholes. |
-| `order_refunds` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`payment_id INT NULL`<br/>`refund_seq INT NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`settlement_status ENUM('authorized_pending','cash_disbursed','bank_reversal_pending','settled','failed','bank_reversal_blocked','cancelled')`<br/>`authorized_by INT NOT NULL`<br/>`disbursed_at DATETIME NULL`<br/>`settled_at DATETIME NULL`<br/>`bank_reversal_ref VARCHAR(100) NULL`<br/>`replaced_refund_id INT NULL` | Finite state machine ledger for customer refunds and reversals. |
-| `order_refund_events` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`refund_id INT NOT NULL`<br/>`event_type VARCHAR(50) NOT NULL`<br/>`from_status VARCHAR(50) NOT NULL`<br/>`to_status VARCHAR(50) NOT NULL`<br/>`actor_id INT NOT NULL`<br/>`notes TEXT NULL`<br/>`created_at DATETIME NOT NULL` | Append-only audit history for refund state transitions. |
+| `order_payments` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`payment_method ENUM('cash','khqr') NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`exchange_rate INT NOT NULL`<br/>`cashier_id INT NOT NULL`<br/>`recorded_at DATETIME NOT NULL`<br/>`CONSTRAINT fk_order_payments_order FOREIGN KEY (order_id) REFERENCES orders(id)`<br/>`INDEX idx_order_payments_order (order_id)`<br/>`INDEX idx_order_payments_recorded (recorded_at)` | General tender ledger for cash & digital payments; explicit foreign keys; cash carries no digital reference constraints. |
+| `order_digital_payments` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`payment_id INT NOT NULL UNIQUE`<br/>`order_id INT NOT NULL`<br/>`provider VARCHAR(50) NOT NULL`<br/>`merchant_account_id VARCHAR(50) NOT NULL`<br/>`payment_ref VARCHAR(100) NOT NULL`<br/>`provider_event_at DATETIME NULL`<br/>`created_at DATETIME NOT NULL`<br/>`CONSTRAINT fk_digital_payments_payment FOREIGN KEY (payment_id) REFERENCES order_payments(id) ON DELETE CASCADE`<br/>`CONSTRAINT fk_digital_payments_order FOREIGN KEY (order_id) REFERENCES orders(id)`<br/>`CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)` | Dedicated digital transaction ledger; mandatory non-null attributes enforce 100% duplicate protection without nullable loopholes. |
+| `order_refunds` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`payment_id INT NULL`<br/>`refund_seq INT NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`settlement_status ENUM('authorized_pending','cash_disbursed','bank_reversal_pending','settled','failed','bank_reversal_timeout','bank_reversal_blocked','cancelled')`<br/>`authorized_by INT NOT NULL`<br/>`disbursed_at DATETIME NULL`<br/>`settled_at DATETIME NULL`<br/>`bank_reversal_ref VARCHAR(100) NULL`<br/>`replaced_refund_id INT NULL`<br/>`CONSTRAINT fk_order_refunds_order FOREIGN KEY (order_id) REFERENCES orders(id)` | Finite state machine ledger for customer refunds and reversals. |
+| `order_refund_events` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`refund_id INT NOT NULL`<br/>`event_type VARCHAR(50) NOT NULL`<br/>`from_status VARCHAR(50) NOT NULL`<br/>`to_status VARCHAR(50) NOT NULL`<br/>`actor_id INT NOT NULL`<br/>`notes TEXT NULL`<br/>`created_at DATETIME NOT NULL`<br/>`CONSTRAINT fk_order_refund_events_refund FOREIGN KEY (refund_id) REFERENCES order_refunds(id) ON DELETE CASCADE` | Append-only audit history for refund state transitions. |
 | `bays` | Update | Index on `(status, is_active)` | Atomic conditional reservation locks. |
 | `bay_tasks` | Update | `task_sequence INT NOT NULL DEFAULT 1`<br/>`status ENUM('waiting','in_progress','completed','pending_prereq')` | Enforce Lift First $\rightarrow$ Wash Second staging. |
 | `settings` | Read / Insert | `receipt_v2_cutover_timestamp DATETIME` | Authorized cutover date. |
@@ -176,7 +187,7 @@ SELECT
         WHEN o.status = 'finished' AND o.payment_status = 'unpaid' THEN 'Finished but Unpaid'
         WHEN o.status = 'paid' AND o.cancelled_at IS NOT NULL THEN 'Paid but Cancelled (Unknown Refund Amount)'
         WHEN o.status = 'paid' AND o.finished_at IS NULL AND o.cancelled_at IS NULL THEN 'Paid but Uncompleted'
-        WHEN o.status = 'paid' AND EXISTS (SELECT 1 FROM order_payments op WHERE op.order_id = o.id) THEN 'Historical Split Payment'
+        WHEN o.status = 'paid' AND EXISTS (SELECT 1 FROM order_payments op WHERE op.order_id = o.id) THEN 'Historical Split Payment (Allocation Indeterminate)'
         ELSE 'Timestamp Conflict'
     END AS exception_reason
 FROM orders o
@@ -228,7 +239,7 @@ WHERE o.created_at < (SELECT setting_value FROM settings WHERE setting_key = 're
   2. Implement refund finite state machine in `order_refunds`:
      - Manager PIN required for `authorized_pending`.
      - Atomic conditional disbursement lock (`rowCount === 1` opens cash drawer).
-     - Bank reversal replacement payout remains BLOCKED pending an approved operational procedure.
+     - Bank reversal timeout and uncertain outcomes block replacement cash payouts pending an approved operational procedure.
      - Append-only event history in `order_refund_events`.
      - Enforce cumulative refund ceiling ($\sum \text{Refunds} \le \text{Total Payments}$).
 
@@ -254,7 +265,7 @@ The 58 test specifications defined in [POS-IMPLEMENTATION-TEST-MATRIX.md](POS-IM
 | **Payment Before Service Gate** | TC-01 to TC-08 | Verify unpaid orders cannot enter bays; electronic receipt issuance gates apron. | Planned (Unexecuted) |
 | **Receipt Decoupling & Printing** | TC-09 to TC-14 | Verify printer paper-out does not block service; verify reprint read-only safety. | Planned (Unexecuted) |
 | **KHQR Scoped Matching** | TC-15 to TC-22 | Verify phone/soundbox matching; reject customer screenshots; test two-table constraint. | Planned (Unexecuted) |
-| **Refund Safety & Finality** | TC-23 to TC-32 | Verify atomic disbursement lock; verify replacement payout blocked without procedure. | Planned (Unexecuted) |
+| **Refund Safety & Finality** | TC-23 to TC-32 | Verify atomic disbursement lock; verify replacement payout blocked on uncertain reversal. | Planned (Unexecuted) |
 | **Period-Aware Financial Reporting** | TC-33 to TC-42 | Verify decoupled fallbacks; multi-refund orders; reporting period boundary isolation. | Planned (Unexecuted) |
 | **Multi-Stage Lift-First Dispatch** | TC-43 to TC-50 | Verify Bay 4 lift executes before wash; verify deferred wash bay reservation. | Planned (Unexecuted) |
 | **Walk-in Guest & Concurrency** | TC-51 to TC-58 | Verify blank customer name defaults to `'Walk-in Guest'`; verify idempotency under double-clicks. | Planned (Unexecuted) |

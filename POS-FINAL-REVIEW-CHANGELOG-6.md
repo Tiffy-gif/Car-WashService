@@ -1,57 +1,75 @@
-# Final POS Engineering Review – Correction Changelog (Round 6, 8, 9 & 10 Addenda)
+# Final POS Engineering Review – Correction Changelog (Round 6, 8, 9, 10 & 11 Addenda)
 
 **Document ID:** POS-REV-2026-006
 **Project:** Car-WashService
-**Date:** November 8, 2026 (Updated - Round 10)
+**Date:** November 8, 2026 (Updated - Round 11)
 **Status:** Business Rules Harmonized – Technical Dependencies Documented – Awaiting Separate Executive Authorization
 
 ---
 
-## Round 10 Addendum: Final Hardening, Reconciliations & Safety Controls (November 8, 2026)
+## Round 11 Addendum: Architectural Integrity, Split-Payment Accounting & Timeout Safety (November 8, 2026)
 
-Following the Round 9 GitHub architectural review, the POS documentation suite was updated to resolve six remaining technical design and operational safety issues:
+Following the Round 10 GitHub architectural review, the POS documentation suite was refined to resolve six technical consistency issues across historical accounting, database schema contracts, bank timeout safety, and reference specifications:
 
-### 1. Area A: UTD-1 Historical Financial Reporting & Realistic Scenarios
-- **Correction of Fallback Omission:** Corrected reporting logic so that historical revenue is **never silently omitted** when an order has both historical payment information and subsequent post-cutover ledger payments.
-- **Double-Counting & Omission Prevention:** The existence of a subsequent ledger payment does not automatically exclude the historical order amount, nor is it double-counted. Unreconstructable legacy split amounts are isolated as **Historical Split-Payment Reconciliation Exceptions** and reported under audit on the Exceptions tab.
-- **Independent Refund Evaluation:** Historical and post-cutover refunds are evaluated completely independently from historical payments; a post-cutover refund never causes a historical payment to disappear.
-- **Historical Cancellations:** Because [`init.php`](database/init.php#L242-L280) lacks `orders.refunded_amount`, pre-cutover cancellations with `payment_status = 'paid'` are classified as **Historical Unreconciled Cancellation Exceptions** rather than guessing unverified numbers.
-- **Clear Metric Separation:** Reports strictly separate **Confirmed Net Settled Revenue** from **Unreconciled Historical Amounts (Under Audit)**.
-- **Four Realistic Examples Added:**
-  1. *Fully historical paid order:* Order #101 ($25.00) confirmed 100% in pre-cutover period without exceptions.
-  2. *Historical order with subsequent ledger payment (split payment):* Order #102 ($50.00 historical total + $20.00 post-cutover ledger). $20.00 confirmed in ledger period; $50.00 isolated under audit on Exceptions tab.
-  3. *Historical order with multiple post-cutover refunds:* Order #103 ($60.00 historical total; $10.00 + $15.00 post-cutover refunds). Payment confirmed in pre-cutover period; refunds recognized independently in post-cutover period.
-  4. *Historical cancellation with no reconstructable refund:* Order #104 ($40.00 cancelled pre-cutover). Isolated as an unreconciled cancellation exception under audit.
+### 1. Area A: Historical Split-Payment Accounting & Allocation Clarity
+- **Explicit Accounting Distinctions:** Formally differentiated:
+  1. *Historical Order Total (`orders.total_usd`):* The static order price stored in the legacy table.
+  2. *Amount Historically Recognized as Paid:* Verified only for unconflicted pre-cutover orders where `payment_status = 'paid'` and zero subsequent ledger rows exist.
+  3. *Subsequent Ledger Payments (`order_payments.amount_usd`):* Discrete payments recorded after cutover.
+  4. *Remaining Unreconciled Amount:* Ambiguous amounts requiring manual executive audit.
+  5. *Subsequent Refunds (`order_refunds.amount_usd`):* Discrete refunds recorded post-cutover.
+- **Strict Accounting Principles:**
+  - Never automatically add a subsequent ledger payment to the full historical order total (prevents double-counting).
+  - Never silently exclude an entire historical order simply because a subsequent ledger payment exists (prevents revenue loss).
+  - Never assume the historical order total equals the amount actually paid when subsequent payments occur.
+  - Do not invent an arbitrary allocation formula (such as `$50 - $20 = $30`) without supporting source data.
+- **Exceptions Tab Double-Counting Defense:**
+  - In Example 2 (Order #102: $50 historical total, $20 subsequent post-cutover payment), the source database cannot establish whether the $20 was part of the $50 (balance payoff) or additional to it (upsell/add-on).
+  - The $20 is recognized as confirmed ledger revenue in the post-cutover period.
+  - The historical $50 is **not** added to confirmed historical revenue (preventing double-counting) and **not** treated as zero. It is isolated on the **Historical Unreconciled Exceptions** tab as an unreconciled historical amount under audit for owner manual review.
 
-### 2. Area B: UTD-4 KHQR Database Constraint Consistency (Two-Table Architecture)
-- **Nullable Column Contradiction Resolved:** Documented that in MariaDB/MySQL InnoDB, `NULL != NULL` in composite unique indexes. If fields are nullable, rows containing `NULL` bypass duplicate protection.
-- **Two-Table Schema Specification:**
-  - `order_payments`: General tender ledger for cash and digital transactions. Cash payments carry zero digital reference requirements.
-  - `order_digital_payments`: Dedicated digital ledger enforcing strictly `NOT NULL` on `provider`, `merchant_account_id`, and `payment_ref`, protected by `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)`.
-- **Reference Scoping & Unresolved Dependency:** Clarified that 4-to-8 digit reference codes are not globally unique; format, character set, and rollover cycle remain an **Unresolved Technical Dependency** pending merchant bank documentation.
+### 2. Area B: Two-Table Digital Payment Architecture & Transaction Integrity
+- **Normalized Schema Contract:** Replaced single-table proposals with a normalized two-table architecture:
+  - `order_payments`: General tender ledger for cash and digital transactions. Cash payments carry zero digital reference requirements. Includes foreign key `fk_order_payments_order` to `orders(id)`.
+  - `order_digital_payments`: Dedicated digital ledger enforcing mandatory `NOT NULL` for `provider`, `merchant_account_id`, and `payment_ref`, with `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)` and foreign keys to `order_payments(id)` and `orders(id)`.
+- **Application Transaction Contract:**
+  - Database constraints alone cannot enforce that each digital tender has exactly one detail row, nor that cash tenders have none.
+  - Backend application transaction logic enforces that every `khqr` tender must insert a valid detail record; cash tenders must never insert a detail record; and if digital insertion fails (duplicate reference or missing field), the entire database transaction is rolled back atomically.
 
-### 3. Area C: UTD-3 Bank Reversal Finality & Replacement Cash Safety
-- **Reversal Finality Reality:** Reaffirmed that local `cancelled` status is not proof of bank cancellation, and statement snapshots do not prove a delayed reversal won't settle later in clearing.
-- **Replacement Cash Blockade:** On an offline local LAN counter without real-time bank APIs, **no automated bank finality mechanism exists**. The replacement cash payout is strictly **BLOCKED**.
-- **Process Kept Unresolved:** The replacement cash refund workflow is classified as an **Unresolved Technical Dependency**, requiring an owner-approved operational procedure (e.g. formal bank clearance or mandatory dispute waiting period) before any implementation.
-- **Archival Controls:** Maintained append-only audit logging (`order_refund_events`), Manager PIN authorization, atomic conditional locks, and `replaced_refund_id` linking if an operational procedure is established.
+### 3. Area C: Bank Reversal Outcomes, Timeout Safety & Unapproved Waiting Periods
+- **Three Distinct Outcomes Clarified:**
+  1. *Definitive Bank Rejection:* Bank clearinghouse explicitly rejects the reversal request.
+  2. *Request Timeout with Unknown Bank Outcome:* Network disconnect or gateway timeout occurs.
+  3. *Confirmed Bank Settlement:* Reversal cleared and credited to the customer.
+- **Timeout Safety Rules:**
+  - A timeout must **never** be treated as a definitive bank rejection.
+  - An uncertain reversal must **never be automatically retried**, as retrying in-flight requests risks duplicate debits on the banking network.
+  - When the bank outcome is uncertain, **replacement cash payout is strictly BLOCKED**.
+  - A retry is permitted ONLY when reliable evidence establishes that the original request was dropped, and an approved operational retry procedure exists.
+- **Unapproved 72-Hour Example Clarification:** Any mention of a "72-hour waiting period" is strictly an **unapproved operational example requiring bank and owner validation**. A 72-hour delay does NOT prove bank finality and does NOT permit automatic cash payouts.
 
-### 4. Area D: Phase 0 Strictly Read-Only Inspection Boundaries
-- **Uncompromising Prohibitions:** Explicitly barred Phase 0 from starting stopped database services, repairing unstable databases, creating databases, running dumps, or performing restore operations.
-- **Inspection Protocol:** If the database is stopped or down, Phase 0 inspects service status, configuration files (`my.ini`), and system event logs, reporting the status in the log without attempting to start or modify it.
-- **Working Tree Preservation:** Explicitly barred cleaning, resetting, stashing, or overwriting existing user changes in the Git working tree.
+### 4. Area D: Historical Exception Reporting Periods & Boundary Isolation
+- **Lifetime Registry vs. Period Metrics:** Distinctly separated period-specific report totals (bounded strictly by `recorded_at >= :start_timestamp AND recorded_at < :end_timestamp`) from lifetime exception registries (which list all unresolved historical orders under audit).
+- **Future Event Isolation:** Subqueries offsetting historical sums must enforce strict interval bounding, preventing future ledger adjustments from altering closed historical reporting periods.
+- **Handling Delayed Notifications:** Late-recorded events fall into the period recorded/settled, preserving the immutability of closed past reports.
 
-### 5. Area E: Phase 5 Recovery and Rollback Safety
-- **Separation of Concerns:** Strictly separated **Application Code Rollback** (reverting PHP/JS files via Git commit tag) from **Database Disaster Recovery** (restoring a data dump).
-- **Transaction Loss Warning:** Documented that restoring a cold backup destroys all transactional data created after the backup timestamp.
-- **Explicit Recovery Authorization:** Database recovery requires separate executive authorization, formal assessment of potential transaction loss, backup verification, and staging validation in an isolated database (`carwash_restore_test`).
-- **No Direct Production Overwrite:** Directly restoring over the production database is strictly prohibited without explicit authorization.
-- **Unverified Timelines Removed:** Removed all unverified claims of a "five-minute recovery or rollback time".
+### 5. Area E: Provisional KHQR Reference Format
+- **Provisional Notice:** Clarified that the description of bank references as "4 to 8 digits" is **provisional** and not a confirmed universal standard.
+- **Scoped Uniqueness:** References are not globally unique; uniqueness is scoped strictly to `(provider, merchant_account_id, payment_ref)`.
+- **Bank Specs Unverified:** Marked exact reference formats, lengths, character sets, and rollover cycles as an **Unresolved Technical Dependency** pending official merchant bank documentation.
 
-### 6. Area F: Git Governance & Report Accuracy
-- **Activity Distinction:** Clearly distinguished local working-tree modifications from remote Git history.
-- **Remote Baseline Recorded:** Acknowledged existing commit `37417efe889d18783eb3a217897eb3ae770b0113` on `origin/main`.
-- **Zero Agent Commits/Pushes:** Confirmed that during this Round 10 session, zero Git commits and zero Git pushes were created by the agent. All updates exist strictly as uncommitted working-tree modifications.
+### 6. Area F: Git Governance & Reporting Accuracy
+- **Remote Baseline Recorded:** Acknowledged commit `c47d133571614f5bc75ae3561af93accd3d6adb0` as the remote base on `origin/main`.
+- **Zero Agent Commits/Pushes:** Confirmed that during this Round 11 session, zero Git commits and zero Git pushes were created by the agent. All updates exist strictly as uncommitted working-tree modifications.
+
+---
+
+## Round 10 Addendum Summary (November 8, 2026)
+- Eliminated fallback omission flaws; introduced four realistic historical scenarios.
+- Resolved MariaDB nullable unique constraint vulnerabilities via Two-Table architecture.
+- Enforced strict blockade on replacement cash payouts for uncertain bank reversals.
+- Renamed Phase 0 to strictly read-only inspection; barred service start, table repairs, and database creation.
+- Separated application code rollback from database disaster recovery; warned of transaction loss.
 
 ---
 
@@ -60,7 +78,6 @@ Following the Round 9 GitHub architectural review, the POS documentation suite w
 - Formulated period-aware independent evaluation of payments and refunds within half-open intervals `[start_date, end_date)`.
 - Replaced global `UNIQUE (payment_method, payment_ref)` with scoped digital uniqueness.
 - Prohibited treating statement snapshots as proof of bank reversal non-execution.
-- Renamed Phase 0 to strictly read-only inspection.
 
 ---
 
@@ -91,6 +108,6 @@ Following the Round 9 GitHub architectural review, the POS documentation suite w
 ## Read-Only Integrity Safeguards Confirmation
 - **Zero Application Code Modified:** No PHP, JS, CSS, HTML, or configuration files were changed.
 - **Zero Database Operations Executed:** No SQL migrations, queries, schema changes, backup dumps, or restore operations were run.
-- **Zero Git Commits or Pushes:** No `git commit` or `git push` commands were executed during Round 10.
+- **Zero Git Commits or Pushes:** No `git commit` or `git push` commands were executed during Round 11.
 - **Permanent LAN Self-Sufficiency:** Counter operations maintain 0% external cloud dependencies.
 - **Governance:** All 58 test cases remain planned specifications; system remains awaiting separate executive authorization.
