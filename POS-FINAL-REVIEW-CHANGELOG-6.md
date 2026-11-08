@@ -1,9 +1,68 @@
-# Final POS Engineering Review – Correction Changelog (Round 6, 8, 9, 10, 11, 12, 13, 14 & 15 Addenda)
+# Final POS Engineering Review – Correction Changelog (Round 6, 8, 9, 10, 11, 12, 13, 14, 15 & 16 Addenda)
 
 **Document ID:** POS-REV-2026-006
 **Project:** Car-WashService
-**Date:** November 8, 2026 (Updated - Round 15 Final Closure)
+**Date:** November 8, 2026 (Updated - Round 16 Final Closure)
 **Status:** Business Rules Harmonized – Technical Dependencies Documented – Awaiting Separate Executive Authorization
+
+---
+
+## Round 16 Addendum: Complete Exception Concurrency, KHQR Evidence Hierarchy & Git Baseline Harmonization (November 8, 2026)
+
+Following the Round 15 review, the four POS engineering documents were corrected and finalized to resolve remaining technical issues across Git history tracking, complete exception registry concurrency rules, KHQR settlement evidence hierarchy, and cross-document metadata consistency:
+
+### 1. Correction 1: Git History Harmonization & Baseline Clarification
+- **Git Branch, HEAD & Remote Tracking Verification:**
+  - Active branch: `main` tracking `origin/main`.
+  - HEAD commit: `6fa37a3d76193f7e8bb746bb12c4a8e89ae18e9b`.
+  - Remote tracking commit: `origin/main` at `6fa37a3d76193f7e8bb746bb12c4a8e89ae18e9b`.
+- **Commit History Analysis for `24b082a` & `6fa37a3`:**
+  - *Local Commit `24b082a` (`24b082a35bad799b2328a4c12e1d0b74d75cf783`):* Authored by `Tiffy-git <nhaxtiffy@gmail.com>` on `Sun Nov 8 13:12:47 2026 +0700`. Its parent is Round 14 base commit `529e5c8b640bb1261267a93ceb4ea4cf7e854e8e`. It captured initial Round 15 documentation updates across all 4 Markdown files (`POS-BUSINESS-RULES-OPEN-QUESTIONS.md`, `POS-FINAL-BUSINESS-RULES.md`, `POS-FINAL-IMPLEMENTATION-PLAN.md`, `POS-FINAL-REVIEW-CHANGELOG-6.md`). It did **NOT** exist prior to Round 15.
+  - *Subsequent Commit `6fa37a3` (`6fa37a3d76193f7e8bb746bb12c4a8e89ae18e9b`):* Authored by `Tiffy-git <nhaxtiffy@gmail.com>` on `Sun Nov 8 13:18:50 2026 +0700`. Its parent is `24b082a`. It captured subsequent Round 15 additions to `POS-FINAL-IMPLEMENTATION-PLAN.md` and `POS-FINAL-REVIEW-CHANGELOG-6.md`.
+  - Both commits were pushed to `origin/main`, leaving the repository in a clean state prior to Round 16 documentation edits.
+- **Strict Distinction Between Committed & Uncommitted Changes:**
+  - *Committed Changes (`529e5c8` $\longrightarrow$ `6fa37a3`):* Encompasses all Round 15 corrections committed and pushed to `main` (4 files, 378 insertions(+), 35 deletions(-)).
+  - *Uncommitted Working-Tree Changes:* Encompasses strictly Round 16 documentation refinements across the permitted four files.
+
+### 2. Correction 2: Complete Exception Registry Concurrency Rules
+- **Universal Rule for Version Incrementing:**
+  - Documented that **EVERY operation that mutates exception status, reconciliation figures, or audit evidence MUST increment `lock_version` (`lock_version = lock_version + 1`)**:
+    1. *Background Reconciliation Updates:* When periodic report sync sweeps or background jobs detect new post-cutover ledger payments or refunds and update `subsequent_ledger_payments` or `subsequent_refunds`, `lock_version` must be incremented. In the upsert query (`INSERT ... ON DUPLICATE KEY UPDATE`), `lock_version` increments whenever tallies change, instantly invalidating stale review screens.
+    2. *Exception Reopening:* When a manager reopens a resolved exception (`resolved` $\longrightarrow$ `under_review`), the update must execute conditionally (`WHERE id = :id AND lock_version = :expected_lock_version`) and increment `lock_version = lock_version + 1`.
+    3. *Manager Resolution:* When a manager resolves an exception (`open` / `under_review` $\longrightarrow$ `resolved`), the update must execute conditionally (`WHERE id = :id AND lock_version = :expected_lock_version`) and increment `lock_version = lock_version + 1`.
+    4. *Any Other Status or Evidence Modification:* Any attachment of supporting evidence, change of reviewer, or operational note update must verify expected `lock_version` and increment it.
+- **Atomic Single-Transaction Requirement:**
+  - The update to `historical_exception_registry` and the insertion of the transition or discovery record in `historical_exception_events` MUST be executed atomically within a single database transaction (`BEGIN ... COMMIT`). If either operation fails or if the conditional update affects 0 rows, the entire transaction is rolled back.
+- **Stale Collision Handling:**
+  - In any conditional update, if `rowCount === 0` (indicating concurrent collision or background figure update), the transaction rolls back, and the API returns `HTTP 409 Conflict` (`EXCEPTION_STALE_RECORD`). The client interface requires reloading current evidence and figures before another decision can be submitted.
+
+### 3. Correction 3: KHQR Settlement Evidence Hierarchy
+- **Explicit Hierarchy of Settlement Proof:**
+  - **Primary Authoritative Evidence:** The official merchant mobile banking application's settled transaction statement history is the **PRIMARY and sole authoritative proof of settlement**.
+  - **Secondary / Investigative Assists Only:** Counter smartphone push notifications, SMS alerts, and counter soundbox voice announcements serve strictly as **assistive investigation tools** to alert the cashier that funds may have arrived. They **CANNOT independently establish settlement**, as notifications and SMS alerts can be delayed, truncated, spoofed, cleared, or silenced.
+- **Mandatory 5-Point Statement Verification:**
+  - Before confirming payment or entering references into the POS, the cashier must verify all five attributes directly in the merchant banking app transaction statement:
+    1. *Merchant Account:* Funds are credited to the verified, authorized merchant counter destination account.
+    2. *Amount:* Transfer amount matches the exact order total.
+    3. *Currency:* Currency matches exactly (USD vs. KHR; e.g., $10.00 is never satisfied by 10,000 KHR).
+    4. *Transaction Status:* Explicitly marked as `SUCCESS` or `COMPLETED` (not pending, held, or reversed).
+    5. *Genuine Bank Reference:* Authentic bank transaction reference code (`payment_ref`) issued by the clearing bank.
+- **Investigate-First Rule Preserved:**
+  - When a customer claims to have completed a transfer after the local QR intent expired:
+  - Cashiers are strictly forbidden from immediately generating a fresh dynamic QR code or requesting another payment.
+  - Cashier must thoroughly investigate the primary merchant banking app statement first.
+  - Never generate a replacement QR or request another payment before investigating whether the original transfer arrived.
+- **Zero Invented Bank APIs:**
+  - Local counter operations rely strictly on physical merchant counter device statement inspection; no direct bank webhooks, automated polling APIs, or simulated push protocols are assumed.
+  - Local intent expiration is purely a UI presentation timeout, NEVER an indicator of bank payment failure.
+
+### 4. Correction 4: Cross-Document Metadata Harmonization
+- **Metadata Synchronization:**
+  - Synchronized all four permitted Markdown files (`POS-BUSINESS-RULES-OPEN-QUESTIONS.md`, `POS-FINAL-BUSINESS-RULES.md`, `POS-FINAL-IMPLEMENTATION-PLAN.md`, `POS-FINAL-REVIEW-CHANGELOG-6.md`) to `November 8, 2026 (Updated - Round 16 Final Closure)`.
+- **Preservation of Historical Integrity:**
+  - Preserved all Round 6, 8, 9, 10, 11, 12, 13, 14, and 15 historical records and changelog entries without rewriting or obscuring historical facts.
+- **Preservation of Architectural Guardrails:**
+  - Retained all six approved business decisions, Phase 0 read-only inspection safety boundaries, and the prohibition of premature implementation.
 
 ---
 

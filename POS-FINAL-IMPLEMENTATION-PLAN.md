@@ -3,7 +3,7 @@
 **Document ID:** POS-PLN-2026-FINAL
 **Project:** Car-WashService (Local Counter Terminal)
 **Scope:** Phased Engineering Roadmap, Technical Migration, Verification Plan, Release Governance
-**Date:** November 8, 2026 (Updated - Round 15 Final Closure)
+**Date:** November 8, 2026 (Updated - Round 16 Final Closure)
 **Status:** Engineering Proposal – Awaiting Separate Executive Authorization (NOT Production-Ready Until Released)
 
 ---
@@ -84,25 +84,34 @@ Phase 0 strictly prohibits and does not require:
   - Inserting an unconfirmed payment into `order_digital_payments` with a provisional fake reference (like `PROV-...`) would corrupt the ledger with uncollected revenue and violate unique constraints.
   - *Standard Local Counter Policy (Approved Scope):* In-flight pending KHQR payments remain staged in browser memory / IndexedDB (`PosStorage`). Zero rows are written to `order_payments` or `order_digital_payments` until positive merchant confirmation is obtained and the genuine `payment_ref` is entered.
   - *Future Server-Side Staging (Pending Approval):* If server-side persistence of unverified payment intents is required, it requires either adding a nullable `payment_ref` with `settlement_status` to `order_digital_payments` or creating a dedicated non-financial staging table `pos_payment_intents`. This limitation is logged as **Unresolved Technical Dependency (UTD-4 Addendum)**.
-* **Proposed KHQR Intent Expiry, "Investigate First" Workflow & Duplicate Prevention:**
+* **Proposed KHQR Intent Expiry, Settlement Evidence Hierarchy & "Investigate First" Workflow:**
+  - **KHQR Settlement Evidence Hierarchy & Mandatory Verification:**
+    * **Primary Authoritative Evidence:** The official merchant mobile banking application's settled transaction statement history is the **PRIMARY and sole authoritative proof of settlement**.
+    * **Secondary / Investigative Assists Only:** Counter smartphone push notifications, SMS alerts, and counter soundbox voice announcements serve strictly as **assistive investigation tools** to alert the cashier that funds may have arrived. They **CANNOT independently establish settlement**, as notifications and SMS alerts can be delayed, truncated, spoofed, cleared, or silenced.
+    * **Mandatory 5-Point Statement Verification:** Before confirming payment or entering references into the POS, the cashier must verify all five attributes directly in the merchant banking app transaction statement:
+      1. *Merchant Account:* Funds are credited to the verified, authorized merchant counter destination account.
+      2. *Amount:* Transfer amount matches the exact order total.
+      3. *Currency:* Currency matches exactly (USD vs. KHR; e.g., $10.00 is never satisfied by 10,000 KHR).
+      4. *Transaction Status:* Explicitly marked as `SUCCESS` or `COMPLETED` (not pending, held, or reversed).
+      5. *Genuine Bank Reference:* Authentic bank transaction reference code (`payment_ref`) issued by the clearing bank.
   - *Proposed Configurable Local Expiry (Default 300s):* Neither NBC Bakong specifications nor EMVCo QR standards mandate a universal 300-second hard cutoff for dynamic QR validity. 300 seconds is defined strictly as a **proposed local POS operational default setting** (`khqr_intent_expiry_seconds`, default: 300s), configurable pending business owner approval and acquiring bank specifications.
   - *Local Intent Expiration vs. Bank Transaction Status:* A local dynamic QR intent expiration is purely a local client-side presentation timeout designed to prevent stale counter cart sessions. **Expiration of a local intent does NOT mean payment failed at the bank**, nor does it indicate that funds were returned.
   - *Mandatory "Investigate First" Workflow for Late Transfers:*
     When a customer claims to have completed a bank transfer after the local QR intent has expired or while in `expired` state, cashiers and managers must follow a strict **Investigate First** protocol:
-    1. **Do NOT Immediately Generate Another QR:** Cashiers are strictly forbidden from immediately generating a fresh dynamic QR code or requesting another payment, as doing so risks double-charging the customer.
-    2. **Cashier Checks Merchant Counter Phone:** The cashier immediately inspects the physical merchant counter smartphone's notification drawer, SMS alerts, and merchant banking app account statement.
-    3. **Verify Transaction Details:** Cashier verifies: (a) exact transfer amount, (b) correct currency (USD vs. KHR), (c) merchant receiver account, (d) transaction status = `SUCCESS`/`COMPLETED`, and (e) customer sender name.
+    1. **Do NOT Immediately Generate Another QR:** Cashiers are strictly forbidden from immediately generating a fresh dynamic QR code or requesting another payment, as doing so risks double-charging the customer. Never generate a replacement QR or request another payment before thoroughly investigating whether the original transfer arrived.
+    2. **Cashier Checks Primary Merchant Bank Statement:** The cashier immediately inspects the official mobile banking application statement history on the physical merchant counter smartphone (using push notifications and SMS strictly as discovery clues).
+    3. **Mandatory 5-Point Statement Verification:** Cashier verifies: (a) merchant receiver account, (b) exact transfer amount, (c) correct currency (USD vs. KHR), (d) transaction status = `SUCCESS`/`COMPLETED`, and (e) customer sender name.
     4. **Locate Genuine Bank Reference:** Cashier extracts the authentic bank transaction reference (`payment_ref`) from the verified merchant notification or app statement.
     5. **Reconcile Without Collecting Second Payment:** Using a controlled late-transfer reconciliation interface, the cashier inputs the genuine `payment_ref` to confirm settlement and issue the electronic receipt for the existing order, without collecting a second payment.
     6. **Preserve Expired Intent:** The expired client intent metadata and timestamp are retained in local audit logs for transaction reconciliation.
-    7. **Escalate to Manager if No Funds Appear:** If no incoming credit appears on the merchant counter phone or banking app, the cashier must escalate to the manager to verify merchant bank statements. Only after manager confirmation that zero funds arrived may a fresh QR be generated or an alternate tender requested.
-    8. **Strict Rejection of Non-Bank Proof:** Customer smartphone screens, customer-shown receipts, dynamic QR generation alone, soundbox announcements without phone statement verification, and temporary local UUIDs are strictly rejected as settlement proof.
+    7. **Escalate to Manager if No Funds Appear:** If no incoming credit appears on the merchant counter mobile banking app after statement inspection, the cashier must escalate to the manager to verify merchant bank statements. Only after manager confirmation that zero funds arrived may a fresh QR be generated or an alternate tender requested.
+    8. **Strict Rejection of Non-Bank Proof:** Customer smartphone screens, customer-shown receipts, dynamic QR generation alone, soundbox announcements without statement verification, and temporary local UUIDs are strictly rejected as settlement proof.
     9. **Database Protection Against Duplicate References:** Composite uniqueness `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)` rejects duplicate bank references and prevents a payment already matched to another order from being accepted.
-    10. **Zero Invented Bank APIs:** LAN operations rely strictly on physical merchant counter device inspection; no direct bank webhooks, automated polling APIs, or simulated push protocols are assumed.
+    10. **Zero Invented Bank APIs:** LAN operations rely strictly on physical merchant counter device statement inspection and soundbox announcements; no direct bank webhooks, automated polling APIs, or simulated push protocols are assumed.
   - *Refresh & Restart Recovery:* Active in-flight intents are persisted in client IndexedDB (`PosStorage`) with creation timestamp, plate, cart items, and `client_pending_intent_id`. If the browser reloads or the counter tablet reboots:
     * If $t < \text{created_at} + \text{expiry_seconds}$, the intent is restored with the remaining countdown timer and QR display.
     * If $t \ge \text{created_at} + \text{expiry_seconds}$, the intent is restored in `expired` state, cart is returned to editable draft mode, and any claimed transfer requires the mandatory Investigate First workflow.
-    * *Crucial Rule:* Recovery does **NOT** constitute proof of payment. Recovered intents remain strictly unverified until genuine bank confirmation is obtained.
+    * *Crucial Rule:* Recovery does **NOT** constitute proof of payment. Recovered intents remain strictly unverified until genuine bank confirmation is obtained directly from the merchant mobile banking app statement.
   - *Local Cleanup Sweep:* Expired intents older than 15 minutes are purged from `PosStorage` by a periodic client cleanup sweep, releasing local browser storage.
   - *Duplicate Payment Prevention:* Each intent carries an immutable `idempotency_key`. The backend rejects payment submissions for already-paid orders with HTTP 409 Conflict (`ORDER_ALREADY_PAID`). Composite uniqueness `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)` strictly prevents the same bank reference from being recorded twice.
 * **Provisional Reference Format Notice:**
@@ -178,19 +187,22 @@ Phase 0 strictly prohibits and does not require:
 * **Append-Only History:**
   Recorded in `historical_exception_events` (`id`, `exception_id`, `from_status`, `to_status`, `actor_id`, `notes`, `created_at`).
 * **Idempotent Ingestion Rule:**
-  Enforces `CONSTRAINT uq_hex_order_type UNIQUE (order_id, exception_type)`. Repeated execution of reports or background sync sweeps executes `INSERT ... ON DUPLICATE KEY UPDATE`, updating subsequent payment/refund amounts without duplicating rows or resetting manager status.
+  Enforces `CONSTRAINT uq_hex_order_type UNIQUE (order_id, exception_type)`. Repeated execution of reports or background sync sweeps executes `INSERT ... ON DUPLICATE KEY UPDATE`, updating subsequent payment/refund amounts and incrementing `lock_version` (`lock_version = CASE WHEN subsequent_ledger_payments != VALUES(subsequent_ledger_payments) OR subsequent_refunds != VALUES(subsequent_refunds) THEN lock_version + 1 ELSE lock_version END`) without duplicating rows or resetting manager status.
 * **Updating Existing Exceptions with New Ledger Evidence:**
-  When a post-cutover payment or refund is posted for an order with an active exception, `subsequent_ledger_payments` and `subsequent_refunds` update idempotently, and an audit event is logged in `historical_exception_events` (`event_type = 'ledger_activity_detected'`). Static historical fields remain immutable.
+  When a post-cutover payment or refund is posted for an order with an active exception, `subsequent_ledger_payments` and `subsequent_refunds` update idempotently, `lock_version` increments, and an audit event is logged in `historical_exception_events` (`event_type = 'ledger_activity_detected'`). Static historical fields remain immutable. The registry update and audit event insert must execute atomically within a single database transaction.
 * **Reopening Governance for Resolved Exceptions:**
   An exception may transition from `resolved` back to `under_review` ONLY upon:
   - *Trigger A:* New conflicting post-cutover transaction (chargeback, refund, installment) posted.
   - *Trigger B:* Manager discovery of physical paper daybook evidence or bank errors.
-  *Procedure:* Requires Manager PIN, logs transition in `historical_exception_events` with mandatory justification notes, and immediately returns the exception to the active open backlog (`WHERE resolution_status IN ('open', 'under_review')`).
-* **Optimistic Concurrency Protection for Exception Resolution:**
-  - Concurrent administrative actions or background reconciliation syncs must never silently overwrite each other's status or newer ledger figures.
-  - The `historical_exception_registry` table maintains a dedicated integer version counter: `lock_version INT NOT NULL DEFAULT 1`.
-  - When a manager loads an exception for review or resolution in the UI, the current `lock_version` is embedded in the form payload.
-  - Submitting a resolution executes an atomic conditional update:
+  *Procedure:* Requires Manager PIN, executes conditional update (`WHERE id = :id AND lock_version = :expected_lock_version`) incrementing `lock_version = lock_version + 1`, logs transition in `historical_exception_events` with mandatory justification notes, and immediately returns the exception to the active open backlog (`WHERE resolution_status IN ('open', 'under_review')`). The update and audit insert must be atomic within a single database transaction.
+* **Comprehensive Optimistic Concurrency Protection for Exception Registry & Lifecycle Transitions:**
+  - **Universal Rule:** Every operation changing exception status, reconciliation figures, or audit evidence MUST increment `lock_version`:
+    1. *Background Reconciliation Updates:* When periodic report sync sweeps detect and update `subsequent_ledger_payments` or `subsequent_refunds`, `lock_version` increments (`lock_version = lock_version + 1`), instantly invalidating any stale review screen.
+    2. *Exception Reopening:* Reopening from `resolved` to `under_review` requires expected `lock_version` and increments `lock_version = lock_version + 1`.
+    3. *Manager Resolution:* Moving from `open`/`under_review` to `resolved` requires expected `lock_version` and increments `lock_version = lock_version + 1`.
+    4. *Evidence or Status Modification:* Attaching supporting evidence or modifying administrative notes requires expected `lock_version` and increments `lock_version = lock_version + 1`.
+  - **Atomic Single-Transaction Requirement:** The update to `historical_exception_registry` and the insertion of the transition or discovery record in `historical_exception_events` MUST be executed atomically within a single database transaction (`BEGIN ... COMMIT`). If either operation fails or if conditional update affects 0 rows, the entire transaction is rolled back.
+  - **Conditional Update Specification:**
     ```sql
     UPDATE historical_exception_registry
     SET resolution_status = :to_status,
@@ -202,8 +214,8 @@ Phase 0 strictly prohibits and does not require:
         lock_version = lock_version + 1
     WHERE id = :id AND lock_version = :expected_lock_version;
     ```
-  - If another user or background sync has updated the record in the interim, `rowCount === 0`. The API aborts the transaction and returns `HTTP 409 Conflict` (`EXCEPTION_STALE_RECORD`).
-  - The UI prompts the manager to reload the record, inspect the updated financial tallies and event history, and re-confirm their resolution decision.
+  - **Stale Collision Handling:** In any conditional update, if `rowCount === 0` (indicating concurrent collision or background figure update), the transaction rolls back, and the API returns `HTTP 409 Conflict` (`EXCEPTION_STALE_RECORD`). The client interface requires reloading current evidence and figures before another decision can be submitted.
+  - All prior audit events are preserved; newer ledger tallies and evidence are never silently overwritten.
 * **Governance Rules:**
   1. Resolving an exception must **never** delete the original exception, historical order, or payment records (`ON DELETE RESTRICT`).
   2. Resolved exceptions remain permanently stored and queryable in `view_historical_exception_audit`.
@@ -363,7 +375,7 @@ FROM historical_exception_registry her;
      - Bank reversal timeout and uncertain outcomes block replacement cash payouts pending an approved operational procedure.
      - Append-only event history in `order_refund_events`.
      - Enforce cumulative refund ceiling ($\sum \text{Refunds} \le \text{Total Payments}$).
-  3. KHQR Pending Reference Lifecycle: Pending digital intents are staged in client memory / IndexedDB (`PosStorage`) with ephemeral session UUID; zero rows are inserted into `order_payments` or `order_digital_payments` until positive merchant confirmation arrives. Dynamic QR validity TTL is a proposed configurable local POS operational default (`khqr_intent_expiry_seconds`, default 300s), not an EMVCo/Bakong mandate. In-flight intent expiration is a client timeout, not bank failure. Late customer transfers strictly require the "Investigate First" workflow: cashiers must inspect the merchant counter phone/app statements and locate the authentic `payment_ref` to reconcile the order without collecting a second payment; generating a fresh QR immediately is prohibited. Genuine bank transaction reference (`payment_ref`) is mandatory; synthetic reference strings (`TRX-` or `PROV-...`), customer smartphone screens, dynamic QR generation alone, soundbox announcements without phone verification, and temporary local UUIDs are strictly rejected as settlement proof.
+  3. KHQR Pending Reference Lifecycle: Pending digital intents are staged in client memory / IndexedDB (`PosStorage`) with ephemeral session UUID; zero rows are inserted into `order_payments` or `order_digital_payments` until positive merchant confirmation arrives. Merchant mobile banking application transaction statement is the PRIMARY settlement evidence; counter phone notifications, SMS, and soundbox announcements are assistive investigative aids only and cannot independently establish settlement. Verification requires: merchant receiver account, exact amount, currency (USD/KHR), `SUCCESS`/`COMPLETED` status, and authentic `payment_ref`. Dynamic QR validity TTL is a proposed configurable local POS operational default (`khqr_intent_expiry_seconds`, default 300s), not an EMVCo/Bakong mandate. In-flight intent expiration is a client timeout, not bank failure. Late customer transfers strictly require the "Investigate First" workflow: cashiers must inspect the merchant banking app statement and locate the authentic `payment_ref` to reconcile the order without collecting a second payment; generating a replacement QR immediately is strictly prohibited. Genuine bank transaction reference (`payment_ref`) is mandatory; synthetic reference strings (`TRX-` or `PROV-...`), customer smartphone screens, dynamic QR generation alone, soundbox announcements without statement verification, and temporary local UUIDs are strictly rejected as settlement proof.
 
 ### WP-5: Reporting Engine & Two-Tier Separation
 * **Files:** [reports.php](views/owner/reports.php).
@@ -374,7 +386,7 @@ FROM historical_exception_registry her;
      - **Net Settled Revenue:** Gross Confirmed Payments minus Settled Refunds.
      - **Net Operating Profit:** Net Settled Revenue minus (COGS + Commissions + Expenses).
   4. Untracked Cost Alert displayed when line items lack COGS data.
-  5. Historical Exception Resolution Workflow: Implement manager resolution workflow (`Open -> Under Review -> Resolved`) in `reports.php` tabs; record transition events in `historical_exception_events`; update `resolution_status` without deleting evidence; enforce optimistic concurrency protection via `lock_version` (atomic conditional update `WHERE id = :id AND lock_version = :expected_lock_version` incrementing `lock_version`, aborting with HTTP 409 Conflict `EXCEPTION_STALE_RECORD` on stale records, requiring manager reload); exclude resolved cases from active open backlog while retaining them in permanent audit views. Administrative resolution documents operational disposition and does not retroactively rewrite closed historical revenue reports.
+  5. Historical Exception Resolution Workflow: Implement manager resolution workflow (`Open -> Under Review -> Resolved`) in `reports.php` tabs; record transition events in `historical_exception_events`; update `resolution_status` without deleting evidence; enforce universal optimistic concurrency: every operation changing status or reconciliation figures (sync sweeps, reopening, resolution, evidence attachment) increments `lock_version` (`lock_version = lock_version + 1`); require registry update and append-only event insertion (`historical_exception_events`) to be executed atomically within a single database transaction; stale requests abort with HTTP 409 Conflict (`EXCEPTION_STALE_RECORD`), requiring managers to reload current figures and evidence before submitting a decision; exclude resolved cases from active open backlog while retaining them in permanent audit views. Administrative resolution documents operational disposition and does not retroactively rewrite closed historical revenue reports.
 
 ---
 
