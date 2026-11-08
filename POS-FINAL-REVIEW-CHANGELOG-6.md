@@ -1,9 +1,70 @@
-# Final POS Engineering Review – Correction Changelog (Round 6, 8, 9, 10, 11, 12, 13 & 14 Addenda)
+# Final POS Engineering Review – Correction Changelog (Round 6, 8, 9, 10, 11, 12, 13, 14 & 15 Addenda)
 
 **Document ID:** POS-REV-2026-006
 **Project:** Car-WashService
-**Date:** November 8, 2026 (Updated - Round 14 Final Closure)
+**Date:** November 8, 2026 (Updated - Round 15 Final Closure)
 **Status:** Business Rules Harmonized – Technical Dependencies Documented – Awaiting Separate Executive Authorization
+
+---
+
+## Round 15 Addendum: Final KHQR Safety, "Investigate First" Workflow, Exception Concurrency & Metadata Harmonization (November 8, 2026)
+
+Following the Round 14 review, the four POS engineering documents were corrected and finalized to resolve remaining technical issues across KHQR expiration policies, late transfer workflows, exception registry concurrency protection, and cross-document metadata consistency:
+
+### 1. Correction 1: KHQR Expiration Policy Reclassification
+- **Removal of False Mandate Claims:**
+  - Removed unverified claims that a 300-second validity window is mandated by NBC Bakong or EMVCo standards.
+  - Clarified that EMVCo MPM standards (Tag 01 point-of-initiation method) and NBC Bakong specifications do not impose a universal 300-second hard cutoff for dynamic QR validity.
+- **Proposed Local POS Operational Default:**
+  - Defined 300 seconds strictly as a **proposed local POS operational default setting** (`khqr_intent_expiry_seconds`, default: 300s), fully configurable pending business owner approval and acquiring bank specifications.
+- **Presentation Intent Expiration vs. Bank Transaction Status:**
+  - Distinctly separated local UI intent expiration from bank transaction status: UI intent expiration is purely a local client presentation timeout designed to prevent stale counter cart sessions.
+  - **Expiration of a local intent does NOT mean payment failed at the bank**, nor does it indicate that customer funds were rejected or returned.
+
+### 2. Correction 2: Late KHQR Transfer Investigation ("Investigate First" Workflow)
+- **Mandatory "Investigate First" Protocol:**
+  - Defined an explicit operational protocol when a customer claims to have transferred after the local dynamic QR intent expired:
+    1. *Do NOT Immediately Generate Another QR:* Cashiers are strictly forbidden from immediately generating a new dynamic QR code or requesting another payment, eliminating the risk of double-charging the customer.
+    2. *Cashier Checks Merchant Counter Phone:* Cashier immediately inspects the merchant counter smartphone's push notification drawer, SMS inbox, and merchant banking app account statement.
+    3. *5-Point Verification:* Cashier verifies: (a) exact transfer amount, (b) correct currency (USD vs. KHR), (c) merchant receiver account, (d) transaction status = `SUCCESS`/`COMPLETED`, and (e) customer sender name.
+    4. *Locate Genuine Bank Reference:* Cashier extracts the authentic bank transaction reference (`payment_ref`) from the verified merchant notification or app statement.
+    5. *Reconcile Without Collecting Second Payment:* Using a controlled late-transfer reconciliation interface, cashier matches the genuine `payment_ref` to confirm settlement and issue the electronic receipt for the existing order, without collecting a second payment.
+    6. *Preserve Expired Intent:* The expired client intent metadata and timestamp are retained in local audit logs for transaction reconciliation.
+    7. *Escalate to Manager if No Funds Appear:* If no incoming credit appears on the merchant counter phone or banking app, cashier must escalate to the manager to verify merchant bank statements. Only after manager confirmation that zero funds arrived may a fresh QR be generated or an alternate tender requested.
+    8. *Strict Rejection of Non-Bank Proof:* Customer smartphone screens, customer-shown receipts, dynamic QR generation alone, soundbox announcements without phone statement verification, and temporary local UUIDs are strictly rejected as settlement proof.
+    9. *Database Protection Against Duplicate References:* Composite uniqueness `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)` rejects duplicate bank references and prevents a payment already matched to another order from being accepted.
+    10. *Zero Invented Bank APIs:* LAN operations rely strictly on physical merchant counter device inspection; no direct bank webhooks, automated polling APIs, or simulated push protocols are assumed.
+
+### 3. Correction 3: Exception Registry Optimistic Concurrency Protection
+- **Prevention of Silent Overwrites:**
+  - Concurrent administrative actions or background reconciliation syncs must never silently overwrite each other's status or newer ledger figures.
+- **Dedicated Version Counter:**
+  - Added `lock_version INT NOT NULL DEFAULT 1` to `historical_exception_registry`.
+- **Atomic Conditional Updates:**
+  - Resolution submissions require the client to submit the expected `lock_version` and execute:
+    ```sql
+    UPDATE historical_exception_registry
+    SET resolution_status = :to_status,
+        resolution_decision = :resolution_decision,
+        resolution_explanation = :resolution_explanation,
+        authorized_manager_id = :authorized_manager_id,
+        resolved_at = NOW(),
+        supporting_evidence_ref = :supporting_evidence_ref,
+        lock_version = lock_version + 1
+    WHERE id = :id AND lock_version = :expected_lock_version;
+    ```
+- **Stale Record Detection & Mandatory Reload:**
+  - If another manager or background sync updated the record in the interim, `rowCount === 0`. The API aborts the transaction and returns `HTTP 409 Conflict` (`EXCEPTION_STALE_RECORD`).
+  - The UI prompts the manager to reload the record, inspect updated ledger tallies and event history, and re-confirm their resolution decision.
+  - Complete transition history is permanently preserved in `historical_exception_events`.
+
+### 4. Correction 4: Document Metadata Harmonization
+- **Metadata Synchronization:**
+  - Synchronized all four permitted Markdown files (`POS-BUSINESS-RULES-OPEN-QUESTIONS.md`, `POS-FINAL-BUSINESS-RULES.md`, `POS-FINAL-IMPLEMENTATION-PLAN.md`, `POS-FINAL-REVIEW-CHANGELOG-6.md`) to `November 8, 2026 (Updated - Round 15 Final Closure)`.
+- **Preservation of Historical Integrity:**
+  - Preserved all Round 6, 8, 9, 10, 11, 12, 13, and 14 historical records and changelog entries without rewriting or obscuring historical facts.
+- **Preservation of Architectural Guardrails:**
+  - Retained all six approved business decisions, Phase 0 read-only inspection safety boundaries, and the prohibition of premature implementation.
 
 ---
 
