@@ -83,7 +83,10 @@ function runMigrations(bool $force = false): array {
         migrate_pos_devices();
         migrateOrderCancelAudit($force);
         migrateRevokeCashierCancel($force);
-        migrateImmutableLedgers($force);
+        $immSuccess = migrateImmutableLedgers($force, $pdo);
+        if (!$immSuccess) {
+            throw new RuntimeException("Immutable ledger triggers verification failed. Migration halted to prevent unprotected database operation.");
+        }
 
         // Record init_database as well
         if ($isSqlite) {

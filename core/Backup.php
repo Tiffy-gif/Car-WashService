@@ -71,6 +71,13 @@ class Backup {
                     $createStmt = $pdo->query("SHOW CREATE TABLE `{$table}`")->fetch(PDO::FETCH_ASSOC);
                     $createSql = $createStmt['Create Table'] ?? '';
                     $dump .= $createSql . ";\n\n";
+                } elseif ($driver === 'sqlite') {
+                    $tStmt = $pdo->prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?");
+                    $tStmt->execute([$table]);
+                    $createSql = (string)$tStmt->fetchColumn();
+                    if (!empty($createSql)) {
+                        $dump .= $createSql . ";\n\n";
+                    }
                 }
 
                 // Dump Data
@@ -95,6 +102,52 @@ class Backup {
                 }
             } catch (Exception $e) {
                 $dump .= "-- Could not dump table `{$table}`: " . $e->getMessage() . "\n\n";
+            }
+        }
+
+        // Dump Triggers (to ensure self-contained, reproducible backups)
+        if ($driver === 'mysql') {
+            try {
+                $trigStmt = $pdo->query("SHOW TRIGGERS");
+                $triggers = $trigStmt ? $trigStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+                if (!empty($triggers)) {
+                    $dump .= "-- --------------------------------------------------------\n";
+                    $dump .= "-- Triggers structure\n";
+                    $dump .= "-- --------------------------------------------------------\n";
+                    foreach ($triggers as $t) {
+                        $trgName = $t['Trigger'];
+                        $createStmt = $pdo->query("SHOW CREATE TRIGGER `{$trgName}`")->fetch(PDO::FETCH_ASSOC);
+                        $createSql = $createStmt['SQL Original Statement'] ?? '';
+                        if (!empty($createSql)) {
+                            $dump .= "DROP TRIGGER IF EXISTS `{$trgName}`;\n";
+                            $dump .= "DELIMITER ;;\n";
+                            $dump .= $createSql . ";;\n";
+                            $dump .= "DELIMITER ;\n\n";
+                        }
+                    }
+                }
+            } catch (Throwable $e) {
+                $dump .= "-- Could not dump triggers: " . $e->getMessage() . "\n\n";
+            }
+        } elseif ($driver === 'sqlite') {
+            try {
+                $trigStmt = $pdo->query("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND name NOT LIKE 'sqlite_%'");
+                $triggers = $trigStmt ? $trigStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+                if (!empty($triggers)) {
+                    $dump .= "-- --------------------------------------------------------\n";
+                    $dump .= "-- Triggers structure\n";
+                    $dump .= "-- --------------------------------------------------------\n";
+                    foreach ($triggers as $t) {
+                        $trgName = $t['name'];
+                        $createSql = $t['sql'];
+                        if (!empty($createSql)) {
+                            $dump .= "DROP TRIGGER IF EXISTS `{$trgName}`;\n";
+                            $dump .= $createSql . ";\n\n";
+                        }
+                    }
+                }
+            } catch (Throwable $e) {
+                $dump .= "-- Could not dump triggers: " . $e->getMessage() . "\n\n";
             }
         }
 
@@ -218,6 +271,8 @@ class Backup {
 
     /**
      * Restores the database from a given SQL dump string.
+     * Automatically reinstalls and catalog-verifies all four mandatory immutable ledger triggers.
+     * If trigger verification fails, restore reports failure and flags the unprotected state.
      */
     public static function restoreFromSql(PDO $pdo, string $sqlContent): array {
         if (!str_contains($sqlContent, 'Car Wash') && !str_contains($sqlContent, 'SET FOREIGN_KEY_CHECKS')) {
@@ -227,39 +282,103 @@ class Backup {
         $lines = explode("\n", $sqlContent);
         $currentQuery = '';
         $executedCount = 0;
+        $inBeginBlock = false;
 
-        $pdo->exec("SET FOREIGN_KEY_CHECKS=0;");
+        $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        if ($driver === 'mysql') {
+            $pdo->exec("SET FOREIGN_KEY_CHECKS=0;");
+        } else {
+            $pdo->exec("PRAGMA foreign_keys = OFF;");
+        }
 
         foreach ($lines as $line) {
             $trimmed = trim($line);
-            // Skip comments and empty lines
-            if ($trimmed === '' || str_starts_with($trimmed, '--') || str_starts_with($trimmed, '/*')) {
+            // Skip comments, empty lines, and client-only commands like DELIMITER
+            if ($trimmed === '' || str_starts_with($trimmed, '--') || str_starts_with($trimmed, '/*') || stripos($trimmed, 'DELIMITER ') === 0) {
                 continue;
+            }
+
+            // Track multi-statement trigger BEGIN...END blocks
+            if (preg_match('/\bBEGIN\b/i', $trimmed)) {
+                $inBeginBlock = true;
             }
 
             $currentQuery .= $line . "\n";
 
-            if (str_ends_with($trimmed, ';')) {
-                try {
-                    $pdo->exec($currentQuery);
-                    $executedCount++;
-                } catch (Throwable $t) {
-                    // Ignore non-fatal drop errors if table doesn't exist
-                    if (!str_contains($currentQuery, 'DROP TABLE')) {
-                        throw $t;
+            $isEndOfStatement = false;
+            if ($inBeginBlock) {
+                if (preg_match('/\bEND\s*;;/i', $trimmed) || preg_match('/\bEND\s*;/i', $trimmed)) {
+                    $isEndOfStatement = true;
+                    $inBeginBlock = false;
+                }
+            } elseif (str_ends_with($trimmed, ';') || str_ends_with($trimmed, ';;')) {
+                $isEndOfStatement = true;
+            }
+
+            if ($isEndOfStatement) {
+                $queryToExec = trim($currentQuery);
+                // Strip delimiter semicolons if doubled
+                if (str_ends_with($queryToExec, ';;')) {
+                    $queryToExec = substr($queryToExec, 0, -2);
+                }
+
+                if ($queryToExec !== '') {
+                    // Skip MySQL session commands when restoring on SQLite
+                    if ($driver === 'sqlite' && stripos($queryToExec, 'SET ') === 0) {
+                        $currentQuery = '';
+                        continue;
+                    }
+
+                    try {
+                        $pdo->exec($queryToExec);
+                        $executedCount++;
+                    } catch (Throwable $t) {
+                        // Ignore non-fatal drop errors if table or trigger doesn't exist
+                        if (!str_contains($queryToExec, 'DROP TABLE') && !str_contains($queryToExec, 'DROP TRIGGER')) {
+                            throw $t;
+                        }
                     }
                 }
                 $currentQuery = '';
             }
         }
 
-        $pdo->exec("SET FOREIGN_KEY_CHECKS=1;");
-        AuditLogger::log('BACKUP_RESTORED', "Database restored from backup dump ({$executedCount} statements executed)", 'system');
+        if ($driver === 'mysql') {
+            $pdo->exec("SET FOREIGN_KEY_CHECKS=1;");
+        } else {
+            $pdo->exec("PRAGMA foreign_keys = ON;");
+        }
+
+        // Automatic post-restore trigger installation & physical catalog verification
+        require_once dirname(__DIR__) . '/database/migrate_immutable_ledgers.php';
+        $triggerInstalled = migrateImmutableLedgers(true, $pdo);
+        $verification = verifyImmutableTriggers($pdo);
+
+        if (!$triggerInstalled || !$verification['valid']) {
+            $errList = !empty($verification['errors']) ? implode('; ', $verification['errors']) : 'Trigger installation failed';
+            
+            if (class_exists('AuditLogger')) {
+                AuditLogger::log('BACKUP_RESTORE_UNPROTECTED', "Database restored from dump ({$executedCount} statements) but immutable triggers could not be secured: {$errList}", 'system');
+            }
+
+            return [
+                'success' => false,
+                'statements_executed' => $executedCount,
+                'triggers_verified' => false,
+                'error' => "Database restored in an UNPROTECTED state: {$errList}",
+                'message' => "RESTORE FAILED TO SECURE DATABASE: All data statements executed, but immutable ledger triggers could not be verified in the catalog ({$errList}). Protected operations refused."
+            ];
+        }
+
+        if (class_exists('AuditLogger')) {
+            AuditLogger::log('BACKUP_RESTORED', "Database restored from backup dump ({$executedCount} statements executed, 4 immutable triggers verified)", 'system');
+        }
 
         return [
             'success' => true,
             'statements_executed' => $executedCount,
-            'message' => "Database restored successfully ({$executedCount} statements executed)."
+            'triggers_verified' => true,
+            'message' => "Database restored successfully ({$executedCount} statements executed) and immutable ledger triggers verified."
         ];
     }
 
