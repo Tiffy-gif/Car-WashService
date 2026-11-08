@@ -1,9 +1,73 @@
-# Final POS Engineering Review – Correction Changelog (Round 6, 8, 9, 10, 11, 12 & 13 Addenda)
+# Final POS Engineering Review – Correction Changelog (Round 6, 8, 9, 10, 11, 12, 13 & 14 Addenda)
 
 **Document ID:** POS-REV-2026-006
 **Project:** Car-WashService
-**Date:** November 8, 2026 (Updated - Round 13 Review)
+**Date:** November 8, 2026 (Updated - Round 14 Final Closure)
 **Status:** Business Rules Harmonized – Technical Dependencies Documented – Awaiting Separate Executive Authorization
+
+---
+
+## Round 14 Addendum: Final Documentation Closure, Exception Idempotency, Unpaid Order Discovery & KHQR Intent Lifecycle (November 8, 2026)
+
+Following the Round 13 review, the four POS engineering documents were corrected and closed to resolve remaining technical issues across historical unpaid order discovery, exception registry idempotency and reopening rules, KHQR pending-intent expiration and recovery, and Git reporting accuracy:
+
+### 1. Correction A: Historical Unpaid Orders & Exception Discovery Realignment
+- **Exception Discovery NOT Restricted to `payment_status = 'paid'`:**
+  - Removed the filtering restriction `AND o.payment_status = 'paid'` from historical exception queries and pseudocode.
+  - Ensured finished but unpaid historical orders (`status = 'finished'` AND `payment_status != 'paid'`) are systematically discovered and surfaced as reconciliation exceptions.
+- **Strict Classification Across Historical States:**
+  - Partitioned historical pre-cutover orders into distinct categories without guessing allocations or fabricating cash:
+    1. *Unconflicted Historical Paid:* `payment_status = 'paid'`, `cancelled_at IS NULL`, zero post-cutover payments. Confirmed revenue = `total_usd`.
+    2. *Historical Finished but Unpaid:* `status = 'finished'`, `payment_status != 'paid'`. Surfaced as `Historical Finished but Unpaid (Uncollected / Unverified Tender)`.
+    3. *Historical Cancellation:* `cancelled_at IS NOT NULL`. Surfaced as `Historical Cancellation (Refund Amount Indeterminate)` due to missing `orders.refunded_amount`.
+    4. *Historical Split Payment:* Pre-cutover orders with subsequent post-cutover ledger payments. Surfaced as `Historical Split Payment (Allocation Indeterminate)`.
+    5. *Historical Incomplete / Ambiguous Tickets:* Tickets lacking payment status or unfinished across cutover.
+- **Worked Realistic Scenario Added:**
+  - Added *Example 6 (Order #106: $35 total, status = 'finished', payment_status = 'unpaid')*. Excluded from Confirmed Revenue to prevent artificial income inflation; visibly isolated on Exceptions tab for manager investigation or CPA write-off authorization.
+
+### 2. Correction B: Exception Registry Integrity, Idempotency & Reopening Governance
+- **Idempotent Ingestion Rule:**
+  - Added unique constraint `CONSTRAINT uq_hex_order_type UNIQUE (order_id, exception_type)` on `historical_exception_registry`.
+  - Defined report discovery queries and background sync sweeps to use `INSERT ... ON DUPLICATE KEY UPDATE`, updating calculated tallies (`subsequent_ledger_payments`, `subsequent_refunds`) without creating duplicate exception rows or resetting manager status. Repeated execution of reports never duplicates records.
+- **Updating Existing Exceptions with New Ledger Evidence:**
+  - When post-cutover ledger payments or refunds occur against an order with an active exception, calculated fields update idempotently and an audit event is logged in `historical_exception_events` (`event_type = 'ledger_activity_detected'`). Static historical fields (`historical_order_total`, `order_number`) remain immutable.
+- **Reopening Governance for Resolved Exceptions:**
+  - A resolved exception may transition from `resolved` back to `under_review` ONLY when:
+    * *Trigger A:* New conflicting post-cutover transactions (chargebacks, unlinked refunds, installments) are posted.
+    * *Trigger B:* Manager discovers physical paper daybook evidence or external banking discrepancies.
+  - *Reopening Procedure:* Gated by Manager PIN; state transitions `resolved` $\longrightarrow$ `under_review`; mandatory justification note logged in `historical_exception_events`; exception immediately returns to active open backlog (`WHERE resolution_status IN ('open', 'under_review')`).
+- **Preservation of Evidence & Prohibition of Automatic Write-Offs:**
+  - Resolving or reopening never deletes any records (`ON DELETE RESTRICT` enforced).
+  - The system **never automatically writes off an outstanding balance** or mutates historical financial records. All write-offs, bad debt classifications, and tax adjustments strictly require explicit CPA or owner approval.
+  - Administrative resolution documents operational disposition; it does **not** retroactively rewrite closed historical revenue reports.
+
+### 3. Correction C: KHQR Pending-Intent Lifecycle, Expiry & Recovery
+- **Expiration TTL (300 Seconds / 5 Minutes):**
+  - Dynamic KHQR checkout intents expire strictly at 300 seconds (matching EMVCo dynamic validity).
+  - Live countdown timer displayed. At $t > 300\text{s}$, intent automatically transitions to `expired`, disabling the "Confirm Payment" button. If customer transfers late, cashier must click "Generate Fresh QR" or use manager override.
+- **Refresh & Restart Recovery via `PosStorage`:**
+  - In-flight intents persisted in client IndexedDB (`PosStorage`) with timestamp, plate, cart, and `client_pending_intent_id`.
+  - On page refresh or tablet reboot:
+    * If $t < \text{created_at} + 300\text{s}$, restored with remaining countdown and QR display.
+    * If $t \ge \text{created_at} + 300\text{s}$, restored in `expired` state, returning cart to editable draft mode.
+    * *Crucial Rule:* Recovery does **NOT** constitute proof of payment. Recovered intents remain strictly unverified. Cashier MUST verify authentic push/SMS evidence on the merchant counter phone and input authentic bank `payment_ref`.
+- **Local Cleanup Sweep:**
+  - Expired intents older than 15 minutes are purged from `PosStorage` by a periodic cleanup sweep, releasing local browser storage.
+- **Duplicate Payment Prevention:**
+  - Immutable `idempotency_key` per intent; backend rejects payment submissions for already-paid orders with HTTP 409 Conflict (`ORDER_ALREADY_PAID`).
+  - Composite uniqueness `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)` strictly prevents recording identical bank references twice.
+- **Zero Invented Bank API Behavior:**
+  - Counter operations rely strictly on merchant counter phone notifications and soundbox announcements. No direct bank gateway webhooks, polling APIs, or automated push integrations are assumed.
+
+### 4. Correction D: Git Reporting Accuracy & Verification Standards
+- **Correction of Round 13 Baseline Statements:**
+  - Corrected previous changelog statements that claimed the remote branch remained permanently static at commit `a304f8a1ce909b118f9b80d701ce84a55c2798be`.
+  - Confirmed that Round 13 documentation updates were committed and pushed to `main` at commit `529e5c8b640bb1261267a93ceb4ea4cf7e854e8e`, which serves as the verified base commit for Round 14.
+- **Strict Distinction of Git States:**
+  - *Local Working-Tree Status:* Verified via `git status --short`. Only the four permitted Markdown files are modified in working tree.
+  - *Local Commit History:* Verified via `git rev-parse HEAD` and `git log -1`.
+  - *Remote Tracking Status:* Verified via `git branch -vv` against `origin/main`.
+  - Prohibited claiming "zero commits or pushes occurred" without live execution and verification of git commands.
 
 ---
 
@@ -69,8 +133,8 @@ Following the Round 12 GitHub review, the four POS engineering documents were co
   - Format specifications, character sets, and rollover cycles remain an Unresolved Technical Dependency pending official bank API documentation.
 
 ### 4. Git & Operational Governance Safeguards
-- **Remote Baseline Recorded:** Commit `a304f8a1ce909b118f9b80d701ce84a55c2798be` on `origin/main`.
-- **Zero Agent Commits/Pushes:** Confirmed zero Git commits and zero Git pushes performed.
+- **Remote Baseline Recorded:** Commit `a304f8a1ce909b118f9b80d701ce84a55c2798be` on `origin/main` was the initial base for Round 13; following Round 13 completion, changes were integrated upstream at commit `529e5c8b640bb1261267a93ceb4ea4cf7e854e8e`.
+- **Session Commit/Push Isolation:** During the Round 13 editing session, zero agent commits or pushes were created. Subsequent upstream commit and push activity was verified prior to Round 14.
 - **Zero Source Code / DB Modifications:** Zero application source files, database migrations, or server configurations altered.
 - **Zero Tests Executed:** All 58 test matrix specifications remain planned specifications only.
 - **Phase 0 Status:** Phase 0 was NOT started.
