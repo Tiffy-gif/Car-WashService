@@ -1,9 +1,80 @@
-# Final POS Engineering Review – Correction Changelog (Round 6, 8, 9, 10, 11 & 12 Addenda)
+# Final POS Engineering Review – Correction Changelog (Round 6, 8, 9, 10, 11, 12 & 13 Addenda)
 
 **Document ID:** POS-REV-2026-006
 **Project:** Car-WashService
-**Date:** November 8, 2026 (Updated - Round 12 Closure)
+**Date:** November 8, 2026 (Updated - Round 13 Review)
 **Status:** Business Rules Harmonized – Technical Dependencies Documented – Awaiting Separate Executive Authorization
+
+---
+
+## Round 13 Addendum: Historical Accounting Pseudocode, Exception Lifecycle & KHQR Pending Reference Harmonization (November 8, 2026)
+
+Following the Round 12 GitHub review, the four POS engineering documents were corrected to resolve remaining technical inconsistencies across historical accounting queries, exception resolution lifecycles, and pending digital payment lifecycles:
+
+### 1. Correction A: Historical Accounting Pseudocode & Query Realignment
+- **Elimination of Contradictory `NOT EXISTS` Query:**
+  - Removed the contradictory `AND NOT EXISTS (SELECT 1 FROM order_payments op WHERE op.order_id = o.id)` clause that previously silently dropped historical pre-cutover orders from historical reports whenever any subsequent ledger payment existed.
+  - No historical order is ever silently omitted from financial visibility because a subsequent payment or refund occurred.
+- **Strict Separation of Accounting Concepts:**
+  - Differentiated:
+    1. *Historical Order Total (`orders.total_usd`):* The static order price stored in the legacy table.
+    2. *Historically Verified Payment Amount:* Verifiable only for unconflicted pre-cutover orders where `payment_status = 'paid'`, `cancelled_at IS NULL`, and zero subsequent ledger rows exist.
+    3. *Post-Cutover Ledger Payments (`order_payments.amount_usd`):* Discrete, immutable payments recorded in the new transaction ledger with known event timestamps.
+    4. *Refunds & Disbursement Periods:* Outflows recognized strictly in the period when currency physically departed (`disbursed_at`) or bank settlement cleared (`settled_at`).
+    5. *Unreconciled Historical Amount:* Ambiguous historical balances requiring manual audit.
+- **Anti-Double-Counting & Anti-Omission Rules:**
+  - A subsequent ledger payment is **never automatically added** to the full historical order total.
+  - In period financial reports, historical orders falling within the reporting window are partitioned into:
+    * *Confirmed Historical Payments:* Unconflicted orders where full payment is verified.
+    * *Period Historical Reconciliation Exceptions:* Orders with subsequent ledger payments or unverified cancellations, displayed visibly under audit on the report rather than guessing an allocation formula.
+  - Post-cutover ledger payments are recognized in their respective post-cutover periods under Confirmed Ledger Payments. Neither transaction is omitted and neither is double-counted.
+- **Four Realistic Scenarios Harmonized:**
+  1. *Historical order with no later payment (unconflicted):* Recognized as Confirmed Historical Payment in historical period; zero exceptions.
+  2. *Historical order with one later partial payment (split payment):* Historical total reported under Period Reconciliation Exceptions ($50 under audit); subsequent payment ($20) confirmed in post-cutover period.
+  3. *Historical order with multiple later payments:* Historical total ($100) reported under Period Reconciliation Exceptions; subsequent payments ($30 + $40) confirmed in post-cutover period.
+  4. *Historical order with a cancellation or unverified refund:* Historical total ($40) reported under Period Reconciliation Exceptions (missing `orders.refunded_amount` in schema); never fabricated as revenue or zero.
+
+### 2. Correction B: Historical Exception Resolution Lifecycle & Governance
+- **Three-State Resolution Lifecycle:**
+  $$\text{Open} \longrightarrow \text{Under Review} \longrightarrow \text{Resolved}$$
+  * `open`: Exception detected automatically by historical queries; presented in active open backlog.
+  * `under_review`: Authorized manager has opened the ticket, reviewing physical receipts, cash sheets, or bank statements.
+  * `resolved`: Authorized manager has recorded an administrative disposition, explanation, and supporting evidence references.
+- **Mandatory Audit Attributes per Exception:**
+  Captures `exception_id`, `order_id`, `order_number`, `exception_type`, `historical_order_total`, `subsequent_ledger_payments`, `subsequent_refunds`, `resolution_status`, `resolution_decision`, `resolution_explanation`, `authorized_manager_id`, `resolved_at`, and `supporting_evidence_ref`.
+- **Append-Only History:** Recorded in `historical_exception_events` (`id`, `exception_id`, `from_status`, `to_status`, `actor_id`, `notes`, `created_at`).
+- **Operational & Accounting Rules:**
+  * Resolving an exception must **never** delete the original exception, historical order, or payment records (`ON DELETE RESTRICT` enforced).
+  * Resolved exceptions remain permanently stored and queryable in `view_historical_exception_audit`.
+  * The active open backlog excludes resolved exceptions (`WHERE resolution_status IN ('open', 'under_review')`).
+  * Lifetime exception totals are **never** injected into periodic net revenue totals.
+  * Manager PIN required for status transitions; cashiers cannot resolve exceptions.
+  * Financial write-off decisions **require explicit CPA or owner approval**.
+  * **Administrative Resolution $\ne$ Revenue Recognition:** Administrative resolution documents operational disposition. It does **not** retroactively rewrite closed historical revenue reports. Any formal revenue recognition or accounting write-off adjustments must be booked as separate general ledger adjustments in the current accounting period with CPA sign-off.
+
+### 3. Correction C: KHQR Pending Reference Lifecycle & Architecture Boundary
+- **Four-Stage Digital Payment Lifecycle:**
+  1. *Stage 1 (Payment Initiated / Staged):* Cashier selects "KHQR"; counter displays dynamic EMVCo QR code. Vehicle is held at counter apron; wash bay entry is blocked. Dynamic QR generation is merely an invitation to pay, **never proof of payment**. Customer screenshots are strictly rejected.
+  2. *Stage 2 (Temporary Local Pending Intent):* An ephemeral client session identifier (UUID v4 `client_pending_intent_id`) tracks the active checkout intent in browser memory / IndexedDB (`PosStorage`). A temporary local identifier is **NOT a bank transaction reference**, must **never be treated as proof of payment**, must **never satisfy verified digital payment requirements**, and must **never be inserted into `order_digital_payments.payment_ref`**.
+  3. *Stage 3 (Authentic Bank Reference Capture):* Cashier reads the genuine bank transaction reference code (`payment_ref`) directly from the merchant smartphone notification or SMS alert. Soundbox chime alerts cashier, but matching on merchant phone is mandatory if amounts collide. Generation of synthetic reference strings (`TRX-` via `uniqid()`) or provisional tokens (`PROV-...`) is prohibited.
+  4. *Stage 4 (Verified & Settled Tender):* Cashier enters genuine `payment_ref`; backend executes atomic insert into `order_payments` and `order_digital_payments`. Electronic receipt is issued (`receipt_issued_at = NOW()`), and vehicle is dispatched to apron.
+- **Two-Table Schema Limitation on Pending Records:**
+  - In the approved Two-Table schema, `order_payments` is an append-only ledger of confirmed collected tenders, and `order_digital_payments.payment_ref` is `NOT NULL` with a unique constraint.
+  - Inserting an unconfirmed payment into `order_digital_payments` with a provisional fake reference (like `PROV-...`) would corrupt the ledger with uncollected revenue and violate unique constraints.
+  - *Standard Local Counter Policy (Approved Scope):* In-flight pending KHQR payments remain staged in browser memory / IndexedDB (`PosStorage`). Zero rows are written to `order_payments` or `order_digital_payments` until positive merchant confirmation is obtained and the genuine `payment_ref` is entered.
+  - *Future Server-Side Staging (Pending Approval):* If server-side persistence of unverified payment intents is required, it requires either adding a nullable `payment_ref` with `settlement_status` to `order_digital_payments` or creating a dedicated non-financial staging table `pos_payment_intents`. This limitation is logged as **Unresolved Technical Dependency (UTD-4 Addendum)**.
+- **Provisional Format & Scoped Uniqueness:**
+  - Describing references as "4 to 8 digits" is provisional and not an assumed universal standard.
+  - Scoped strictly to `(provider, merchant_account_id, payment_ref)`.
+  - Format specifications, character sets, and rollover cycles remain an Unresolved Technical Dependency pending official bank API documentation.
+
+### 4. Git & Operational Governance Safeguards
+- **Remote Baseline Recorded:** Commit `a304f8a1ce909b118f9b80d701ce84a55c2798be` on `origin/main`.
+- **Zero Agent Commits/Pushes:** Confirmed zero Git commits and zero Git pushes performed.
+- **Zero Source Code / DB Modifications:** Zero application source files, database migrations, or server configurations altered.
+- **Zero Tests Executed:** All 58 test matrix specifications remain planned specifications only.
+- **Phase 0 Status:** Phase 0 was NOT started.
+- **Readiness:** The POS system remains strictly NOT production-ready and awaits separate executive authorization.
 
 ---
 

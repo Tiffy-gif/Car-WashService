@@ -95,19 +95,20 @@ The cashier interface operates on a unified single-page layout divided into thre
 3. **Cash Drawer Pulse:**
    - Upon cash confirmation, an ESC/POS hardware kick pulse (`ESC p 0 25 250`) is dispatched to open the counter cash drawer.
 
-### Rule 3.2: Anti-Fraud KHQR & Two-Table Digital Architecture (UTD-4)
-1. **Positive Verification Requirement:**
+### Rule 3.2: Anti-Fraud KHQR, Pending Reference Lifecycle & Two-Table Digital Architecture (UTD-4)
+1. **Four-Stage Digital Payment Lifecycle:**
+   - **Stage 1 (Payment Initiated / Staged):** The cashier selects "KHQR", displaying an EMVCo dynamic QR code. *Status:* Unverified. No money has moved. Dynamic QR generation is merely an invitation to pay, **never proof of settlement**.
+   - **Stage 2 (Temporary Local Pending Intent):** An ephemeral client session identifier (e.g. UUID v4 `client_pending_intent_id`) tracks the in-flight checkout intent in browser memory / IndexedDB (`PosStorage`). A temporary local identifier is **NOT a bank transaction reference**, must **never be treated as proof of payment**, must **never satisfy verified digital payment requirements**, and must **never be inserted into `order_digital_payments.payment_ref`**.
+   - **Stage 3 (Genuine Bank Reference Capture):** Captured directly from the merchant counter smartphone bank push notification or SMS alert. The backend must **never** generate synthetic reference strings (`TRX-` via `uniqid()`) or provisional tokens (`PROV-...`). Describing bank references as "4 to 8 digits" is provisional and not an assumed universal format.
+   - **Stage 4 (Verified & Settled Tender):** Cashier matches customer and amount on the merchant phone, inputs genuine `payment_ref`, and submits tender. Backend commits within an atomic transaction inserting into `order_payments` and `order_digital_payments`. Electronic receipt is issued, and vehicle is admitted to service apron.
+2. **Positive Verification Requirement & Screen Rejection:**
    - A customer's smartphone screen showing a "successful transfer" screenshot is **strictly rejected as proof of payment**. Screenshots can be doctored, reused from previous visits, or cancelled before broadcast.
-   - Dynamic QR generation is **not proof of payment**; it is merely an invitation to pay.
-   - Blind cashier button clicks without positive evidence are strictly prohibited.
-2. **Approved Verification Channels (Local LAN Scope):**
+   - Blind cashier button clicks without positive evidence on merchant devices are strictly prohibited.
+3. **Approved Verification Channels (Local LAN Scope):**
    Payment is confirmed ONLY when authentic evidence arrives on the business's own merchant devices:
    - **Channel A (Store Counter Phone App / Push):** Official bank mobile push notification or SMS alert displaying matching amount, currency, and customer name.
    - **Channel B (IoT Merchant Soundbox):** Counter soundbox chimes audible confirmation: *"Received [Amount] via KHQR"*.
    - *Soundbox Ambiguity Safeguard:* An audible chime alone alerts the cashier, but if multiple customers are paying simultaneously or amounts are identical, the soundbox chime alone is insufficient; the cashier **must match the transaction on the counter merchant phone**.
-3. **Genuine Bank Transaction References (No Synthetic TRX):**
-   - The backend must **never** generate fake reference strings (e.g., `TRX-` via `uniqid()`) to represent bank transactions.
-   - The cashier captures the genuine bank transaction reference code (`payment_ref`) from the merchant bank notification.
 4. **Two-Table Schema & Relational Integrity:**
    - To eliminate nullable unique constraint loopholes in MariaDB (`NULL != NULL`), digital transactions are normalized across two tables:
      1. `order_payments` (Tender Ledger): Records financial amounts for all tenders; cash payments carry zero digital reference requirements. Primary key `(id, order_id)`.
@@ -119,11 +120,15 @@ The cashier interface operates on a unified single-page layout divided into thre
      * Each digital payment must have exactly one detail row in `order_digital_payments`.
      * Cash tenders must **never** have a row in `order_digital_payments`.
      * If digital insertion fails (duplicate reference or missing field), the entire database transaction is rolled back atomically.
-5. **Provisional Format & Scoped Uniqueness:**
-   - Describing references as "4 to 8 digits" is provisional and not an assumed universal standard.
+5. **Two-Table Schema Limitation on Pending Records:**
+   - In the approved Two-Table schema, `order_payments` records confirmed collected tenders, and `order_digital_payments.payment_ref` is strictly `NOT NULL` with unique constraint `(provider, merchant_account_id, payment_ref)`.
+   - Storing unverified pending payments in `order_digital_payments` with provisional fake references would corrupt the tender ledger with uncollected money and violate unique constraints.
+   - *Operational Baseline:* Pending digital checkouts remain staged purely in client-side memory / IndexedDB (`PosStorage`). Zero rows are written to `order_payments` or `order_digital_payments` until positive merchant confirmation is obtained.
+   - *Future Server-Side Staging (Pending Approval):* If server-side persistence of unverified payment intents is required, it requires either adding a nullable `payment_ref` with `settlement_status` to `order_digital_payments` or creating a separate `pos_payment_intents` staging table. This limitation is classified as an **Unresolved Technical Dependency (UTD-4 Addendum)**.
+6. **Scoped Uniqueness & Format Governance:**
    - References are **not globally unique**; uniqueness is scoped strictly to `(provider, merchant_account_id, payment_ref)`.
-   - Exact formats and rollover cycles remain an **Unresolved Technical Dependency** pending official merchant bank documentation.
-6. **Unconfirmed Transfers Hold Protocol:**
+   - Exact formats, length constraints, character sets, and rollover cycles remain an **Unresolved Technical Dependency** pending official merchant bank documentation.
+7. **Unconfirmed Transfers Hold Protocol:**
    - If a customer claims payment was sent but no merchant alert arrives within 60 seconds (interbank latency), the vehicle is **held at the counter apron**. The car is never dispatched to a wash bay until funds are confirmed.
 
 ### Rule 3.3: Dual-Currency Accounting & Frozen Exchange Rates
@@ -258,15 +263,49 @@ Financial reporting distinguishes three distinct event timestamps:
      `event_timestamp >= :start_timestamp AND event_timestamp < :end_timestamp`
 2. **Handling Delayed Notifications:**
    - Transactions recorded or settled after a period boundary belong to the subsequent reporting period based on their effective recognition timestamp, ensuring closed historical periods remain immutable.
-3. **Decoupled, Period-Aware Historical Accounting:**
-   - Payment fallback and refund fallback are evaluated independently per reporting period.
-   - The existence of a subsequent ledger payment must **never** automatically cause the historical order to be excluded, nor is it automatically added to the historical total.
-   - Post-cutover refunds do not suppress historical payments, and payments do not suppress refunds.
-4. **Confirmed Totals vs. Lifetime Historical Exceptions Registry:**
-   - Confirmed period revenue includes only verified ledger rows and unconflicted historical orders.
-   - Pre-cutover orders with subsequent ledger payments (split payments) cannot have their historical paid total deduced without risk of double-counting.
-   - Pre-cutover orders cancelled with `payment_status = 'paid'` lack refund amounts in the schema (`orders.refunded_amount` does not exist).
-   - These items are **never silently included in confirmed revenue** and **never treated as zero**. They are isolated into a dedicated **"Historical Unreconciled Exceptions"** tab in [reports.php](views/owner/reports.php) with their full order totals reported under audit for owner manual review.
+3. **Elimination of Contradictory `NOT EXISTS` Logic:**
+   - The contradictory `NOT EXISTS` clause that silently excluded historical orders whenever any subsequent ledger payment existed has been **completely eliminated**.
+   - A historical order is **never silently excluded** from reports because a subsequent payment or refund occurred.
+4. **Strict Accounting Distinctions:**
+   - **Historical Order Total (`orders.total_usd`):** Static order price stored in the legacy table.
+   - **Historically Verified Payment Amount:** Verifiable only for unconflicted pre-cutover orders where `payment_status = 'paid'`, `cancelled_at IS NULL`, and zero subsequent ledger rows exist.
+   - **Post-Cutover Ledger Payments (`order_payments.amount_usd`):** Discrete, immutable payments recorded in the new transaction ledger with known event timestamps.
+   - **Refunds & Disbursement Periods:** Outflows recognized strictly in the period when currency physically departed or bank settlement cleared.
+   - **Unreconciled Historical Amount:** Ambiguous historical balances requiring manual audit.
+5. **Decoupled Evaluation & Anti-Double-Counting Rules:**
+   - A subsequent ledger payment must **never** be automatically added to the full historical order total (prevents double-counting).
+   - In period financial reports, historical orders falling within the reporting window are partitioned into:
+     * **Confirmed Historical Payments:** Unconflicted orders where full payment is verified.
+     * **Period Historical Reconciliation Exceptions:** Orders with subsequent ledger payments or unverified cancellations. These orders and their historical totals are visibly displayed under audit on the report rather than fabricating an arbitrary allocation formula.
+   - Post-cutover ledger payments are recognized in their respective post-cutover periods under Confirmed Ledger Payments. Neither transaction is omitted and neither is double-counted.
+
+### Rule 5.4: Historical Exception Resolution Lifecycle & Governance (UTD-1)
+1. **Three-State Resolution Lifecycle:**
+   - Discrepancies and unverified historical orders follow an immutable audit lifecycle:
+     $$\text{Open} \longrightarrow \text{Under Review} \longrightarrow \text{Resolved}$$
+   - **`open`:** Exception detected automatically by historical data queries; presented in active open backlog.
+   - **`under_review`:** Authorized manager has opened the investigation, reviewing physical receipts, cash sheets, or bank statements.
+   - **`resolved`:** Authorized manager has recorded an administrative disposition, explanation, and supporting evidence references.
+2. **Mandatory Audit Information per Exception:**
+   Every exception record captures:
+   - Unique exception ID (`exception_id`).
+   - Related order ID and order number (`order_id`, `order_number`).
+   - Exception type (`historical_split_payment`, `historical_cancellation_unverified`, `historical_unpaid_finished`, `timestamp_conflict`).
+   - Original historical order total under review (`historical_order_total`).
+   - Related subsequent ledger payments and refunds (`subsequent_ledger_payments`, `subsequent_refunds`).
+   - Current resolution status (`resolution_status`).
+   - Resolution decision category (`resolution_decision`) and mandatory explanation (`resolution_explanation`).
+   - Authorized manager ID (`authorized_manager_id`) and resolution timestamp (`resolved_at`).
+   - Supporting evidence reference (`supporting_evidence_ref`).
+   - Append-only event history in `historical_exception_events`.
+3. **Strict Governance & Accounting Protection Rules:**
+   - **No Record Deletion:** Resolving an exception must **never** delete the original exception, historical order, or payment records (`ON DELETE RESTRICT` enforced).
+   - **Permanent Audit Trail:** Resolved exceptions remain permanently stored and queryable for internal and external auditors.
+   - **Backlog Filtering:** The active operational backlog excludes resolved exceptions (`WHERE resolution_status IN ('open', 'under_review')`).
+   - **Separation of Lifetime Registry from Period Revenue:** Lifetime exception balances are **never** injected into periodic net revenue totals.
+   - **Manager Authority Gate:** Status changes require an authorized Manager PIN; cashiers cannot resolve exceptions.
+   - **No Autonomous Write-Offs:** Write-off determinations, bad-debt classifications, and tax adjustments **require explicit CPA or owner approval**.
+   - **Administrative Resolution $\ne$ Revenue Recognition:** Administrative resolution documents operational disposition. It does **not** retroactively rewrite closed historical revenue reports. Any formal revenue recognition or accounting write-off adjustments must be booked as separate general ledger adjustments in the current accounting period with CPA sign-off.
 
 ---
 

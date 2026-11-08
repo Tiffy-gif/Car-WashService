@@ -68,25 +68,24 @@ Phase 0 strictly prohibits and does not require:
 
 ## Phase 1: Technical Design Specifications & Unresolved Dependencies
 
-### 1.1 TD-1: Scoped KHQR Reference Uniqueness & Two-Table Schema (UTD-4)
-* **Operational Flow:** The counter terminal utilizes an IoT soundbox and merchant smartphone bank app.
-  1. **Primary Alert:** Soundbox chime alerts cashier to incoming funds.
-  2. **Phone App Match:** If multiple customers are checking out simultaneously or amounts are identical, the soundbox chime alone is insufficient; the cashier **must match the transaction on the counter merchant phone**.
-  3. **Authentic Reference Capture:** Cashier reads the genuine bank transaction reference code (`payment_ref`) from the bank notification and enters it into the POS interface.
-  4. **Customer Screen Rejection:** Smartphone screens presented by customers are strictly rejected as proof of payment.
-  5. **No Synthetic TRX:** Backend generation of synthetic reference strings (`TRX-` via `uniqid()`) is prohibited.
+### 1.1 TD-1: Scoped KHQR Reference Uniqueness, Pending Lifecycle & Two-Table Schema (UTD-4)
+* **Four-Stage Digital Payment Lifecycle:**
+  1. **Stage 1 (Payment Initiated / Staged):** Cashier selects "KHQR"; counter displays dynamic EMVCo QR code. Vehicle is held at counter apron; wash bay entry is blocked. Dynamic QR generation is merely an invitation to pay, **never proof of payment**.
+  2. **Stage 2 (Temporary Local Pending Intent):** An ephemeral client session identifier (UUID v4 `client_pending_intent_id`) tracks the active checkout intent in browser memory / IndexedDB (`PosStorage`). A temporary local identifier is **NOT a bank transaction reference**, must **never be treated as proof of payment**, must **never satisfy verified digital payment requirements**, and must **never be inserted into `order_digital_payments.payment_ref`**.
+  3. **Stage 3 (Authentic Bank Reference Capture):** Cashier reads the genuine bank transaction reference code (`payment_ref`) directly from the merchant smartphone notification or SMS alert. Screens presented by customers are strictly rejected. Generation of synthetic reference strings (`TRX-` via `uniqid()`) or provisional tokens (`PROV-...`) is prohibited.
+  4. **Stage 4 (Verified & Settled Tender):** Cashier enters genuine `payment_ref`; backend executes atomic insert into `order_payments` and `order_digital_payments`. Electronic receipt is issued (`receipt_issued_at = NOW()`), and vehicle is dispatched to apron.
 * **The MariaDB Nullable Column Vulnerability & Two-Table Solution:**
   - Under SQL standards, `NULL != NULL` in unique indexes. If composite columns (`provider`, `merchant_account_id`, `payment_ref`) allow `NULL`, multiple identical rows with `NULL` bypass duplicate protection.
   - To enforce 100% database-level integrity, digital payments are separated from cash across two tables with restrictive deletion (`ON DELETE RESTRICT`):
     1. General Tender Ledger (`order_payments`): Primary key `(id, order_id)`. Records financial amounts for all tenders; cash payments carry zero digital reference requirements.
     2. Dedicated Digital Ledger (`order_digital_payments`): Primary key `(payment_id)`. Composite foreign key `FOREIGN KEY (payment_id, order_id) REFERENCES order_payments(id, order_id) ON DELETE RESTRICT` guarantees that digital details **can never disagree with parent tender order assignments**. Mandatory `NOT NULL` for `provider`, `merchant_account_id`, and `payment_ref`, enforced by `CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)`.
-* **Transaction Validation & Rollback Contract:**
-  - Database constraints alone cannot verify that every `khqr` tender possesses a corresponding detail row. This is enforced via backend application transactions:
-    * Each digital payment must have exactly one row in `order_digital_payments`.
-    * Cash payments must **never** create a row in `order_digital_payments`.
-    * If digital insertion fails (duplicate bank reference or null attribute), the entire transaction rolls back atomically.
+* **Two-Table Schema Limitation on Pending Records:**
+  - In the approved Two-Table schema, `order_payments` is an append-only ledger of confirmed collected tenders, and `order_digital_payments.payment_ref` is `NOT NULL` with a unique constraint.
+  - Inserting an unconfirmed payment into `order_digital_payments` with a provisional fake reference (like `PROV-...`) would corrupt the ledger with uncollected revenue and violate unique constraints.
+  - *Standard Local Counter Policy (Approved Scope):* In-flight pending KHQR payments remain staged in browser memory / IndexedDB (`PosStorage`). Zero rows are written to `order_payments` or `order_digital_payments` until positive merchant confirmation is obtained and the genuine `payment_ref` is entered.
+  - *Future Server-Side Staging (Pending Approval):* If server-side persistence of unverified payment intents is required, it requires either adding a nullable `payment_ref` with `settlement_status` to `order_digital_payments` or creating a dedicated non-financial staging table `pos_payment_intents`. This limitation is logged as **Unresolved Technical Dependency (UTD-4 Addendum)**.
 * **Provisional Reference Format Notice:**
-  - Describing references as "4 to 8 digits" is **provisional** and not a confirmed universal standard.
+  - Describing references as "4 to 8 digits" is **provisional** based on counter observation and is not an assumed universal format.
   - References are **not globally unique**; uniqueness is scoped strictly to `(provider, merchant_account_id, payment_ref)`.
   - Official ABA PayWay and NBC Bakong documentation must be reviewed before finalizing format rules.
 
@@ -118,22 +117,26 @@ Phase 0 strictly prohibits and does not require:
   - These discrete timestamp columns do not exist in the current `orders` table ([init.php](database/init.php)) and require creation during Phase 2.
 
 ### 1.4 TD-4: Decoupled Period-Aware Historical Fallback Architecture (UTD-1)
-* **Elimination of Unsupported Assumptions:**
-  - Removed undefined flags (`is_initial_migration`) and non-existent fields (the schema in [init.php](database/init.php#L242-L280) possesses `total_usd`, `paid_at`, and `cancelled_at`, but **does NOT contain `orders.refunded_amount`**).
+* **Elimination of Unsupported Assumptions & Contradictory Logic:**
+  - Removed undefined flags (`is_initial_migration`) and non-existent fields (`orders.refunded_amount` does not exist in [init.php](database/init.php)).
+  - **Eliminated the contradictory `NOT EXISTS` query clause** that previously excluded an entire historical order from historical reports whenever any subsequent ledger payment existed.
 * **Period-Aware Fallback Principles:**
   - Differentiates cash received, revenue earned, and accounting-period recognition.
   - Payment recognition and refund recognition are evaluated independently within `[start_date, end_date)`.
   - Historical revenue is **never silently omitted** when an order has both historical payment information and subsequent ledger payments.
-  - A subsequent ledger payment must **never be automatically added** to the full historical order total.
+  - A subsequent ledger payment must **never be automatically added** to the full historical order total (prevents double-counting).
   - The existence of a subsequent ledger payment must not automatically exclude the historical order amount.
-  - Split payments must not be double-counted.
-  - Unreconstructable amounts are classified as **Historical Reconciliation Exceptions**, reported under audit, and **never silently included in confirmed revenue or treated as zero**.
+  - In period financial reports, historical orders falling within the reporting window are partitioned into:
+    * **Confirmed Historical Payments:** Unconflicted pre-cutover orders where payment is fully verified.
+    * **Period Historical Reconciliation Exceptions:** Orders with subsequent ledger payments or unverified cancellations, displayed under audit rather than guessing an allocation formula.
+  - Post-cutover ledger payments are confirmed in their respective post-cutover periods under Confirmed Ledger Payments. Neither transaction is omitted and neither is double-counted.
 
 #### Realistic Historical Scenarios:
-1. **Fully Historical Paid Order (Unconflicted):** Order #101 created pre-cutover, `paid_at = '2026-10-15'`, `total_usd = 25.00`, `payment_status = 'paid'`. Zero rows in `order_payments` or `order_refunds`. Recognized in Oct 2026 as Confirmed Historical Payment = +$25.00. 100% confirmed.
-2. **Historical Order with Subsequent Partial Ledger Payment (Split Payment):** Order #102 created pre-cutover, `total_usd = 50.00`, `payment_status = 'paid'`. After cutover, a partial payment of $20.00 is recorded in `order_payments` (`recorded_at = '2026-11-10'`). Confirmed Ledger in Nov = +$20.00. The historical database cannot prove whether the $20.00 is part of the $50.00 or additional to it; the historical order is isolated as a **Historical Split-Payment Exception** ($50.00 under audit on Exceptions tab) rather than guessing an allocation formula.
-3. **Historical Order with Multiple Post-Cutover Partial Refunds:** Order #103 created pre-cutover, `total_usd = 60.00`, `payment_status = 'paid'`. Two partial refunds occur post-cutover: Refund A for $10 on Nov 12, Refund B for $15 on Nov 15. In Oct 2026, Confirmed Payment = +$60.00. In Nov 2026, Settled Refunds = +$25.00 ($10 + $15). Payments and refunds recognized independently in respective periods without disappearing.
-4. **Historical Cancellation with No Reconstructable Refund Amount:** Order #104 created pre-cutover, `total_usd = 40.00`, `payment_status = 'paid'`, `cancelled_at = '2026-10-18'`. `orders.refunded_amount` does not exist in schema. Excluded from Confirmed Revenue and classified as a **Historical Unreconciled Cancellation Exception** ($40.00 under audit) for owner manual review.
+1. **Historical Order with No Later Payment (Unconflicted):** Order #101 created pre-cutover, `paid_at = '2026-10-15'`, `total_usd = 25.00`, `payment_status = 'paid'`. Zero rows in `order_payments` or `order_refunds`. Recognized in Oct 2026 as Confirmed Historical Payment = +$25.00. 100% confirmed; zero exceptions.
+2. **Historical Order with One Later Partial Payment (Split Payment):** Order #102 created pre-cutover, `total_usd = 50.00`, `payment_status = 'paid'`, `cancelled_at IS NULL`. After cutover, a partial payment of $20.00 is recorded in `order_payments` (`recorded_at = '2026-11-10'`). Confirmed Ledger in Nov = +$20.00. The historical database cannot prove whether the $20.00 is part of the $50.00 or additional to it; the historical order is displayed in October under **Period Historical Reconciliation Exceptions** ($50.00 under audit) rather than fabricating an allocation formula.
+3. **Historical Order with Multiple Later Payments:** Order #105 created pre-cutover, `total_usd = 100.00`, `payment_status = 'paid'`, `cancelled_at IS NULL`. After cutover, two payments occur: $30.00 on Nov 5 and $40.00 on Nov 12 in `order_payments`. Confirmed Ledger in Nov = +$70.00 ($30 + $40). In October, Order #105 is displayed under **Period Historical Reconciliation Exceptions** ($100.00 under audit). Zero omission, zero double-counting.
+4. **Historical Order with Multiple Post-Cutover Partial Refunds:** Order #103 created pre-cutover, `total_usd = 60.00`, `payment_status = 'paid'`. Two partial refunds occur post-cutover: Refund A for $10 on Nov 12, Refund B for $15 on Nov 15. In Oct 2026, Confirmed Payment = +$60.00. In Nov 2026, Settled Refunds = +$25.00 ($10 + $15). Payments and refunds recognized independently in respective periods without disappearing.
+5. **Historical Cancellation with No Reconstructable Refund Amount:** Order #104 created pre-cutover, `total_usd = 40.00`, `payment_status = 'paid'`, `cancelled_at = '2026-10-18'`. `orders.refunded_amount` does not exist in schema. Excluded from Confirmed Revenue and classified as a **Historical Unreconciled Cancellation Exception** ($40.00 under audit) for owner manual review.
 
 * **Status:** The reporting algorithm is **not complete** until demonstrated against actual source fields and realistic examples during Phase 2.
 
@@ -144,6 +147,22 @@ Phase 0 strictly prohibits and does not require:
 ### 1.6 TD-6: Receipt Cutover Timestamp Configuration
 * Cutover is governed by setting `receipt_v2_cutover_timestamp` in `settings`.
 * **Fail-Closed Rule:** If the setting is missing or unparseable, the system fails closed (enforces electronic receipt requirement for all orders without exception).
+
+### 1.7 TD-7: Historical Exception Resolution Lifecycle & Governance (UTD-1)
+* **Three-State Resolution Lifecycle:**
+  `Open -> Under Review -> Resolved`
+* **Mandatory Audit Attributes:**
+  Every record captures `exception_id`, `order_id`, `order_number`, `exception_type`, `historical_order_total`, `subsequent_ledger_payments`, `subsequent_refunds`, `resolution_status`, `resolution_decision`, `resolution_explanation`, `authorized_manager_id`, `resolved_at`, and `supporting_evidence_ref`.
+* **Append-Only History:**
+  Recorded in `historical_exception_events` (`id`, `exception_id`, `from_status`, `to_status`, `actor_id`, `notes`, `created_at`).
+* **Governance Rules:**
+  1. Resolving an exception must **never** delete the original exception, historical order, or payment records (`ON DELETE RESTRICT`).
+  2. Resolved exceptions remain permanently stored and queryable in `view_historical_exception_audit`.
+  3. The active open backlog filters `WHERE resolution_status IN ('open', 'under_review')`.
+  4. Lifetime exception totals are **never** injected into periodic revenue totals.
+  5. Manager PIN required for status transitions.
+  6. Financial write-off decisions **require explicit CPA or owner approval**.
+  7. Administrative resolution documents operational disposition; it does **not** retroactively rewrite closed historical revenue reports. Any formal revenue recognition or accounting write-off adjustments must be booked as separate general ledger adjustments in the current accounting period with CPA sign-off.
 
 ---
 
@@ -158,6 +177,8 @@ Phase 0 strictly prohibits and does not require:
 | `order_digital_payments` | Create (New Table) | `payment_id INT NOT NULL PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`provider VARCHAR(50) NOT NULL`<br/>`merchant_account_id VARCHAR(50) NOT NULL`<br/>`payment_ref VARCHAR(100) NOT NULL`<br/>`provider_event_at DATETIME NULL`<br/>`created_at DATETIME NOT NULL`<br/>`CONSTRAINT fk_digital_tender FOREIGN KEY (payment_id, order_id) REFERENCES order_payments(id, order_id) ON DELETE RESTRICT`<br/>`CONSTRAINT uq_digital_bank_ref UNIQUE (provider, merchant_account_id, payment_ref)`<br/>`INDEX idx_digital_order (order_id)` | Dedicated digital transaction ledger; composite foreign key prevents order disagreement; mandatory non-null attributes enforce 100% duplicate protection without nullable loopholes. |
 | `order_refunds` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`payment_id INT NULL`<br/>`refund_seq INT NOT NULL`<br/>`amount_usd DECIMAL(10,2) NOT NULL`<br/>`amount_khr INT NOT NULL`<br/>`settlement_status ENUM('authorized_pending','cash_disbursed','bank_reversal_pending','settled','failed','bank_reversal_timeout','bank_reversal_blocked','cancelled')`<br/>`authorized_by INT NOT NULL`<br/>`disbursed_at DATETIME NULL`<br/>`settled_at DATETIME NULL`<br/>`bank_reversal_ref VARCHAR(100) NULL`<br/>`replaced_refund_id INT NULL`<br/>`CONSTRAINT fk_order_refunds_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT` | Finite state machine ledger for customer refunds and reversals; restrictive deletion. |
 | `order_refund_events` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`refund_id INT NOT NULL`<br/>`event_type VARCHAR(50) NOT NULL`<br/>`from_status VARCHAR(50) NOT NULL`<br/>`to_status VARCHAR(50) NOT NULL`<br/>`actor_id INT NOT NULL`<br/>`notes TEXT NULL`<br/>`created_at DATETIME NOT NULL`<br/>`CONSTRAINT fk_order_refund_events_refund FOREIGN KEY (refund_id) REFERENCES order_refunds(id) ON DELETE RESTRICT` | Append-only audit history for refund state transitions; restrictive deletion. |
+| `historical_exception_registry` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`order_id INT NOT NULL`<br/>`order_number VARCHAR(50) NOT NULL`<br/>`exception_type VARCHAR(50) NOT NULL`<br/>`historical_order_total DECIMAL(10,2) NOT NULL`<br/>`subsequent_ledger_payments DECIMAL(10,2) NOT NULL DEFAULT 0.00`<br/>`subsequent_refunds DECIMAL(10,2) NOT NULL DEFAULT 0.00`<br/>`resolution_status ENUM('open','under_review','resolved') NOT NULL DEFAULT 'open'`<br/>`resolution_decision VARCHAR(100) NULL`<br/>`resolution_explanation TEXT NULL`<br/>`authorized_manager_id INT NULL`<br/>`resolved_at DATETIME NULL`<br/>`supporting_evidence_ref VARCHAR(255) NULL`<br/>`created_at DATETIME NOT NULL`<br/>`CONSTRAINT fk_hex_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT` | Lifecycle tracking registry for historical accounting exceptions; restrictive deletion; immutable audit log. |
+| `historical_exception_events` | Create (New Table) | `id INT AUTO_INCREMENT PRIMARY KEY`<br/>`exception_id INT NOT NULL`<br/>`from_status VARCHAR(50) NOT NULL`<br/>`to_status VARCHAR(50) NOT NULL`<br/>`actor_id INT NOT NULL`<br/>`notes TEXT NULL`<br/>`created_at DATETIME NOT NULL`<br/>`CONSTRAINT fk_hex_events_exception FOREIGN KEY (exception_id) REFERENCES historical_exception_registry(id) ON DELETE RESTRICT` | Append-only audit history for exception lifecycle transitions; restrictive deletion. |
 | `bays` | Update | Index on `(status, is_active)` | Atomic conditional reservation locks. |
 | `bay_tasks` | Update | `task_sequence INT NOT NULL DEFAULT 1`<br/>`status ENUM('waiting','in_progress','completed','pending_prereq')` | Enforce Lift First $\rightarrow$ Wash Second staging. |
 | `settings` | Read / Insert | `receipt_v2_cutover_timestamp DATETIME` | Authorized cutover date. |
@@ -168,37 +189,85 @@ Phase 0 strictly prohibits and does not require:
   2. Zero existing data rows in `orders` or `order_items` are altered, deleted, or converted.
   3. Pre-cutover ambiguous tickets are left untouched for owner review.
 
-### 2.3 Historical Unreconciled Exceptions View
-Create an informational SQL view for the owner reporting dashboard:
+### 2.3 Historical Exception Registry & Views
+
+#### 1. Registry & Audit Tables:
+```sql
+CREATE TABLE IF NOT EXISTS historical_exception_registry (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NOT NULL,
+    order_number VARCHAR(50) NOT NULL,
+    exception_type VARCHAR(50) NOT NULL,
+    historical_order_total DECIMAL(10,2) NOT NULL,
+    subsequent_ledger_payments DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    subsequent_refunds DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    resolution_status ENUM('open','under_review','resolved') NOT NULL DEFAULT 'open',
+    resolution_decision VARCHAR(100) NULL,
+    resolution_explanation TEXT NULL,
+    authorized_manager_id INT NULL,
+    resolved_at DATETIME NULL,
+    supporting_evidence_ref VARCHAR(255) NULL,
+    created_at DATETIME NOT NULL,
+    CONSTRAINT fk_hex_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT,
+    INDEX idx_hex_status (resolution_status),
+    INDEX idx_hex_order (order_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS historical_exception_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    exception_id INT NOT NULL,
+    from_status VARCHAR(50) NOT NULL,
+    to_status VARCHAR(50) NOT NULL,
+    actor_id INT NOT NULL,
+    notes TEXT NULL,
+    created_at DATETIME NOT NULL,
+    CONSTRAINT fk_hex_events_exception FOREIGN KEY (exception_id)
+        REFERENCES historical_exception_registry(id) ON DELETE RESTRICT
+) ENGINE=InnoDB;
+```
+
+#### 2. Open Backlog View (Excludes Resolved Exceptions):
 ```sql
 CREATE OR REPLACE VIEW view_historical_unreconciled_exceptions AS
 SELECT
-    o.id AS order_id,
-    o.order_number,
+    her.id AS exception_id,
+    her.order_id,
+    her.order_number,
     o.customer_name,
     o.plate_number,
-    o.total_usd,
+    her.historical_order_total,
+    her.subsequent_ledger_payments,
+    her.subsequent_refunds,
+    her.exception_type,
+    her.resolution_status,
     o.status AS operational_status,
     o.payment_status,
-    o.created_at,
-    o.started_at,
-    o.finished_at,
-    o.cancelled_at,
-    CASE
-        WHEN o.status = 'finished' AND o.payment_status = 'unpaid' THEN 'Finished but Unpaid'
-        WHEN o.status = 'paid' AND o.cancelled_at IS NOT NULL THEN 'Paid but Cancelled (Unknown Refund Amount)'
-        WHEN o.status = 'paid' AND o.finished_at IS NULL AND o.cancelled_at IS NULL THEN 'Paid but Uncompleted'
-        WHEN o.status = 'paid' AND EXISTS (SELECT 1 FROM order_payments op WHERE op.order_id = o.id) THEN 'Historical Split Payment (Allocation Indeterminate)'
-        ELSE 'Timestamp Conflict'
-    END AS exception_reason
-FROM orders o
-WHERE o.created_at < (SELECT setting_value FROM settings WHERE setting_key = 'receipt_v2_cutover_timestamp')
-  AND (
-      (o.status = 'finished' AND o.payment_status = 'unpaid') OR
-      (o.status = 'paid' AND o.cancelled_at IS NOT NULL) OR
-      (o.payment_status IS NULL) OR
-      (o.status = 'paid' AND EXISTS (SELECT 1 FROM order_payments op WHERE op.order_id = o.id))
-  );
+    o.created_at AS order_created_at,
+    her.created_at AS exception_created_at
+FROM historical_exception_registry her
+JOIN orders o ON o.id = her.order_id
+WHERE her.resolution_status IN ('open', 'under_review');
+```
+
+#### 3. Permanent Audit View (Includes Complete Resolution Trail):
+```sql
+CREATE OR REPLACE VIEW view_historical_exception_audit AS
+SELECT
+    her.id AS exception_id,
+    her.order_id,
+    her.order_number,
+    her.exception_type,
+    her.historical_order_total,
+    her.subsequent_ledger_payments,
+    her.subsequent_refunds,
+    her.resolution_status,
+    her.resolution_decision,
+    her.resolution_explanation,
+    her.authorized_manager_id,
+    her.resolved_at,
+    her.supporting_evidence_ref,
+    her.created_at
+FROM historical_exception_registry her;
 ```
 
 ---
@@ -243,6 +312,7 @@ WHERE o.created_at < (SELECT setting_value FROM settings WHERE setting_key = 're
      - Bank reversal timeout and uncertain outcomes block replacement cash payouts pending an approved operational procedure.
      - Append-only event history in `order_refund_events`.
      - Enforce cumulative refund ceiling ($\sum \text{Refunds} \le \text{Total Payments}$).
+  3. KHQR Pending Reference Lifecycle: Pending digital intents are staged in client memory / IndexedDB (`PosStorage`) with ephemeral session UUID; zero rows are inserted into `order_payments` or `order_digital_payments` until positive merchant confirmation arrives. Genuine bank transaction reference (`payment_ref`) is mandatory; synthetic reference strings (`TRX-` or `PROV-...`) are strictly prohibited.
 
 ### WP-5: Reporting Engine & Two-Tier Separation
 * **Files:** [reports.php](views/owner/reports.php).
@@ -253,6 +323,7 @@ WHERE o.created_at < (SELECT setting_value FROM settings WHERE setting_key = 're
      - **Net Settled Revenue:** Gross Confirmed Payments minus Settled Refunds.
      - **Net Operating Profit:** Net Settled Revenue minus (COGS + Commissions + Expenses).
   4. Untracked Cost Alert displayed when line items lack COGS data.
+  5. Historical Exception Resolution Workflow: Implement manager resolution workflow (`Open -> Under Review -> Resolved`) in `reports.php` tabs; record transition events in `historical_exception_events`; update `resolution_status` without deleting evidence; exclude resolved cases from active open backlog while retaining them in permanent audit views. Administrative resolution documents operational disposition and does not retroactively rewrite closed historical revenue reports.
 
 ---
 
