@@ -1,70 +1,57 @@
-# Final POS Engineering Review – Correction Changelog (Round 6 & Round 8 Addenda)
+# Final POS Engineering Review – Correction Changelog (Round 6, 8 & 9 Addenda)
 
 **Document ID:** POS-REV-2026-006
 **Project:** Car-WashService
-**Date:** November 8, 2026 (Updated - Round 8)
+**Date:** November 8, 2026 (Updated - Round 9)
 **Status:** Business Rules Harmonized – Technical Dependencies Documented – Awaiting Separate Executive Authorization
+
+---
+
+## Round 9 Addendum: Final Documentation Harmonization & Dependency Strengthening (November 8, 2026)
+
+Following a comprehensive architectural review against the live codebase, the POS documentation was refined to eliminate unsupported schema assumptions, address database constraint vulnerabilities, strengthen bank reversal safety, and enforce strict read-only inspection boundaries:
+
+### 1. UTD-1: Historical Financial Reporting & Reconciliation Exceptions
+- **Unsupported Assumptions Eliminated:** Removed undefined flags (`is_initial_migration`) and unsupported schema assumptions (the live schema in [init.php](database/init.php#L242-L280) possesses `total_usd`, `paid_at`, and `cancelled_at`, but **does NOT contain `orders.refunded_amount`**).
+- **Independent Period-Aware Evaluation:** Payment and refund recognition are evaluated independently within `[start_date, end_date)`. A post-cutover refund never causes a pre-cutover payment to disappear, and a post-cutover payment never suppresses historical payment recognition.
+- **Double-Counting Defense & Reconciliation Exceptions:** Pre-cutover orders (`created_at < cutover_ts`) with `payment_status = 'paid'` that receive subsequent post-cutover ledger payments cannot have historical paid totals reliably inferred without risking double-counting. Rather than guessing an unverified formula, these orders are classified as **Historical Split-Payment Reconciliation Exceptions** on the Exceptions tab for manual audit.
+- **Pre-Cutover Cancellations:** Orders cancelled prior to cutover with `payment_status = 'paid'` lack refund amount data in the schema. They are formally classified as **Historical Unreconciled Cancellation Exceptions** rather than assuming $0.00 or full refund.
+- **Pseudocode Realignment:** Updated pseudocode to reference actual source fields and include explicit exception classification branches.
+
+### 2. UTD-4: KHQR Uniqueness & Nullable Column Protection
+- **Vulnerability Identified:** In MariaDB/MySQL ANSI SQL, `NULL != NULL` in unique constraints. If composite fields are nullable, multiple identical rows containing `NULL` bypass duplicate protection.
+- **Mandatory Digital Fields:** Defined that for verified digital payments, `provider`, `merchant_account_id`, and `payment_ref` must be strictly `NOT NULL`.
+- **Cash Separation:** Cash transactions do not possess bank references and are kept strictly separate from digital reference validation (e.g. dedicated digital ledger table or separate tender schemas).
+- **No Global 4-8 Digit Uniqueness Assumption:** Clarified that short bank reference codes are not globally unique across banks, accounts, or rollover cycles. Marked official bank reference specifications as an **Unresolved Technical Dependency**.
+
+### 3. UTD-3: Bank Reversal Finality & Operational Blockades
+- **Snapshot Limitation Clarified:** Documented that inspecting a bank mobile app or bank statement snapshot at a single point in time **does not prove that a delayed reversal cannot settle later in clearing**.
+- **No Automated Finality on Local LAN:** Explicitly recognized that on an offline LAN counter operating without direct bank gateway API integrations, **no automated mechanism exists to guarantee bank reversal finality**.
+- **Mandatory Payout Blockade:** If the definitive external bank outcome cannot be verified through formal gateway rejection codes or written bank confirmation, cash replacement payout **must remain strictly blocked**.
+- **Operational Policy Required:** The replacement cash refund workflow is classified as an **unresolved process requiring an approved operational procedure** before implementation.
+- **Traceability & Concurrency:** Preserved append-only event logging (`order_refund_events`), Manager PIN authorization, atomic conditional locks, and explicit linking via `replaced_refund_id`.
+
+### 4. Phase 0: Strictly Read-Only Inspection Boundaries
+- **Bar on Modifying Operations:** Explicitly barred Phase 0 from starting stopped database services, repairing unstable databases, creating databases, running dumps, or performing restore operations.
+- **Inspection Protocol:** If the database service is stopped or down, Phase 0 inspects service status, configuration files, and system logs and reports the status without attempting to start or modify it.
+
+### 5. Corporate Receipt Policy & Verification Standards
+- **Sole Gate Pass:** Confirmed payment (`payment_status = 'paid'`) and electronic receipt issuance (`receipt_issued_at`) are the sole service admission gate pass. Paper printing is advisory.
+- **Unapproved Proposal:** Any proposal to introduce a physical-printing hard gate (`require_receipt_before_wash`) is classified as an **unapproved proposal requiring a separate owner decision**.
+- **Planned Test Matrix:** Reaffirmed that all 58 test cases in [POS-IMPLEMENTATION-TEST-MATRIX.md](POS-IMPLEMENTATION-TEST-MATRIX.md) remain **planned test specifications**; no tests have been executed or passed.
+- **Relative Linking:** Standardized all cross-document references to relative repository links.
 
 ---
 
 ## Round 8 Addendum: Engineering & Governance Harmonization (November 8, 2026)
 
 Following in-depth architectural review, the POS documentation suite was refined to address key data integrity, financial reporting, and release governance requirements:
-
-### 1. Removal of All-or-Nothing Historical Fallback Logic (Area 1)
-- **Problem Resolved:** Earlier drafts applied coupled, all-or-nothing fallback logic that risked dropping historical payments if a post-cutover refund occurred, or omitting historical payments when a post-cutover split payment was recorded.
-- **Harmonization:**
-  - Fallback logic is now decoupled and period-aware: payment recognition and refund recognition are evaluated independently within `[start_date, end_date)`.
-  - Defined explicit handling for pre-cutover orders, historical payments, post-cutover payments, split payments, multiple partial refunds, post-cutover refunds against pre-cutover orders, and events outside reporting boundaries.
-  - Documented that the existing MariaDB schema lacks `orders.refunded_amount` and lacks a pre-cutover payment ledger; marked the exact historical split-reconciliation query as an **Unresolved Technical Design Item (UTD-1)** pending Phase 2 schema design.
-
-### 2. Definition of Reporting Timestamps & Period Bounding (Area 2)
-- **Timestamps Distinguished:**
-  - `provider_event_at`: External provider/bank event timestamp.
-  - `recorded_at`: Local POS ledger recording timestamp.
-  - `disbursed_at` / `settled_at`: Currency disbursement or bank settlement confirmation timestamp.
-- **Recognition Standards:**
-  - Cash payments and manually verified KHQR payments recognized at `recorded_at`.
-  - Cash refunds recognized at `disbursed_at`.
-  - Settled digital refunds recognized at `settled_at`.
-- **Interval Bounding:** Strictly half-open interval `[:start_timestamp, :end_timestamp)`. Delayed provider notifications are recorded in the period received/settled, preserving the immutability of closed past periods.
-- **Design Dependency:** Highlighted that these discrete columns do not exist in the current source tables ([init.php](database/init.php)) and require introduction in Phase 2.
-
-### 3. Verification-Gated Bank Reversal Safety & Dual-Payout Prevention (Area 3)
-- **Problem Resolved:** Removed the erroneous claim that updating a failed reversal row to `'cancelled'` eliminates all risk of a delayed bank settlement.
-- **Harmonization:**
-  - A local database status update does not guarantee bank non-execution.
-  - Preserved original reversal attempts in an append-only audit trail (`order_refund_events`).
-  - Cash replacement refunds are strictly blocked until the manager verifies the definitive external bank outcome (e.g. reviewing merchant bank statement).
-  - If the bank outcome remains ambiguous or pending, cash replacement payout remains blocked.
-  - Authorized cash replacements require Manager PIN, an atomic conditional lock, and maintain an explicit foreign key link (`replaced_refund_id`).
-
-### 4. Scoped KHQR Reference Uniqueness (Area 4)
-- **Problem Resolved:** Removed the unworkable global constraint `UNIQUE (payment_method, payment_ref)` which broke cash transactions and falsely assumed 4-to-8 digit bank codes were globally unique.
-- **Harmonization:**
-  - Defined uniqueness scoped to provider and merchant account: `UNIQUE (provider, merchant_account_id, payment_ref)`.
-  - Cash transactions carry no digital reference requirement.
-  - Marked official bank reference format, character set, length, and uniqueness rules as an **Unresolved Technical Dependency (UTD-4)** pending official merchant bank documentation.
-
-### 5. Strictly Read-Only Phase 0 (Area 5)
-- **Problem Resolved:** Removed active database dumps (`mysqldump`), database creation, database restoration, and directory copying commands from Phase 0.
-- **Harmonization:**
-  - Renamed Phase 0 to **"Phase 0: Read-Only Source, Runtime & Configuration Inspection"**.
-  - Limited activities strictly to inspecting source code, Git status, runtime versions, configuration files, service status, and reviewing existing backup documentation.
-  - Backup and restore verification was reclassified as a future prerequisite under authorized staging conditions, requiring an isolated environment and zero changes to production MariaDB.
-
-### 6. Corporate Receipt Policy Clarification (Area 6)
-- **Problem Resolved:** Clarified that an optional physical-printing hard gate (`require_receipt_before_wash`) is **not approved policy**.
-- **Harmonization:**
-  - Confirmed payment (`payment_status = 'paid'`) and electronic receipt issuance (`receipt_issued_at`) are the sole service gate pass.
-  - Physical paper printing is strictly advisory; hardware printer failure never blocks vehicle admission into service apron.
-  - Re-stated that any physical printing gate proposal is an unapproved item requiring a separate owner decision.
-
-### 7. Governance, Relative Linking & Planned Tests (Area 7)
-- Replaced all local `file:///` URLs with valid relative repository links.
-- Confirmed that the 58 test cases in [POS-IMPLEMENTATION-TEST-MATRIX.md](POS-IMPLEMENTATION-TEST-MATRIX.md) remain **planned test specifications**; no tests have been executed or passed.
-- Standardized document dates to November 8, 2026.
-- Maintained status: **Engineering Proposal – Awaiting Separate Executive Authorization (NOT Production-Ready Until Released)**.
+1. Removed all-or-nothing historical fallback logic; introduced period-aware independent evaluation.
+2. Distinguished `provider_event_at`, `recorded_at`, and `disbursed_at` / `settled_at` timestamps with half-open interval boundaries.
+3. Removed claim that local `'cancelled'` status guarantees bank non-execution.
+4. Removed global `UNIQUE (payment_method, payment_ref)`.
+5. Renamed Phase 0 to strictly read-only inspection.
+6. Reaffirmed corporate receipt policy and marked 58 tests as planned specifications.
 
 ---
 
@@ -154,7 +141,7 @@ This produced two primary operational reference documents:
 3. [POS-FINAL-IMPLEMENTATION-PLAN.md](POS-FINAL-IMPLEMENTATION-PLAN.md):
    - Six-phase engineering roadmap with strictly read-only Phase 0 inspection.
 4. [POS-FINAL-REVIEW-CHANGELOG-6.md](POS-FINAL-REVIEW-CHANGELOG-6.md):
-   - This comprehensive changelog registering all audit activities, forensic findings, and Round 8 harmonizations.
+   - This comprehensive changelog registering all audit activities, forensic findings, and Round 8/9 harmonizations.
 
 ---
 
