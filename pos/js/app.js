@@ -9297,80 +9297,84 @@ class PosApp {
         this._isSyncingPendingOrders = true;
         try {
             const queue = PosStorage.getPendingOrders();
-            if (queue.length === 0) return;
+            const statusQueue = PosStorage.getOfflineStatusQueue();
+            const ackQueue = PosStorage.getPendingReceiptAcks();
+            if (queue.length === 0 && statusQueue.length === 0 && ackQueue.length === 0) return;
 
-            console.log(`Syncing ${queue.length} pending offline orders to back office...`);
-            const badge = document.getElementById('syncBadge');
-            if (badge) {
-                badge.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Syncing...`;
-            }
+            if (queue.length > 0) {
+                console.log(`Syncing ${queue.length} pending offline orders to back office...`);
+                const badge = document.getElementById('syncBadge');
+                if (badge) {
+                    badge.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Syncing...`;
+                }
 
-            let syncedCount = 0;
-            for (const order of queue) {
-                try {
-                    const res = await PosApi.createOrder(order, order.idempotency_key);
-                    if (res.success || res.is_duplicate) {
-                        PosStorage.removePendingOrder(order.idempotency_key);
-                        syncedCount++;
+                let syncedCount = 0;
+                for (const order of queue) {
+                    try {
+                        const res = await PosApi.createOrder(order, order.idempotency_key);
+                        if (res.success || res.is_duplicate) {
+                            PosStorage.removePendingOrder(order.idempotency_key);
+                            syncedCount++;
 
-                        // Server-confirmed canonical order details
-                        const serverOrder = res.order || {};
-                        const confirmedOrderId = serverOrder.id || res.order_id || 0;
-                        const confirmedOrderNumber = serverOrder.order_number || res.order_number || '';
-                        const paymentStatus = (serverOrder.payment_status || order.payment_status || '').toLowerCase();
+                            // Server-confirmed canonical order details
+                            const serverOrder = res.order || {};
+                            const confirmedOrderId = serverOrder.id || res.order_id || 0;
+                            const confirmedOrderNumber = serverOrder.order_number || res.order_number || '';
+                            const paymentStatus = (serverOrder.payment_status || order.payment_status || '').toLowerCase();
 
-                        // Validate details match local order
-                        const orderIdMatch = (!order.id || !confirmedOrderId || order.id === confirmedOrderId);
-                        const orderNumberMatch = (!order.order_number || !confirmedOrderNumber || order.order_number.startsWith('ORD-OFFLINE-') || order.order_number === confirmedOrderNumber);
+                            // Validate details match local order
+                            const orderIdMatch = (!order.id || !confirmedOrderId || order.id === confirmedOrderId);
+                            const orderNumberMatch = (!order.order_number || !confirmedOrderNumber || order.order_number.startsWith('ORD-OFFLINE-') || order.order_number === confirmedOrderNumber);
 
-                        if (orderIdMatch && orderNumberMatch) {
-                            const updatedOrderRecord = {
-                                ...order,
-                                ...(res.order || {}),
-                                id: confirmedOrderId || order.id,
-                                order_number: confirmedOrderNumber || order.order_number,
-                                synced: true
-                            };
-                            PosStorage.addSyncedOrder(updatedOrderRecord);
+                            if (orderIdMatch && orderNumberMatch) {
+                                const updatedOrderRecord = {
+                                    ...order,
+                                    ...(res.order || {}),
+                                    id: confirmedOrderId || order.id,
+                                    order_number: confirmedOrderNumber || order.order_number,
+                                    synced: true
+                                };
+                                PosStorage.addSyncedOrder(updatedOrderRecord);
 
-                            if (this.currentReceiptOrder && this.currentReceiptOrder.idempotency_key === order.idempotency_key) {
-                                this.currentReceiptOrder.id = confirmedOrderId || this.currentReceiptOrder.id;
-                                this.currentReceiptOrder.order_number = confirmedOrderNumber || this.currentReceiptOrder.order_number;
-                                this.currentReceiptOrder.synced = true;
-                            }
-                            if (this.lastCompletedOrder && this.lastCompletedOrder.idempotency_key === order.idempotency_key) {
-                                this.lastCompletedOrder.id = confirmedOrderId || this.lastCompletedOrder.id;
-                                this.lastCompletedOrder.order_number = confirmedOrderNumber || this.lastCompletedOrder.order_number;
-                                this.lastCompletedOrder.synced = true;
-                            }
+                                if (this.currentReceiptOrder && this.currentReceiptOrder.idempotency_key === order.idempotency_key) {
+                                    this.currentReceiptOrder.id = confirmedOrderId || this.currentReceiptOrder.id;
+                                    this.currentReceiptOrder.order_number = confirmedOrderNumber || this.currentReceiptOrder.order_number;
+                                    this.currentReceiptOrder.synced = true;
+                                }
+                                if (this.lastCompletedOrder && this.lastCompletedOrder.idempotency_key === order.idempotency_key) {
+                                    this.lastCompletedOrder.id = confirmedOrderId || this.lastCompletedOrder.id;
+                                    this.lastCompletedOrder.order_number = confirmedOrderNumber || this.lastCompletedOrder.order_number;
+                                    this.lastCompletedOrder.synced = true;
+                                }
 
-                            // Acknowledge receipt only for paid orders
-                            if (paymentStatus === 'paid' && (confirmedOrderId || confirmedOrderNumber)) {
-                                await this.sendReceiptAcknowledgement(confirmedOrderId, confirmedOrderNumber);
+                                // Acknowledge receipt only for paid orders
+                                if (paymentStatus === 'paid' && (confirmedOrderId || confirmedOrderNumber)) {
+                                    await this.sendReceiptAcknowledgement(confirmedOrderId, confirmedOrderNumber);
+                                }
+                            } else {
+                                console.warn(`Order details mismatch on sync for ${order.idempotency_key}: local (#${order.order_number}) vs server (#${confirmedOrderNumber})`);
                             }
                         } else {
-                            console.warn(`Order details mismatch on sync for ${order.idempotency_key}: local (#${order.order_number}) vs server (#${confirmedOrderNumber})`);
+                            PosStorage.updatePendingOrderFailure(order.idempotency_key, res.message || 'Server rejected');
                         }
-                    } else {
-                        PosStorage.updatePendingOrderFailure(order.idempotency_key, res.message || 'Server rejected');
+                    } catch (err) {
+                        PosStorage.updatePendingOrderFailure(order.idempotency_key, err.message || 'Network timeout');
+                        console.warn(`Could not sync order ${order.idempotency_key}:`, err);
+                        break; // Stop loop if server connection failed
                     }
-                } catch (err) {
-                    PosStorage.updatePendingOrderFailure(order.idempotency_key, err.message || 'Network timeout');
-                    console.warn(`Could not sync order ${order.idempotency_key}:`, err);
-                    break; // Stop loop if server connection failed
+                }
+
+                this.updatePendingSyncBadge();
+                if (syncedCount > 0) {
+                    console.log(`Successfully synced ${syncedCount} orders.`);
+                    this.renderJobQueue();
                 }
             }
 
-            this.updatePendingSyncBadge();
-            if (syncedCount > 0) {
-                console.log(`Successfully synced ${syncedCount} orders.`);
-                this.renderJobQueue();
-            }
-
             // Requirement 7: Sync pending offline status changes
-            const statusQueue = PosStorage.getOfflineStatusQueue();
-            if (statusQueue.length > 0) {
-                for (const item of statusQueue) {
+            const currentStatusQueue = PosStorage.getOfflineStatusQueue();
+            if (currentStatusQueue.length > 0) {
+                for (const item of currentStatusQueue) {
                     try {
                         const res = await PosApi.syncOrderStatus(0, item.orderNumber, item.status);
                         if (res && res.success) {
@@ -9384,9 +9388,9 @@ class PosApp {
             }
 
             // Sync pending offline electronic receipt acknowledgements
-            const ackQueue = PosStorage.getPendingReceiptAcks();
-            if (ackQueue.length > 0) {
-                for (const item of ackQueue) {
+            const currentAckQueue = PosStorage.getPendingReceiptAcks();
+            if (currentAckQueue.length > 0) {
+                for (const item of currentAckQueue) {
                     try {
                         const res = await PosApi.ackReceiptIssued(item.order_id, item.order_number);
                         if (res && res.success) {
