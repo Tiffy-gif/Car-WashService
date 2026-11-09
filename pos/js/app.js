@@ -9229,6 +9229,46 @@ class PosApp {
             const res = await PosApi.createOrder(ord, ord.idempotency_key);
             if (res.success || res.is_duplicate) {
                 PosStorage.removePendingOrder(ord.idempotency_key);
+
+                // Server-confirmed canonical order details
+                const serverOrder = res.order || {};
+                const confirmedOrderId = serverOrder.id || res.order_id || 0;
+                const confirmedOrderNumber = serverOrder.order_number || res.order_number || '';
+                const paymentStatus = (serverOrder.payment_status || ord.payment_status || '').toLowerCase();
+
+                // Validate details match local order
+                const orderIdMatch = (!ord.id || !confirmedOrderId || ord.id === confirmedOrderId);
+                const orderNumberMatch = (!ord.order_number || !confirmedOrderNumber || ord.order_number.startsWith('ORD-OFFLINE-') || ord.order_number === confirmedOrderNumber);
+
+                if (orderIdMatch && orderNumberMatch) {
+                    const updatedOrderRecord = {
+                        ...ord,
+                        ...(res.order || {}),
+                        id: confirmedOrderId || ord.id,
+                        order_number: confirmedOrderNumber || ord.order_number,
+                        synced: true
+                    };
+                    PosStorage.addSyncedOrder(updatedOrderRecord);
+
+                    if (this.currentReceiptOrder && this.currentReceiptOrder.idempotency_key === ord.idempotency_key) {
+                        this.currentReceiptOrder.id = confirmedOrderId || this.currentReceiptOrder.id;
+                        this.currentReceiptOrder.order_number = confirmedOrderNumber || this.currentReceiptOrder.order_number;
+                        this.currentReceiptOrder.synced = true;
+                    }
+                    if (this.lastCompletedOrder && this.lastCompletedOrder.idempotency_key === ord.idempotency_key) {
+                        this.lastCompletedOrder.id = confirmedOrderId || this.lastCompletedOrder.id;
+                        this.lastCompletedOrder.order_number = confirmedOrderNumber || this.lastCompletedOrder.order_number;
+                        this.lastCompletedOrder.synced = true;
+                    }
+
+                    // Acknowledge receipt only for paid orders
+                    if (paymentStatus === 'paid' && (confirmedOrderId || confirmedOrderNumber)) {
+                        await this.sendReceiptAcknowledgement(confirmedOrderId, confirmedOrderNumber);
+                    }
+                } else {
+                    console.warn(`Order details mismatch on retry for ${ord.idempotency_key}: local (#${ord.order_number}) vs server (#${confirmedOrderNumber})`);
+                }
+
                 this.updatePendingSyncBadge();
                 this.openPendingOrdersModal();
                 alert(`Order ${ord.plate_number} sent successfully to back office!`);
@@ -9272,6 +9312,45 @@ class PosApp {
                     if (res.success || res.is_duplicate) {
                         PosStorage.removePendingOrder(order.idempotency_key);
                         syncedCount++;
+
+                        // Server-confirmed canonical order details
+                        const serverOrder = res.order || {};
+                        const confirmedOrderId = serverOrder.id || res.order_id || 0;
+                        const confirmedOrderNumber = serverOrder.order_number || res.order_number || '';
+                        const paymentStatus = (serverOrder.payment_status || order.payment_status || '').toLowerCase();
+
+                        // Validate details match local order
+                        const orderIdMatch = (!order.id || !confirmedOrderId || order.id === confirmedOrderId);
+                        const orderNumberMatch = (!order.order_number || !confirmedOrderNumber || order.order_number.startsWith('ORD-OFFLINE-') || order.order_number === confirmedOrderNumber);
+
+                        if (orderIdMatch && orderNumberMatch) {
+                            const updatedOrderRecord = {
+                                ...order,
+                                ...(res.order || {}),
+                                id: confirmedOrderId || order.id,
+                                order_number: confirmedOrderNumber || order.order_number,
+                                synced: true
+                            };
+                            PosStorage.addSyncedOrder(updatedOrderRecord);
+
+                            if (this.currentReceiptOrder && this.currentReceiptOrder.idempotency_key === order.idempotency_key) {
+                                this.currentReceiptOrder.id = confirmedOrderId || this.currentReceiptOrder.id;
+                                this.currentReceiptOrder.order_number = confirmedOrderNumber || this.currentReceiptOrder.order_number;
+                                this.currentReceiptOrder.synced = true;
+                            }
+                            if (this.lastCompletedOrder && this.lastCompletedOrder.idempotency_key === order.idempotency_key) {
+                                this.lastCompletedOrder.id = confirmedOrderId || this.lastCompletedOrder.id;
+                                this.lastCompletedOrder.order_number = confirmedOrderNumber || this.lastCompletedOrder.order_number;
+                                this.lastCompletedOrder.synced = true;
+                            }
+
+                            // Acknowledge receipt only for paid orders
+                            if (paymentStatus === 'paid' && (confirmedOrderId || confirmedOrderNumber)) {
+                                await this.sendReceiptAcknowledgement(confirmedOrderId, confirmedOrderNumber);
+                            }
+                        } else {
+                            console.warn(`Order details mismatch on sync for ${order.idempotency_key}: local (#${order.order_number}) vs server (#${confirmedOrderNumber})`);
+                        }
                     } else {
                         PosStorage.updatePendingOrderFailure(order.idempotency_key, res.message || 'Server rejected');
                     }
@@ -9315,7 +9394,12 @@ class PosApp {
                         }
                     } catch (e) {
                         console.warn(`Could not sync receipt ack for ${item.order_number}:`, e);
-                        break;
+                        // Permanent errors (unpaid or not found) should be unqueued to prevent endless retry
+                        if (e.status === 400 || e.status === 402 || e.status === 404 || e.code === 'PAYMENT_REQUIRED' || e.code === 'ORDER_NOT_FOUND') {
+                            PosStorage.removePendingReceiptAck(item.order_number, item.order_id);
+                        } else {
+                            break;
+                        }
                     }
                 }
             }
