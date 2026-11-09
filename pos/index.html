@@ -686,8 +686,11 @@
                         </div>
 
                         <!-- Grand Total Line -->
-                        <div class="summary-line total-line">
-                            <span class="total-title" data-i18n="totalPayable">Grand Total</span>
+                        <div class="summary-line total-line cart-grand-total-card">
+                            <div class="total-meta-info">
+                                <span class="total-title" data-i18n="totalPayable">Grand Total</span>
+                                <span class="total-subtitle" data-i18n="payableAmountNote">Total due for current order</span>
+                            </div>
                             <div class="total-amount-box">
                                 <div class="total-usd" id="cartTotalUsd">$0.00</div>
                                 <div class="total-khr" id="cartTotalKhr">0 ៛</div>
@@ -701,11 +704,11 @@
                                 <span data-i18n="clearBtn">Clear</span>
                             </button>
                             <button type="button" class="btn-cart-pill pill-hold" id="btnPayLater" disabled title="Pay Later / Hold Bill">
-                                <i class="fa-solid fa-pause"></i>
+                                <i class="fa-solid fa-clock-rotate-left"></i>
                                 <span data-i18n="holdBill">Pay Later</span>
                             </button>
                             <button type="button" class="btn-cart-pill pill-saved" id="btnCartPillQueue" title="Job Queue / Saved Bills">
-                                <i class="fa-regular fa-clock"></i>
+                                <i class="fa-solid fa-list-check"></i>
                                 <span data-i18n="savedBills">Queue</span>
                             </button>
                             <button type="button" class="btn-cart-pill pill-discount" id="btnCartPillDiscount" disabled title="Discount">
@@ -716,10 +719,19 @@
                         </div>
 
                         <!-- Large Pay / Checkout Button -->
-                        <button type="button" class="btn-checkout-primary" id="btnOpenCheckout" disabled>
-                            <i class="fa-solid fa-credit-card"></i>
-                            <span data-i18n="payCheckout">Pay / Checkout</span>
-                        </button>
+                        <div class="cart-checkout-action-wrap">
+                            <button type="button" class="btn-checkout-primary is-disabled" id="btnOpenCheckout" disabled>
+                                <span class="btn-checkout-content">
+                                    <i class="fa-solid fa-cash-register checkout-btn-icon"></i>
+                                    <span class="checkout-btn-text" data-i18n="collectPayment">Collect Payment</span>
+                                    <span class="btn-checkout-amount" id="checkoutBtnAmount" style="display: none;">$0.00</span>
+                                </span>
+                            </button>
+                            <div class="checkout-helper-text" id="checkoutHelperText">
+                                <i class="fa-solid fa-circle-info"></i>
+                                <span data-i18n="cartEmptyCheckoutHelp">Add services or products to collect payment</span>
+                            </div>
+                        </div>
                     </div>
 
                 </div>

@@ -4401,12 +4401,96 @@ class PosApp {
         document.getElementById('cartTotalUsd').textContent = `$${totals.totalUsd.toFixed(2)}`;
         document.getElementById('cartTotalKhr').textContent = `${totals.totalKhr.toLocaleString()} ៛`;
 
+        // Update Checkout Button State (Phase 1 UI/UX: Collect Payment, helper text, empty/active states)
+        this.updateCheckoutButtonState();
+
         // Update Cart Wait Time & Trigger Server Refresh
         this.updateWaitTimesUI();
         this.fetchWaitTimes();
 
         // Requirement 2: Check for upsell offer (show at most one offer, never block the sale)
         this.checkCartUpsellRules();
+    }
+
+    /**
+     * Update Collect Payment button and helper explanation based on cart and lock states
+     */
+    static updateCheckoutButtonState() {
+        const payBtn = document.getElementById('btnOpenCheckout');
+        const helperText = document.getElementById('checkoutHelperText');
+        if (!payBtn) return;
+
+        if (this.isDayLocked || this.isDayClosed) {
+            payBtn.disabled = true;
+            payBtn.classList.remove('is-active');
+            payBtn.classList.add('is-disabled');
+            payBtn.style.opacity = '0.5';
+            payBtn.style.pointerEvents = 'none';
+            payBtn.innerHTML = `
+                <span class="btn-checkout-content">
+                    <i class="fa-solid fa-lock checkout-btn-icon"></i>
+                    <span class="checkout-btn-text">Sales Locked</span>
+                </span>
+            `;
+            if (helperText) {
+                helperText.style.display = 'flex';
+                helperText.innerHTML = `<i class="fa-solid fa-lock"></i> <span>Sales are locked. Day has been closed.</span>`;
+            }
+            return;
+        }
+
+        if (!this.activeShift && this.currentUser?.role === 'cashier') {
+            payBtn.disabled = true;
+            payBtn.classList.remove('is-active');
+            payBtn.classList.add('is-disabled');
+            payBtn.style.opacity = '0.5';
+            payBtn.style.pointerEvents = 'none';
+            payBtn.innerHTML = `
+                <span class="btn-checkout-content">
+                    <i class="fa-solid fa-door-closed checkout-btn-icon"></i>
+                    <span class="checkout-btn-text">Start Shift First</span>
+                </span>
+            `;
+            if (helperText) {
+                helperText.style.display = 'flex';
+                helperText.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> <span>Open cash drawer shift to start sales</span>`;
+            }
+            return;
+        }
+
+        payBtn.style.opacity = '1';
+        payBtn.style.pointerEvents = '';
+
+        if (!this.cart || this.cart.length === 0) {
+            payBtn.disabled = true;
+            payBtn.classList.remove('is-active');
+            payBtn.classList.add('is-disabled');
+            payBtn.innerHTML = `
+                <span class="btn-checkout-content">
+                    <i class="fa-solid fa-cash-register checkout-btn-icon"></i>
+                    <span class="checkout-btn-text" data-i18n="collectPayment">${I18nManager.t('collectPayment') || 'Collect Payment'}</span>
+                </span>
+            `;
+            if (helperText) {
+                helperText.style.display = 'flex';
+                helperText.innerHTML = `<i class="fa-solid fa-circle-info"></i> <span data-i18n="cartEmptyCheckoutHelp">${I18nManager.t('cartEmptyCheckoutHelp') || 'Add services or products to collect payment'}</span>`;
+            }
+        } else {
+            payBtn.disabled = false;
+            payBtn.classList.add('is-active');
+            payBtn.classList.remove('is-disabled');
+            const totals = this.calculateTotals();
+            payBtn.innerHTML = `
+                <span class="btn-checkout-content">
+                    <i class="fa-solid fa-cash-register checkout-btn-icon"></i>
+                    <span class="checkout-btn-text" data-i18n="collectPayment">${I18nManager.t('collectPayment') || 'Collect Payment'}</span>
+                    <span class="btn-checkout-amount" id="checkoutBtnAmount">$${totals.totalUsd.toFixed(2)}</span>
+                </span>
+            `;
+            if (helperText) {
+                helperText.style.display = 'none';
+            }
+        }
     }
 
     // ========================================================
@@ -7241,56 +7325,115 @@ class PosApp {
                 nextActionBtn = `<span style="font-size: 0.8rem; font-weight: 700; color: var(--danger);"><i class="fa-solid fa-ban"></i> ${I18nManager.t('cancelled') || 'Cancelled'}</span>`;
             }
 
-            const washersLabel = ord.washer_names ? `Washers: ${this.escapeHtml(ord.washer_names)}` : 'No washers';
-            const mechanicsLabel = ord.mechanic_names ? `Mechanics: ${this.escapeHtml(ord.mechanic_names)}` : '';
-            const crewLine = [washersLabel, mechanicsLabel].filter(Boolean).join(' • ');
             const totalNum = parseFloat(ord.total_usd || 0);
+            const totalKhrVal = Math.round(totalNum * (this.exchangeRate || 4100));
 
-            const pendingBadgeHtml = ord._isPendingSync ? `<span class="badge" style="background: #fef3c7; color: #b45309; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px;"><i class="fa-solid fa-cloud-arrow-up"></i> ${I18nManager.t('pendingSyncBadge') || 'Pending Sync'}</span>` : '';
-            const receiptPendingBadge = (!ord.receipt_printed_at && status !== 'cancelled') ? `<span class="badge" style="background: #f59e0b; color: #fff; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px;"><i class="fa-solid fa-receipt"></i> ${I18nManager.t('receiptPendingBadge') || 'Receipt Pending'}</span>` : '';
+            const pendingBadgeHtml = ord._isPendingSync ? `<span class="queue-badge-sync" title="Pending Sync"><i class="fa-solid fa-cloud-arrow-up"></i> ${I18nManager.t('pendingSyncBadge') || 'Pending Sync'}</span>` : '';
+            const receiptPendingBadge = (!ord.receipt_printed_at && status !== 'cancelled') ? `<span class="queue-badge-receipt" title="Receipt Pending"><i class="fa-solid fa-receipt"></i> ${I18nManager.t('receiptPendingBadge') || 'Receipt Pending'}</span>` : '';
 
             const isReadyToPay = (status === 'finished');
+            const isPaidStatus = (ord.payment_status === 'paid' || status === 'paid');
+
+            // Section 4: Parse services as chips
+            const rawServices = ord.item_names ? ord.item_names.split(',').map(s => s.trim()).filter(Boolean) : [];
+            const servicesChipsHtml = rawServices.length > 0
+                ? rawServices.map(s => `<span class="queue-service-chip"><i class="fa-solid fa-check"></i> ${this.escapeHtml(s)}</span>`).join('')
+                : `<span class="queue-service-chip is-muted">${I18nManager.t('noServicesSelected') || 'Standard Wash & Service'}</span>`;
 
             html += `
-                <div class="queue-card" style="${isCancelled ? 'opacity: 0.65; border-color: #fecaca;' : ''} ${isReadyToPay ? 'border: 2px solid #86efac; box-shadow: 0 4px 12px rgba(22, 163, 74, 0.12);' : ''}">
-                    <div class="queue-card-header">
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <span class="queue-card-plate">${this.escapeHtml(ord.plate_number)}</span>
+                <div class="queue-card ${isCancelled ? 'is-cancelled' : ''} ${isReadyToPay ? 'is-ready-to-pay' : ''}">
+                    <!-- Section 1: Vehicle Plate & Queue Position -->
+                    <div class="queue-card-section queue-section-plate">
+                        <div class="queue-plate-wrap">
+                            <i class="fa-solid fa-car-side queue-plate-icon"></i>
+                            <span class="queue-card-plate">${this.escapeHtml(ord.plate_number || 'N/A')}</span>
+                        </div>
+                        <div class="queue-pos-wrap">
                             ${positionBadgeHtml}
                         </div>
-                        <div style="display: flex; gap: 0.35rem; align-items: center;">
+                    </div>
+
+                    <!-- Section 2: Order Status & Synchronization Badges -->
+                    <div class="queue-card-section queue-section-status">
+                        <div class="queue-status-badges">
+                            <span class="queue-badge ${badgeClass}"><i class="fa-solid ${badgeIcon}"></i> <span>${statusText}</span></span>
                             ${pendingBadgeHtml}
                             ${receiptPendingBadge}
-                            <span class="queue-badge ${badgeClass}"><i class="fa-solid ${badgeIcon}"></i> ${statusText}</span>
                         </div>
                     </div>
-                    <div style="display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.88rem;">
-                        <span style="font-weight: 700;">${this.formatCustomerName(ord.customer_name)}</span>
-                        <span style="color: var(--text-muted); font-size: 0.78rem;">#${this.escapeHtml(ord.order_number)} • $${totalNum.toFixed(2)} ${ord.item_names ? '• ' + this.escapeHtml(ord.item_names) : ''}</span>
-                        <span style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.2rem;"><i class="fa-solid fa-users" style="font-size: 0.7rem;"></i> ${crewLine}</span>
+
+                    <!-- Section 3: Customer Name & Order Number -->
+                    <div class="queue-card-section queue-section-customer">
+                        <div class="queue-customer-meta">
+                            <i class="fa-solid fa-user-circle queue-meta-icon"></i>
+                            <span class="queue-customer-name">${this.formatCustomerName(ord.customer_name)}</span>
+                        </div>
+                        <div class="queue-order-meta">
+                            <i class="fa-solid fa-hashtag queue-meta-icon"></i>
+                            <span class="queue-order-number">${this.escapeHtml(ord.order_number)}</span>
+                        </div>
                     </div>
-                    <div style="margin-top: 0.75rem; display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;">
+
+                    <!-- Section 4: Selected Services -->
+                    <div class="queue-card-section queue-section-services">
+                        <div class="queue-section-label">
+                            <i class="fa-solid fa-spray-can-sparkles"></i> <span>${I18nManager.t('services') || 'Services'}</span>
+                        </div>
+                        <div class="queue-services-chips">
+                            ${servicesChipsHtml}
+                        </div>
+                    </div>
+
+                    <!-- Section 5: Assigned Washer & Mechanic -->
+                    <div class="queue-card-section queue-section-crew">
+                        <div class="queue-crew-grid">
+                            <div class="queue-crew-row">
+                                <span class="queue-crew-label"><i class="fa-solid fa-hands-bubbles"></i> Washers:</span>
+                                <span class="queue-crew-val">${this.escapeHtml(ord.washer_names || 'None assigned')}</span>
+                            </div>
+                            ${ord.mechanic_names ? `
+                            <div class="queue-crew-row">
+                                <span class="queue-crew-label"><i class="fa-solid fa-wrench"></i> Mechanics:</span>
+                                <span class="queue-crew-val">${this.escapeHtml(ord.mechanic_names)}</span>
+                            </div>` : ''}
+                        </div>
+                    </div>
+
+                    <!-- Section 6: Payment Status & Total Amount -->
+                    <div class="queue-card-section queue-section-financial">
+                        <div class="queue-payment-pill ${isPaidStatus ? 'is-paid' : 'is-unpaid'}">
+                            <i class="fa-solid ${isPaidStatus ? 'fa-circle-check' : 'fa-circle-exclamation'}"></i>
+                            <span>${isPaidStatus ? (I18nManager.t('statusPaid') || 'Paid') : (I18nManager.t('statusUnpaid') || 'Unpaid')}</span>
+                        </div>
+                        <div class="queue-financial-amounts">
+                            <span class="queue-amount-usd">$${totalNum.toFixed(2)}</span>
+                            <span class="queue-amount-khr">${totalKhrVal.toLocaleString()} ៛</span>
+                        </div>
+                    </div>
+
+                    <!-- Section 7: Action Buttons -->
+                    <div class="queue-card-section queue-section-actions">
                         ${nextActionBtn}
 
                         ${(!isCancelled && isUnpaid) ? `
-                            <button type="button" class="btn btn-sm" style="background: ${isReadyToPay ? '#16a34a' : 'var(--success)'}; color: white; font-weight: 800; ${isReadyToPay ? 'padding: 0.45rem 0.85rem; box-shadow: 0 2px 6px rgba(22, 163, 74, 0.35);' : ''}" data-action="pay-order" data-order-number="${this.escapeHtml(ord.order_number)}">
-                                <i class="fa-solid fa-dollar-sign"></i> ${I18nManager.t('payOrder') || (isReadyToPay ? 'Pay / Checkout' : 'Pay Order')}
+                            <button type="button" class="btn btn-sm btn-queue-pay ${isReadyToPay ? 'is-ready-to-pay' : ''}" data-action="pay-order" data-order-number="${this.escapeHtml(ord.order_number)}">
+                                <i class="fa-solid fa-dollar-sign"></i> <span>${I18nManager.t('payOrder') || (isReadyToPay ? 'Pay / Checkout' : 'Pay Order')}</span>
                             </button>
                         ` : ''}
 
                         ${(!isCancelled && !isCashier) ? `
-                            <button type="button" class="btn btn-outline btn-sm" data-action="change-crew" data-order-number="${this.escapeHtml(ord.order_number)}" title="Change Crew">
-                                <i class="fa-solid fa-users-gear"></i> ${I18nManager.t('crewBtn') || 'Crew'}
+                            <button type="button" class="btn btn-outline btn-sm btn-queue-action" data-action="change-crew" data-order-number="${this.escapeHtml(ord.order_number)}" title="Change Crew">
+                                <i class="fa-solid fa-users-gear"></i> <span>${I18nManager.t('crewBtn') || 'Crew'}</span>
                             </button>
-                            <button type="button" class="btn btn-outline btn-sm" style="color: #dc2626; border-color: #fecaca;" data-action="cancel-order" data-order-number="${this.escapeHtml(ord.order_number)}" title="Cancel Order">
-                                <i class="fa-solid fa-ban"></i> ${I18nManager.t('cancelBtn') || 'Cancel'}
+                            <button type="button" class="btn btn-outline btn-sm btn-queue-action text-danger" style="color: #dc2626; border-color: #fecaca;" data-action="cancel-order" data-order-number="${this.escapeHtml(ord.order_number)}" title="Cancel Order">
+                                <i class="fa-solid fa-ban"></i> <span>${I18nManager.t('cancelBtn') || 'Cancel'}</span>
                             </button>
                         ` : ''}
 
-                        <button type="button" class="btn btn-outline btn-sm" data-action="reprint-receipt" data-order-number="${this.escapeHtml(ord.order_number)}" title="Reprint Receipt">
+                        <button type="button" class="btn btn-outline btn-sm btn-queue-icon-action" data-action="reprint-receipt" data-order-number="${this.escapeHtml(ord.order_number)}" title="Reprint Receipt">
                             <i class="fa-solid fa-print"></i>
                         </button>
-                        <button type="button" class="btn btn-outline btn-sm" style="color: var(--primary);" data-action="print-ticket" data-order-number="${this.escapeHtml(ord.order_number)}" title="Print Washer Ticket">
+                        <button type="button" class="btn btn-outline btn-sm btn-queue-icon-action text-primary" data-action="print-ticket" data-order-number="${this.escapeHtml(ord.order_number)}" title="Print Washer Ticket">
                             <i class="fa-solid fa-ticket"></i>
                         </button>
                     </div>
@@ -10389,14 +10532,25 @@ class PosApp {
         if (!payBtn) return;
         if (isBlocked) {
             payBtn.disabled = true;
+            payBtn.classList.remove('is-active');
+            payBtn.classList.add('is-disabled');
             payBtn.style.opacity = '0.5';
             payBtn.style.pointerEvents = 'none';
-            payBtn.innerHTML = `<i class="fa-solid fa-door-closed mr-1"></i> Start Shift First`;
+            payBtn.innerHTML = `
+                <span class="btn-checkout-content">
+                    <i class="fa-solid fa-door-closed checkout-btn-icon"></i>
+                    <span class="checkout-btn-text">Start Shift First</span>
+                </span>
+            `;
+            const helperText = document.getElementById('checkoutHelperText');
+            if (helperText) {
+                helperText.style.display = 'flex';
+                helperText.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> <span>Open cash drawer shift to start sales</span>`;
+            }
         } else if (!this.isDayLocked && !this.isDayClosed) {
-            payBtn.disabled = false;
             payBtn.style.opacity = '1';
             payBtn.style.pointerEvents = '';
-            payBtn.innerHTML = `<i class="fa-solid fa-cash-register mr-1"></i> <span data-i18n="chargeBtn">គិតប្រាក់</span>`;
+            this.updateCheckoutButtonState();
         }
     }
 
@@ -10646,16 +10800,27 @@ class PosApp {
         if (payBtn) {
             if (isLocked) {
                 payBtn.disabled = true;
+                payBtn.classList.remove('is-active');
+                payBtn.classList.add('is-disabled');
                 payBtn.style.opacity = '0.5';
                 payBtn.style.pointerEvents = 'none';
-                payBtn.innerHTML = `<i class="fa-solid fa-lock mr-1"></i> Sales Locked`;
+                payBtn.innerHTML = `
+                    <span class="btn-checkout-content">
+                        <i class="fa-solid fa-lock checkout-btn-icon"></i>
+                        <span class="checkout-btn-text">Sales Locked</span>
+                    </span>
+                `;
+                const helperText = document.getElementById('checkoutHelperText');
+                if (helperText) {
+                    helperText.style.display = 'flex';
+                    helperText.innerHTML = `<i class="fa-solid fa-lock"></i> <span>${this.escapeHtml(message || 'Sales are locked for today')}</span>`;
+                }
             } else if (!this.activeShift && this.currentUser?.role === 'cashier') {
                 this.updateShiftRegisterBlocked(true);
             } else {
-                payBtn.disabled = false;
                 payBtn.style.opacity = '1';
                 payBtn.style.pointerEvents = '';
-                payBtn.innerHTML = `<i class="fa-solid fa-cash-register mr-1"></i> <span data-i18n="chargeBtn">គិតប្រាក់</span>`;
+                this.updateCheckoutButtonState();
             }
         }
     }
