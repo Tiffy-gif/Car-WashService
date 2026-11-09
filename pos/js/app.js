@@ -5749,6 +5749,11 @@ class PosApp {
         this.renderReceipt(completedOrderRecord);
         document.getElementById('modalReceipt').classList.add('open');
 
+        // Acknowledge electronic receipt receipt to backend
+        if (completedOrderRecord && completedOrderRecord.payment_status === 'paid' && completedOrderRecord.synced) {
+            this.sendReceiptAcknowledgement(completedOrderRecord.id, completedOrderRecord.order_number);
+        }
+
         // Direct Silent Thermal Printing (Requirement 1, 2, 7)
         const cfg = PosConfig.get();
         if (cfg.printerDirectEnabled) {
@@ -7541,6 +7546,9 @@ class PosApp {
                 this.currentReceiptOrder = target;
                 this.renderReceipt(target);
 
+                // Acknowledge electronic receipt receipt to backend
+                this.sendReceiptAcknowledgement(orderId, orderNumber);
+
                 const cfg = PosConfig.get();
                 if (cfg.printerDirectEnabled) {
                     this.executeSilentPrint(target);
@@ -9296,6 +9304,22 @@ class PosApp {
                 }
             }
 
+            // Sync pending offline electronic receipt acknowledgements
+            const ackQueue = PosStorage.getPendingReceiptAcks();
+            if (ackQueue.length > 0) {
+                for (const item of ackQueue) {
+                    try {
+                        const res = await PosApi.ackReceiptIssued(item.order_id, item.order_number);
+                        if (res && res.success) {
+                            PosStorage.removePendingReceiptAck(item.order_number, item.order_id);
+                        }
+                    } catch (e) {
+                        console.warn(`Could not sync receipt ack for ${item.order_number}:`, e);
+                        break;
+                    }
+                }
+            }
+
             // If pending modal is currently open, refresh its content
             if (document.getElementById('modalPendingOrders')?.classList.contains('open')) {
                 this.openPendingOrdersModal();
@@ -9654,6 +9678,38 @@ class PosApp {
     // ========================================================
     // DIRECT THERMAL PRINTING DISPATCHER & ALERTS
     // ========================================================
+    /**
+     * Send client acknowledgement that electronic receipt was successfully received and validated
+     */
+    static async sendReceiptAcknowledgement(orderId, orderNumber = '') {
+        if (!orderId && !orderNumber) return;
+        try {
+            const res = await PosApi.ackReceiptIssued(orderId, orderNumber);
+            if (res && res.success) {
+                PosStorage.removePendingReceiptAck(orderNumber, orderId);
+                const nowIso = res.receipt_issued_at || new Date().toISOString();
+                if (this.currentReceiptOrder && (this.currentReceiptOrder.id === orderId || this.currentReceiptOrder.order_number === orderNumber)) {
+                    this.currentReceiptOrder.receipt_issued_at = nowIso;
+                }
+                if (this.lastCompletedOrder && (this.lastCompletedOrder.id === orderId || this.lastCompletedOrder.order_number === orderNumber)) {
+                    this.lastCompletedOrder.receipt_issued_at = nowIso;
+                }
+                const synced = PosStorage.getSyncedOrders() || [];
+                const found = synced.find(o => (orderId && o.id === orderId) || (orderNumber && o.order_number === orderNumber));
+                if (found) {
+                    found.receipt_issued_at = nowIso;
+                    PosStorage.setSyncedOrders(synced);
+                }
+                return res;
+            } else {
+                PosStorage.addPendingReceiptAck(orderId, orderNumber);
+            }
+        } catch (err) {
+            console.warn(`Receipt acknowledgement network error for #${orderNumber}, queued for retry:`, err);
+            PosStorage.addPendingReceiptAck(orderId, orderNumber);
+        }
+    }
+
     static async markReceiptPrinted(order) {
         if (!order) return;
         const orderId = order.id || 0;

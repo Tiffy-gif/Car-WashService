@@ -26,7 +26,8 @@ class PosStorage {
         OIL_REMINDERS_UPDATED_AT: 'cw_pos_oil_reminders_updated_at',
         DAILY_CLOSE_STATUS: 'cw_pos_daily_close_status',
         LAYOUT: 'cw_pos_layout_device',
-        CURRENT_SHIFT: 'cw_pos_current_shift'
+        CURRENT_SHIFT: 'cw_pos_current_shift',
+        PENDING_RECEIPT_ACKS: 'cw_pos_pending_receipt_acks'
     };
 
     /**
@@ -183,6 +184,43 @@ class PosStorage {
 
     static clearPendingOrders() {
         this.setItem(this.KEYS.PENDING_ORDERS, JSON.stringify([]));
+    }
+
+    // Pending Electronic Receipt Acknowledgements Queue
+    static getPendingReceiptAcks() {
+        try {
+            const data = localStorage.getItem(this.KEYS.PENDING_RECEIPT_ACKS);
+            return data ? JSON.parse(data) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    static addPendingReceiptAck(orderId, orderNumber) {
+        const queue = this.getPendingReceiptAcks();
+        const existingIdx = queue.findIndex(a => (orderNumber && a.order_number === orderNumber) || (orderId && a.order_id === orderId));
+        const item = { order_id: orderId, order_number: orderNumber, queued_at: new Date().toISOString() };
+        if (existingIdx >= 0) {
+            queue[existingIdx] = item;
+        } else {
+            queue.push(item);
+        }
+        this.setItem(this.KEYS.PENDING_RECEIPT_ACKS, JSON.stringify(queue));
+        return queue.length;
+    }
+
+    static removePendingReceiptAck(orderNumber, orderId = null) {
+        const queue = this.getPendingReceiptAcks().filter(a => {
+            if (orderNumber && a.order_number === orderNumber) return false;
+            if (orderId && a.order_id === orderId) return false;
+            return true;
+        });
+        this.setItem(this.KEYS.PENDING_RECEIPT_ACKS, JSON.stringify(queue));
+        return queue.length;
+    }
+
+    static clearPendingReceiptAcks() {
+        this.setItem(this.KEYS.PENDING_RECEIPT_ACKS, JSON.stringify([]));
     }
 
     // Synced Orders (For daily reporting and receipt re-printing)

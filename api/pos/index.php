@@ -484,6 +484,7 @@ $ACTION_PERMISSIONS = [
     // Orders & Sales
     'create_order' => ['pos.create_order'],
     'mark_receipt_printed' => ['pos.create_order'],
+    'ack_receipt_issued' => ['pos.create_order', 'pos.pay_order', 'pos.access'],
     'sync_order_status' => ['pos.pay_order', 'orders.change_status'],
     'pay_order' => ['pos.pay_order', 'orders.change_status'],
     'get_today_orders' => ['orders.list', 'pos.access'],
@@ -2377,6 +2378,58 @@ if ($action === 'mark_receipt_printed') {
 }
 
 // ========================================================
+// 5c. ACTION: ack_receipt_issued
+// Client acknowledgement that electronic receipt was received
+// ========================================================
+if ($action === 'ack_receipt_issued') {
+    $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
+    $orderNumber = trim($inputData['order_number'] ?? $_POST['order_number'] ?? '');
+
+    if ($orderId <= 0 && $orderNumber === '') {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'order_id or order_number is required']);
+        exit;
+    }
+
+    if ($orderId <= 0 && $orderNumber !== '') {
+        $stmt = $pdo->prepare("SELECT id FROM orders WHERE order_number = ? LIMIT 1");
+        $stmt->execute([$orderNumber]);
+        $orderId = (int)$stmt->fetchColumn();
+    }
+
+    if ($orderId <= 0) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'ORDER_NOT_FOUND', 'message' => 'Order not found']);
+        exit;
+    }
+
+    $actorId = $sessionUser['id'] ?? null;
+    $actorName = $sessionUser['full_name'] ?? ($sessionUser['username'] ?? 'Staff');
+    $actorRole = $sessionUser['role'] ?? 'cashier';
+    $authDeviceId = $device['id'] ?? null;
+
+    try {
+        $res = OrderGate::ackReceiptIssued($pdo, $orderId, ($orderNumber !== '' ? $orderNumber : null), $actorId, $actorName, $actorRole, $authDeviceId);
+        echo json_encode([
+            'success' => true,
+            'message' => 'Electronic receipt acknowledged successfully',
+            'order_id' => $res['order_id'],
+            'order_number' => $res['order_number'],
+            'receipt_issued_at' => $res['receipt_issued_at'],
+            'already_acknowledged' => $res['already_acknowledged']
+        ]);
+    } catch (PaymentRequiredException $pe) {
+        http_response_code(402);
+        echo json_encode(['success' => false, 'error' => 'PAYMENT_REQUIRED', 'message' => $pe->getMessage()]);
+    } catch (Exception $e) {
+        $code = ($e->getCode() >= 400 && $e->getCode() <= 499) ? $e->getCode() : 400;
+        http_response_code($code);
+        echo json_encode(['success' => false, 'error' => 'ACK_FAILED', 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// ========================================================
 // 6. ACTION: sync_order_status & pay_order
 // Handles later payment with discount, cash received, change,
 // payment ref, and recalculated commissions (identical to web)
@@ -2738,6 +2791,10 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
         $mgrUser = $inputData['manager_username'] ?? $_POST['manager_username'] ?? null;
         try {
             OrderGate::assertReceiptPrinted($pdo, $id, $mgrPin, $overrideReason, $mgrUser, $sessionUser['id'] ?? null, $sessionUser['full_name'] ?? ($sessionUser['username'] ?? 'Staff'), $sessionUser['role'] ?? null);
+        } catch (PaymentRequiredException $pe) {
+            http_response_code(402);
+            echo json_encode(['success' => false, 'error' => 'PAYMENT_REQUIRED', 'message' => $pe->getMessage()]);
+            exit;
         } catch (ReceiptRequiredException $re) {
             http_response_code(422);
             echo json_encode(['success' => false, 'error' => 'RECEIPT_REQUIRED', 'message' => $re->getMessage()]);

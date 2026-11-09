@@ -125,6 +125,9 @@ class BayManager {
             if (!in_array('receipt_printed_at', $cols, true)) {
                 $pdo->exec("ALTER TABLE orders ADD COLUMN receipt_printed_at DATETIME DEFAULT NULL AFTER paid_at");
             }
+            if (!in_array('receipt_issued_at', $cols, true)) {
+                $pdo->exec("ALTER TABLE orders ADD COLUMN receipt_issued_at DATETIME DEFAULT NULL AFTER receipt_printed_at");
+            }
         } else {
             $tableInfo = $pdo->query("PRAGMA table_info(orders)")->fetchAll(PDO::FETCH_ASSOC);
             $existingCols = array_column($tableInfo, 'name');
@@ -154,6 +157,9 @@ class BayManager {
             }
             if (!in_array('receipt_printed_at', $existingCols, true)) {
                 $pdo->exec("ALTER TABLE orders ADD COLUMN receipt_printed_at DATETIME DEFAULT NULL");
+            }
+            if (!in_array('receipt_issued_at', $existingCols, true)) {
+                $pdo->exec("ALTER TABLE orders ADD COLUMN receipt_issued_at DATETIME DEFAULT NULL");
             }
         }
 
@@ -616,25 +622,35 @@ class BayManager {
             ];
         }
 
-        // Sort queues: First by supervisor manual queue_priority (if explicitly set > 0 or negative),
-        // then by priority_weight ASC (P0=0, P1=1, P2=2, P3=3),
+        // Sort queues: First by positive supervisor override (> 0, smaller positive first),
+        // non-positive values (0 or negative) are treated as non-overridden,
+        // then by dynamic priority_weight ASC (P0=0, P1=1, P2=2, P3=3),
         // within the same priority tier: exact arrival timestamp FIFO (earlier arrival = first),
         // deterministic tiebreaker: order_id ASC.
         usort($processedOrders, function($a, $b) {
-            if ($a['queue_priority'] !== $b['queue_priority']) {
-                if ($a['queue_priority'] > 0 && $b['queue_priority'] === 0) {
-                    return -1;
-                }
-                if ($a['queue_priority'] === 0 && $b['queue_priority'] > 0) {
-                    return 1;
-                }
-                if ($a['queue_priority'] !== 0 && $b['queue_priority'] !== 0) {
-                    return $a['queue_priority'] <=> $b['queue_priority'];
+            $pA = (int)($a['queue_priority'] ?? 0);
+            $pB = (int)($b['queue_priority'] ?? 0);
+            $overrideA = ($pA > 0);
+            $overrideB = ($pB > 0);
+
+            // 1. Partition: Positive supervisor override always precedes non-overridden (<= 0)
+            if ($overrideA !== $overrideB) {
+                return $overrideA ? -1 : 1;
+            }
+
+            // 2. Both are supervisor overrides: Smaller positive number precedes larger positive
+            if ($overrideA && $overrideB) {
+                if ($pA !== $pB) {
+                    return $pA <=> $pB;
                 }
             }
+
+            // 3. Both non-overridden (or identical override value): Dynamic Priority Tier (P0=0, P1=1, P2=2, P3=3)
             if ($a['priority_weight'] !== $b['priority_weight']) {
                 return $a['priority_weight'] <=> $b['priority_weight'];
             }
+
+            // 4. Within same tier: Exact arrival timestamp FIFO (arrived_at with created_at fallback)
             $timeA = !empty($a['arrived_at']) ? $a['arrived_at'] : (!empty($a['created_at']) ? $a['created_at'] : null);
             $timeB = !empty($b['arrived_at']) ? $b['arrived_at'] : (!empty($b['created_at']) ? $b['created_at'] : null);
             $tsA = $timeA ? strtotime((string)$timeA) : 0;
@@ -642,6 +658,8 @@ class BayManager {
             if ($tsA !== $tsB) {
                 return $tsA <=> $tsB;
             }
+
+            // 5. Deterministic tiebreaker: order_id ASC
             return (int)$a['order_id'] <=> (int)$b['order_id'];
         });
 
@@ -872,6 +890,12 @@ class BayManager {
         // "No receipt, no wash" rule enforcement
         try {
             OrderGate::assertReceiptPrinted($pdo, $orderId, $managerPin, $reason, $managerUsername, $userId, $userName, $userRole);
+        } catch (PaymentRequiredException $pe) {
+            return [
+                'success' => false,
+                'error' => 'PAYMENT_REQUIRED',
+                'message' => $pe->getMessage()
+            ];
         } catch (ReceiptRequiredException $re) {
             return [
                 'success' => false,
@@ -879,6 +903,13 @@ class BayManager {
                 'message' => $re->getMessage()
             ];
         } catch (Throwable $e) {
+            if ($e->getCode() === 404 || strpos($e->getMessage(), 'not found') !== false) {
+                return [
+                    'success' => false,
+                    'error' => 'ORDER_NOT_FOUND',
+                    'message' => $e->getMessage()
+                ];
+            }
             return [
                 'success' => false,
                 'error' => 'RECEIPT_REQUIRED',

@@ -272,6 +272,7 @@ function initDatabase(bool $force = false): void {
         finished_at DATETIME DEFAULT NULL,
         paid_at DATETIME DEFAULT NULL,
         receipt_printed_at DATETIME DEFAULT NULL,
+        receipt_issued_at DATETIME DEFAULT NULL,
         cancelled_at DATETIME DEFAULT NULL,
         current_mileage INT DEFAULT NULL,
         next_oil_mileage INT DEFAULT NULL,

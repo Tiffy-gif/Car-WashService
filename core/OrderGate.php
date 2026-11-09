@@ -10,6 +10,12 @@ class ReceiptRequiredException extends Exception {
     }
 }
 
+class PaymentRequiredException extends Exception {
+    public function __construct(string $message = "PAYMENT_REQUIRED: Upfront payment is mandatory before car can enter wash/work bay.", int $code = 402, ?Throwable $previous = null) {
+        parent::__construct($message, $code, $previous);
+    }
+}
+
 class OrderGate {
     /**
      * Check if receipt requirement setting is active. Default is '1' (enabled).
@@ -58,10 +64,80 @@ class OrderGate {
     }
 
     /**
-     * Assert that the receipt for $orderId has been printed, or a valid manager override is provided.
-     * Throws ReceiptRequiredException (code 422) if assertion fails.
+     * Acknowledge that the electronic receipt has been successfully received by the client/POS.
+     * Idempotently stamps receipt_issued_at only for paid orders.
      */
-    public static function assertReceiptPrinted(
+    public static function ackReceiptIssued(
+        PDO $pdo,
+        int $orderId,
+        ?string $orderNumber = null,
+        ?int $actorId = null,
+        ?string $actorName = null,
+        ?string $actorRole = null,
+        ?int $posDeviceId = null
+    ): array {
+        $stmt = $pdo->prepare("SELECT id, order_number, plate_number, payment_status, receipt_issued_at, pos_device_id FROM orders WHERE id = ?");
+        $stmt->execute([$orderId]);
+        $order = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$order) {
+            throw new Exception("Order #{$orderId} not found", 404);
+        }
+
+        // Validate matching order number if supplied
+        if ($orderNumber !== null && $orderNumber !== '' && $order['order_number'] !== $orderNumber) {
+            throw new Exception("Order number mismatch: expected {$order['order_number']}, got {$orderNumber}", 400);
+        }
+
+        // Validate device if device ID is set on order and supplied
+        if ($posDeviceId !== null && $posDeviceId > 0 && !empty($order['pos_device_id']) && (int)$order['pos_device_id'] !== $posDeviceId) {
+            throw new Exception("POS device mismatch for order #{$order['order_number']}", 403);
+        }
+
+        // Validate payment status: Unpaid orders CANNOT be acknowledged
+        if (($order['payment_status'] ?? '') !== 'paid') {
+            throw new PaymentRequiredException("Cannot acknowledge receipt for unpaid order #{$order['order_number']}. Payment status is '{$order['payment_status']}'", 402);
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $wasAlreadySet = !empty($order['receipt_issued_at']);
+        $issuedAt = $wasAlreadySet ? $order['receipt_issued_at'] : $now;
+
+        if (!$wasAlreadySet) {
+            $upd = $pdo->prepare("UPDATE orders SET receipt_issued_at = ? WHERE id = ? AND payment_status = 'paid' AND receipt_issued_at IS NULL");
+            $upd->execute([$now, $orderId]);
+
+            AuditLogger::log(
+                'RECEIPT_ACKNOWLEDGED',
+                "Electronic receipt acknowledged by client for order #{$order['order_number']}",
+                'order',
+                (string)$orderId,
+                $actorId,
+                $actorName,
+                $actorRole
+            );
+        }
+
+        return [
+            'success' => true,
+            'order_id' => $orderId,
+            'order_number' => $order['order_number'],
+            'receipt_issued_at' => $issuedAt,
+            'already_acknowledged' => $wasAlreadySet
+        ];
+    }
+
+    /**
+     * Assert that an order satisfies mandatory payment and electronic receipt admission criteria before entering a bay.
+     * Enforces strict hierarchy:
+     * 1. Order must exist.
+     * 2. Mandatory payment check (payment_status === 'paid') - NO bypass, Manager PIN cannot admit unpaid car.
+     * 3. Receipt setting check: if require_receipt_before_wash is '0', paid car may proceed.
+     * 4. Electronic receipt issuance (receipt_issued_at IS NOT NULL) - passes.
+     * 5. Verified legacy physical print fallback (receipt_printed_at IS NOT NULL) - passes.
+     * 6. Narrow receipt-only manager PIN override for paid orders with missing receipt.
+     */
+    public static function assertServiceAdmissible(
         PDO $pdo,
         int $orderId,
         ?string $managerPin = null,
@@ -71,31 +147,44 @@ class OrderGate {
         ?string $actorName = null,
         ?string $actorRole = null
     ): bool {
-        if (!self::isReceiptRequired($pdo)) {
-            return true;
-        }
-
-        $stmt = $pdo->prepare("SELECT id, order_number, plate_number, receipt_printed_at, status FROM orders WHERE id = ?");
+        // 1. Fetch order
+        $stmt = $pdo->prepare("SELECT id, order_number, plate_number, payment_status, receipt_issued_at, receipt_printed_at, status FROM orders WHERE id = ?");
         $stmt->execute([$orderId]);
         $order = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$order) {
-            throw new Exception("Order #{$orderId} not found");
+            throw new Exception("Order #{$orderId} not found", 404);
         }
 
-        // If receipt has already been printed, gate passes immediately
+        // 2. Mandatory payment enforcement (BEFORE ANY setting or manager PIN bypass)
+        $paymentStatus = (string)($order['payment_status'] ?? '');
+        if ($paymentStatus !== 'paid') {
+            throw new PaymentRequiredException("PAYMENT_REQUIRED: Upfront payment is mandatory before vehicle {$order['plate_number']} (#{$order['order_number']}) can enter wash/work bay.");
+        }
+
+        // 3. Receipt setting check: Only AFTER payment is verified
+        if (!self::isReceiptRequired($pdo)) {
+            return true;
+        }
+
+        // 4. Primary electronic receipt issuance check
+        if (!empty($order['receipt_issued_at'])) {
+            return true;
+        }
+
+        // 5. Verified legacy evidence fallback
         if (!empty($order['receipt_printed_at'])) {
             return true;
         }
 
-        // Check for manager PIN override
+        // 6. Narrowly scoped receipt-only manager PIN override for paid orders
         $pin = trim((string)$managerPin);
         $reason = trim((string)$overrideReason);
 
         if ($pin !== '') {
             $manager = self::verifyOverrideManager($pdo, $pin, $managerUsername);
             if ($manager) {
-                $overrideDetails = "Manager {$manager['full_name']} ({$manager['role']}) authorized 'No Receipt' override for Order #{$order['order_number']} (Plate: {$order['plate_number']}). Reason: " . ($reason !== '' ? $reason : 'Manual Manager Override');
+                $overrideDetails = "Manager {$manager['full_name']} ({$manager['role']}) authorized Missing Receipt admission for PAID Order #{$order['order_number']} (Plate: {$order['plate_number']}). Reason: " . ($reason !== '' ? $reason : 'Manual Manager Override');
                 AuditLogger::log(
                     'RECEIPT_OVERRIDE',
                     $overrideDetails,
@@ -120,7 +209,32 @@ class OrderGate {
             }
         }
 
-        throw new ReceiptRequiredException("RECEIPT_REQUIRED: Customer receipt must be printed before vehicle {$order['plate_number']} (#{$order['order_number']}) can enter wash/work bay.");
+        throw new ReceiptRequiredException("RECEIPT_REQUIRED: Customer electronic receipt must be issued before vehicle {$order['plate_number']} (#{$order['order_number']}) can enter wash/work bay.");
+    }
+
+    /**
+     * Backward-compatible alias for assertServiceAdmissible.
+     */
+    public static function assertReceiptPrinted(
+        PDO $pdo,
+        int $orderId,
+        ?string $managerPin = null,
+        ?string $overrideReason = null,
+        ?string $managerUsername = null,
+        ?int $actorId = null,
+        ?string $actorName = null,
+        ?string $actorRole = null
+    ): bool {
+        return self::assertServiceAdmissible(
+            $pdo,
+            $orderId,
+            $managerPin,
+            $overrideReason,
+            $managerUsername,
+            $actorId,
+            $actorName,
+            $actorRole
+        );
     }
 
     /**

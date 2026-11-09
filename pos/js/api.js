@@ -250,6 +250,13 @@ class PosApi {
     }
 
     /**
+     * Acknowledge receipt of electronic receipt payload from server
+     */
+    static async ackReceiptIssued(orderId, orderNumber = '') {
+        return await this.request('ack_receipt_issued', { order_id: orderId, order_number: orderNumber });
+    }
+
+    /**
      * Update job status in Back Office (waiting, washing, working, finished, paid, cancelled)
      */
     static async syncOrderStatus(orderId, orderNumber, status, paymentMethod = 'cash', paymentDetails = {}) {
