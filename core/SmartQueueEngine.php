@@ -287,7 +287,7 @@ class SmartQueueEngine {
                 service_id, service_name, vehicle_type, order_id, task_id,
                 estimated_minutes, actual_minutes, over_percentage, washer_answered_longer,
                 status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW())
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
         ");
         $ins->execute([
             $serviceId,
@@ -370,7 +370,7 @@ class SmartQueueEngine {
 
             $pdo->prepare("
                 UPDATE service_duration_reviews 
-                SET status = ?, reviewed_by = ?, reviewed_at = NOW(), resolution_notes = ? 
+                SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, resolution_notes = ? 
                 WHERE id = ?
             ")->execute([$status, $userId, $notes ?: $logMsg, $reviewId]);
 

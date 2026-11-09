@@ -435,7 +435,7 @@ class TechnicalManager {
         }
 
         // 3. Mark Order as Finished & Free Bay (hands over to wash queue if mixed)
-        $finishRes = BayManager::finishCar($pdo, $orderId, $userId, $userName, $userRole, $tookLonger);
+        $finishRes = BayManager::finishCar($pdo, null, $orderId, $userId, $userName, $userRole, $tookLonger);
         if (empty($finishRes['success'])) {
             throw new Exception($finishRes['message'] ?? 'Could not complete job order.');
         }

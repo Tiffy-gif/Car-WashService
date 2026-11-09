@@ -7044,8 +7044,15 @@ class PosApp {
     static openWasherFinishPrompt(bayId, orderId, plate, bayName, isMixed = 0, role = 'washer') {
         const modal = document.getElementById('modalWasherFinish');
         if (!modal) return;
-        const targetId = bayId > 0 ? bayId : orderId;
-        document.getElementById('finishPromptTargetId').value = targetId;
+        const bId = parseInt(bayId || 0, 10);
+        const oId = parseInt(orderId || 0, 10);
+        const elBay = document.getElementById('finishPromptBayId');
+        if (elBay) elBay.value = bId;
+        const elOrder = document.getElementById('finishPromptOrderId');
+        if (elOrder) elOrder.value = oId;
+        const targetId = oId > 0 ? oId : bId;
+        const elTarget = document.getElementById('finishPromptTargetId');
+        if (elTarget) elTarget.value = targetId;
         document.getElementById('finishPromptIsMixed').value = isMixed ? '1' : '0';
         document.getElementById('finishPromptRole').value = role;
         document.getElementById('finishPromptVehicle').textContent = `Vehicle: ${plate}`;
@@ -7055,17 +7062,20 @@ class PosApp {
 
     static async handleConfirmFinish(tookLonger = 0) {
         const modal = document.getElementById('modalWasherFinish');
-        const targetId = parseInt(document.getElementById('finishPromptTargetId')?.value || 0);
+        const bayId = parseInt(document.getElementById('finishPromptBayId')?.value || 0, 10);
+        const orderId = parseInt(document.getElementById('finishPromptOrderId')?.value || 0, 10);
+        const targetId = parseInt(document.getElementById('finishPromptTargetId')?.value || 0, 10);
+        const effectiveOrderId = orderId > 0 ? orderId : targetId;
         const isMixed = document.getElementById('finishPromptIsMixed')?.value === '1';
         const role = document.getElementById('finishPromptRole')?.value || 'washer';
 
         if (modal) modal.classList.remove('open');
-        if (targetId <= 0) return;
+        if (effectiveOrderId <= 0 && bayId <= 0) return;
 
         try {
             let res;
             if (role === 'technical') {
-                res = await PosApi.finishTechJob(targetId, tookLonger);
+                res = await PosApi.finishTechJob(effectiveOrderId, tookLonger);
                 if (res && res.success) {
                     this.showToastNotice('Technical Job completed! Vehicle is ready for cashier checkout.', 'success');
                     this.playChimeSound();
@@ -7074,7 +7084,7 @@ class PosApp {
                     this.showAppAlert(res?.message || res?.error || 'Failed to complete technical job');
                 }
             } else {
-                res = await PosApi.finishWasherCar(targetId, tookLonger);
+                res = await PosApi.finishWasherCar(bayId > 0 ? bayId : null, effectiveOrderId, tookLonger);
                 if (res && res.success) {
                     if (res.is_handshake) {
                         this.showToastNotice(`Wash completed. Car ${res.plate_number || ''} sent to Technical screen! Wash Bay is now Free.`, 'info');

@@ -595,13 +595,39 @@ class PosApi {
 
     /**
      * Finish Wash: Frees bay, handles "took longer", and handshakes mixed orders
+     * Accepts explicit (bayId, orderId, tookLonger, reason) or legacy (bayOrOrderId, tookLonger, reason)
      */
-    static async finishWasherCar(bayOrOrderId, tookLonger = null, reason = '') {
+    static async finishWasherCar(bayIdOrOrderId, orderIdOrTookLonger = null, tookLonger = null, reason = '') {
+        let bId = null;
+        let oId = null;
+        let tl = null;
+        let rsn = '';
+
+        if (tookLonger !== null && typeof tookLonger === 'number') {
+            // New signature: finishWasherCar(bayId, orderId, tookLonger, reason)
+            bId = (bayIdOrOrderId && bayIdOrOrderId > 0) ? parseInt(bayIdOrOrderId, 10) : null;
+            oId = (orderIdOrTookLonger && orderIdOrTookLonger > 0) ? parseInt(orderIdOrTookLonger, 10) : null;
+            tl = tookLonger;
+            rsn = reason || '';
+        } else if (orderIdOrTookLonger !== null && typeof orderIdOrTookLonger === 'number' && orderIdOrTookLonger > 1) {
+            // Called with (bayId, orderId)
+            bId = (bayIdOrOrderId && bayIdOrOrderId > 0) ? parseInt(bayIdOrOrderId, 10) : null;
+            oId = parseInt(orderIdOrTookLonger, 10);
+            tl = (tookLonger === 0 || tookLonger === 1) ? tookLonger : null;
+            rsn = reason || '';
+        } else {
+            // Legacy signature: finishWasherCar(orderId, tookLonger, reason)
+            oId = (bayIdOrOrderId && bayIdOrOrderId > 0) ? parseInt(bayIdOrOrderId, 10) : null;
+            tl = (orderIdOrTookLonger === 0 || orderIdOrTookLonger === 1) ? orderIdOrTookLonger : null;
+            rsn = (typeof tookLonger === 'string') ? tookLonger : (reason || '');
+        }
+
         const user = PosStorage.getUser();
         return await this.request('finish_car', {
-            order_id: bayOrOrderId,
-            took_longer: tookLonger,
-            reason: reason,
+            bay_id: bId,
+            order_id: oId,
+            took_longer: tl,
+            reason: rsn,
             staff_id: user?.id || null
         });
     }

@@ -14,7 +14,11 @@ class NotificationManager {
             return;
         }
 
-        $driver = Database::getDriver();
+        try {
+            $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        } catch (Throwable $t) {
+            $driver = Database::getDriver();
+        }
         $isSqlite = ($driver === 'sqlite');
         $autoInc = $isSqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT AUTO_INCREMENT PRIMARY KEY';
         $charsetEngine = $isSqlite ? '' : 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';

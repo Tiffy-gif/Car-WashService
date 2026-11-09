@@ -19,7 +19,11 @@ class BayManager {
             return;
         }
 
-        $driver = Database::getDriver();
+        try {
+            $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        } catch (Throwable $t) {
+            $driver = Database::getDriver();
+        }
         $isSqlite = ($driver === 'sqlite');
         $autoInc = $isSqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT AUTO_INCREMENT PRIMARY KEY';
         $charsetEngine = $isSqlite ? '' : 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
@@ -192,7 +196,12 @@ class BayManager {
     public static function getAllBays(PDO $pdo): array {
         self::ensureTables($pdo);
 
-        $isSqlite = (Database::getDriver() === 'sqlite');
+        try {
+            $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        } catch (Throwable $t) {
+            $driver = Database::getDriver();
+        }
+        $isSqlite = ($driver === 'sqlite');
         $groupConcat = $isSqlite ? "GROUP_CONCAT(DISTINCT oi.service_name)" : "GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ')";
 
         $sql = "
@@ -262,17 +271,17 @@ class BayManager {
                 'skill_tag' => $skillTag, // 'wash_only', 'oil_only', 'wash_and_oil', 'detailing'
                 'status' => $isBusy ? 'busy' : 'free',
                 'is_active' => (int)$r['is_active'],
-                'current_order_id' => $r['current_order_id'] ? (int)$r['current_order_id'] : null,
-                'occupied_at' => $r['occupied_at'],
+                'current_order_id' => $isBusy && !empty($r['current_order_id']) ? (int)$r['current_order_id'] : null,
+                'occupied_at' => $isBusy ? $r['occupied_at'] : null,
                 'last_freed_at' => $r['last_freed_at'],
                 'sort_order' => (int)$r['sort_order'],
                 'duration_minutes' => $durationMinutes,
                 'in_bay_minutes' => $durationMinutes,
                 'idle_minutes' => $idleMinutes,
-                'plate_number' => $currentCar ? $currentCar['plate_number'] : ($r['plate_number'] ?? null),
-                'service_names' => $currentCar ? $currentCar['service_names'] : ($r['service_names'] ?? null),
-                'is_mixed' => $currentCar ? (int)$currentCar['is_mixed'] : (int)($r['is_mixed'] ?? 0),
-                'current_car' => $currentCar
+                'plate_number' => $isBusy && $currentCar ? $currentCar['plate_number'] : null,
+                'service_names' => $isBusy && $currentCar ? $currentCar['service_names'] : null,
+                'is_mixed' => $isBusy && $currentCar ? (int)$currentCar['is_mixed'] : 0,
+                'current_car' => $isBusy ? $currentCar : null
             ];
         }
 
@@ -442,8 +451,167 @@ class BayManager {
     /**
      * Ensure child tasks exist for an order (Mixed orders & single orders).
      * Enforces approved lifecycle: Mechanical Service in Bay 4 (Step 1) -> Wash Bay (Step 2).
+     * Concurrency-safe: acquires parent row lock on orders to serialize simultaneous task creation.
      */
     public static function ensureOrderTasks(PDO $pdo, int $orderId): array {
+        if ($orderId <= 0) {
+            return [];
+        }
+
+        $wasInTransaction = $pdo->inTransaction();
+        $maxAttempts = (!$wasInTransaction) ? 3 : 1;
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            // Quick check without locking if tasks are already established
+            $existing = $pdo->prepare("SELECT * FROM order_tasks WHERE order_id = ? ORDER BY sequence ASC, id ASC");
+            $existing->execute([$orderId]);
+            $tasks = $existing->fetchAll(PDO::FETCH_ASSOC);
+            if (!empty($tasks)) {
+                return $tasks;
+            }
+
+            if (!$wasInTransaction && !$pdo->inTransaction()) {
+                $pdo->beginTransaction();
+            }
+
+            try {
+                try {
+                    $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+                } catch (Throwable $t) {
+                    $driver = Database::getDriver();
+                }
+                $isMySql = ($driver === 'mysql');
+                $forUpdate = $isMySql ? ' FOR UPDATE' : '';
+
+                // 1. Lock the parent order row to serialize concurrent task generation for this order
+                $ordLock = $pdo->prepare("SELECT * FROM orders WHERE id = ?" . $forUpdate);
+                $ordLock->execute([$orderId]);
+                $order = $ordLock->fetch(PDO::FETCH_ASSOC);
+
+                if (!$order) {
+                    if (!$wasInTransaction && $pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    return [];
+                }
+
+                // 2. Re-check existing tasks inside the serialized lock using locking read (FOR UPDATE on MySQL/MariaDB)
+                // to bypass REPEATABLE READ MVCC snapshot and read newly committed tasks from competing transactions
+                $taskLockStmt = $pdo->prepare("SELECT * FROM order_tasks WHERE order_id = ? ORDER BY sequence ASC, id ASC" . $forUpdate);
+                $taskLockStmt->execute([$orderId]);
+                $tasks = $taskLockStmt->fetchAll(PDO::FETCH_ASSOC);
+                if (!empty($tasks)) {
+                    if (!$wasInTransaction && $pdo->inTransaction()) {
+                        $pdo->commit();
+                    }
+                    return $tasks;
+                }
+
+                // 3. Inspect items to determine task types
+                $itemsStmt = $pdo->prepare("
+                    SELECT oi.*, s.category as service_category, p.category as product_category
+                    FROM order_items oi
+                    LEFT JOIN services s ON oi.service_id = s.id
+                    LEFT JOIN products p ON oi.product_id = p.id
+                    WHERE oi.order_id = ?
+                ");
+                $itemsStmt->execute([$orderId]);
+                $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+                $hasWash = false;
+                $hasOil = false;
+
+                foreach ($items as $it) {
+                    $sc = $it['service_category'] ?? '';
+                    $pc = $it['product_category'] ?? '';
+                    $name = strtolower($it['service_name'] ?? '');
+
+                    if ($sc === 'wash' || $sc === 'detailing' || str_contains($name, 'wash') || str_contains($name, 'vacuum')) {
+                        $hasWash = true;
+                    }
+                    if ($sc === 'repair' || $sc === 'maintenance' || $sc === 'care' ||
+                        in_array($pc, ['engine_oil', 'oil_filter', 'fluid', 'spare_part'], true) ||
+                        str_contains($name, 'oil') || str_contains($name, 'filter') || str_contains($name, 'repair')) {
+                        $hasOil = true;
+                    }
+                }
+
+                // Also check order notes / repair status
+                if (!empty($order['repair_status']) || !empty($order['next_oil_mileage']) || !empty($order['repair_notes'])) {
+                    $hasOil = true;
+                }
+
+                // If neither detected, default to car wash
+                if (!$hasWash && !$hasOil) {
+                    $hasWash = true;
+                }
+
+                $isMixed = ($hasWash && $hasOil) ? 1 : 0;
+                $pdo->prepare("UPDATE orders SET is_mixed = ? WHERE id = ?")->execute([$isMixed, $orderId]);
+
+                $repairFinished = (!empty($order['repair_status']) && strtolower(trim((string)$order['repair_status'])) === 'finished');
+
+                $insTask = $pdo->prepare("
+                    INSERT INTO order_tasks (order_id, task_type, title, sequence, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ");
+
+                if ($isMixed) {
+                    if ($repairFinished) {
+                        // Historical mixed order with finished mechanical service:
+                        // Step 1: completed, Step 2: waiting in Wash Queue
+                        $insTask->execute([$orderId, 'oil_change', 'Engine Oil Change & Inspection (Step 1)', 1, 'completed']);
+                        $insTask->execute([$orderId, 'wash', 'Exterior & Interior Wash (Step 2)', 2, 'waiting']);
+                    } else {
+                        // Standard mixed order: Lift First (Step 1: waiting, Step 2: pending_prereq)
+                        $insTask->execute([$orderId, 'oil_change', 'Engine Oil Change & Inspection (Step 1)', 1, 'waiting']);
+                        $insTask->execute([$orderId, 'wash', 'Exterior & Interior Wash (Step 2)', 2, 'pending_prereq']);
+                    }
+                } elseif ($hasOil) {
+                    $insTask->execute([$orderId, 'oil_change', 'Engine Oil Change & Technical Service', 1, 'waiting']);
+                } else {
+                    $insTask->execute([$orderId, 'wash', 'Car Wash Service', 1, 'waiting']);
+                }
+
+                $existing->execute([$orderId]);
+                $createdTasks = $existing->fetchAll(PDO::FETCH_ASSOC);
+
+                if (!$wasInTransaction && $pdo->inTransaction()) {
+                    $pdo->commit();
+                }
+
+                return $createdTasks;
+            } catch (Throwable $e) {
+                if (!$wasInTransaction && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+
+                // Never retry if an outer transaction already exists ($wasInTransaction === true)
+                // Only retry if this method owns the transaction and error is SQLite locked/busy
+                $isLockError = str_contains($e->getMessage(), 'database is locked') || str_contains($e->getMessage(), 'busy');
+                if (!$wasInTransaction && $isLockError && $attempt < $maxAttempts) {
+                    // Exponential backoff with progressive sleep: 25ms, 50ms
+                    usleep($attempt * 25000);
+                    // Check if competing process already committed tasks before retrying transaction
+                    $retryTasks = self::getOrderTasksReadOnly($pdo, $orderId);
+                    if (!empty($retryTasks)) {
+                        return $retryTasks;
+                    }
+                    continue;
+                }
+
+                throw $e;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Read-only task retrieval for queue operations.
+     * Guarantees ZERO database writes on GET queue requests while preserving workflow sequence.
+     */
+    public static function getOrderTasksReadOnly(PDO $pdo, int $orderId, ?array $order = null): array {
         $existing = $pdo->prepare("SELECT * FROM order_tasks WHERE order_id = ? ORDER BY sequence ASC, id ASC");
         $existing->execute([$orderId]);
         $tasks = $existing->fetchAll(PDO::FETCH_ASSOC);
@@ -452,10 +620,12 @@ class BayManager {
             return $tasks;
         }
 
-        // Inspect order and items to determine tasks
-        $ordStmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?");
-        $ordStmt->execute([$orderId]);
-        $order = $ordStmt->fetch(PDO::FETCH_ASSOC);
+        // If tasks have not yet been persisted to DB, synthesize in-memory without database writes
+        if (!$order) {
+            $ordStmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?");
+            $ordStmt->execute([$orderId]);
+            $order = $ordStmt->fetch(PDO::FETCH_ASSOC);
+        }
 
         if (!$order) {
             return [];
@@ -489,43 +659,79 @@ class BayManager {
             }
         }
 
-        // Also check order notes / repair status
         if (!empty($order['repair_status']) || !empty($order['next_oil_mileage']) || !empty($order['repair_notes'])) {
             $hasOil = true;
         }
 
-        // If neither detected, default to car wash
         if (!$hasWash && !$hasOil) {
             $hasWash = true;
         }
 
-        $isMixed = ($hasWash && $hasOil) ? 1 : 0;
-        $pdo->prepare("UPDATE orders SET is_mixed = ? WHERE id = ?")->execute([$isMixed, $orderId]);
-
-        $insTask = $pdo->prepare("
-            INSERT INTO order_tasks (order_id, task_type, title, sequence, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        ");
-
-        $tasksCreated = [];
+        $isMixed = ($hasWash && $hasOil);
+        $simulated = [];
         if ($isMixed) {
-            // Step 1: Mechanical Service in Bay 4 (Active / Waiting) - Lift First
-            $insTask->execute([$orderId, 'oil_change', 'Engine Oil Change & Inspection (Step 1)', 1, 'waiting']);
-            $tasksCreated[] = ['order_id' => $orderId, 'task_type' => 'oil_change', 'sequence' => 1, 'status' => 'waiting'];
+            $repairFinished = (!empty($order['repair_status']) && strtolower(trim((string)$order['repair_status'])) === 'finished');
 
-            // Step 2: Exterior & Interior Wash (Pending prerequisite until Bay 4 completes) - Wash Second
-            $insTask->execute([$orderId, 'wash', 'Exterior & Interior Wash (Step 2)', 2, 'pending_prereq']);
-            $tasksCreated[] = ['order_id' => $orderId, 'task_type' => 'wash', 'sequence' => 2, 'status' => 'pending_prereq'];
+            if ($repairFinished) {
+                // Historical mixed order with finished mechanical service:
+                // Step 1: completed, Step 2: waiting in Wash Queue
+                $simulated[] = [
+                    'id' => 0,
+                    'order_id' => $orderId,
+                    'task_type' => 'oil_change',
+                    'title' => 'Engine Oil Change & Inspection (Step 1)',
+                    'sequence' => 1,
+                    'status' => 'completed'
+                ];
+                $simulated[] = [
+                    'id' => 0,
+                    'order_id' => $orderId,
+                    'task_type' => 'wash',
+                    'title' => 'Exterior & Interior Wash (Step 2)',
+                    'sequence' => 2,
+                    'status' => 'waiting'
+                ];
+            } else {
+                // Historical mixed order with unfinished mechanical service:
+                // Step 1: waiting in Technical Queue (Lift First), Step 2: pending_prereq (Wash Second)
+                $simulated[] = [
+                    'id' => 0,
+                    'order_id' => $orderId,
+                    'task_type' => 'oil_change',
+                    'title' => 'Engine Oil Change & Inspection (Step 1)',
+                    'sequence' => 1,
+                    'status' => 'waiting'
+                ];
+                $simulated[] = [
+                    'id' => 0,
+                    'order_id' => $orderId,
+                    'task_type' => 'wash',
+                    'title' => 'Exterior & Interior Wash (Step 2)',
+                    'sequence' => 2,
+                    'status' => 'pending_prereq'
+                ];
+            }
         } elseif ($hasOil) {
-            $insTask->execute([$orderId, 'oil_change', 'Engine Oil Change & Technical Service', 1, 'waiting']);
-            $tasksCreated[] = ['order_id' => $orderId, 'task_type' => 'oil_change', 'sequence' => 1, 'status' => 'waiting'];
+            $simulated[] = [
+                'id' => 0,
+                'order_id' => $orderId,
+                'task_type' => 'oil_change',
+                'title' => 'Engine Oil Change & Technical Service',
+                'sequence' => 1,
+                'status' => 'waiting'
+            ];
         } else {
-            $insTask->execute([$orderId, 'wash', 'Car Wash Service', 1, 'waiting']);
-            $tasksCreated[] = ['order_id' => $orderId, 'task_type' => 'wash', 'sequence' => 1, 'status' => 'waiting'];
+            $simulated[] = [
+                'id' => 0,
+                'order_id' => $orderId,
+                'task_type' => 'wash',
+                'title' => 'Car Wash Service',
+                'sequence' => 1,
+                'status' => 'waiting'
+            ];
         }
 
-        $existing->execute([$orderId]);
-        return $existing->fetchAll(PDO::FETCH_ASSOC);
+        return $simulated;
     }
 
     /**
@@ -534,7 +740,12 @@ class BayManager {
     public static function getQueues(PDO $pdo): array {
         self::ensureTables($pdo);
 
-        $isSqlite = (Database::getDriver() === 'sqlite');
+        try {
+            $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        } catch (Throwable $t) {
+            $driver = Database::getDriver();
+        }
+        $isSqlite = ($driver === 'sqlite');
         $groupConcat = $isSqlite ? "GROUP_CONCAT(DISTINCT oi.service_name)" : "GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ')";
 
         // Fetch all waiting orders joined with customer membership
@@ -558,7 +769,7 @@ class BayManager {
 
         foreach ($orders as $ord) {
             $orderId = (int)$ord['id'];
-            $tasks = self::ensureOrderTasks($pdo, $orderId);
+            $tasks = self::getOrderTasksReadOnly($pdo, $orderId, $ord);
 
             // Determine current active task
             $activeTask = null;
@@ -1124,7 +1335,11 @@ class BayManager {
             ];
         }
 
-        $driver = Database::getDriver();
+        try {
+            $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        } catch (Throwable $t) {
+            $driver = Database::getDriver();
+        }
         $isMysql = ($driver === 'mysql');
 
         $pdo->beginTransaction();
@@ -1278,78 +1493,186 @@ class BayManager {
      *   The Technical screen shows "Car ABC waiting for Oil Change", and technician taps "Receive from Wash" to start.
      *   The parent order is NOT "Done" until every child task is finished.
      */
-    public static function finishCar(PDO $pdo, int $identifier, int $userId, string $userName, string $userRole, ?int $tookLonger = null, ?string $reason = null): array {
+    /**
+     * Finish a Car or Handshake to Next Step.
+     * Explicit, consistently typed signature. Does not silently reinterpret arguments.
+     *
+     * @param PDO $pdo Active PDO connection
+     * @param int|null $bayId Explicit bay ID (null if completing unassigned/waiting order)
+     * @param int $orderId Explicit order ID (mandatory)
+     * @param int $userId Performing staff user ID
+     * @param string $userName Performing staff user name
+     * @param string $userRole Performing staff effective role
+     * @param int|null $tookLonger Answer to "Did this take longer?" (1=yes, 0=no, null=unanswered)
+     * @param string|null $reason Optional reason or notes
+     * @return array Result array with success boolean and details/error
+     */
+    public static function finishCar(
+        PDO $pdo,
+        ?int $bayId,
+        int $orderId,
+        int $userId,
+        string $userName,
+        string $userRole,
+        ?int $tookLonger = null,
+        ?string $reason = null
+    ): array {
         self::ensureTables($pdo);
 
-        // Identifier can be bay_id or order_id
-        $bay = null;
-        $order = null;
-
-        // Check if identifier is bay_id
-        $bStmt = $pdo->prepare("SELECT * FROM bays WHERE id = ?");
-        $bStmt->execute([$identifier]);
-        $bay = $bStmt->fetch();
-
-        if ($bay && !empty($bay['current_order_id'])) {
-            $orderId = (int)$bay['current_order_id'];
-            $oStmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?");
-            $oStmt->execute([$orderId]);
-            $order = $oStmt->fetch();
-        } else {
-            // Check if identifier is order_id
-            $oStmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?");
-            $oStmt->execute([$identifier]);
-            $order = $oStmt->fetch();
-
-            if ($order) {
-                $orderId = (int)$order['id'];
-                $bStmt = $pdo->prepare("SELECT * FROM bays WHERE current_order_id = ?");
-                $bStmt->execute([$orderId]);
-                $bay = $bStmt->fetch();
-            }
+        if ($orderId <= 0) {
+            return ['success' => false, 'error' => 'ORDER_ID_REQUIRED', 'message' => 'Valid order_id is required'];
         }
 
-        if (!$order) {
-            return ['success' => false, 'error' => 'ORDER_NOT_FOUND', 'message' => 'Order not found'];
+        $isMySql = false;
+        try {
+            $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+            $isMySql = ($driver === 'mysql');
+        } catch (Throwable $t) {
+            $isMySql = false;
         }
-
-        $orderId = (int)$order['id'];
-        $now = date('Y-m-d H:i:s');
-        $bayName = $bay ? $bay['bay_name'] : 'Bay';
-        $bayId = $bay ? (int)$bay['id'] : null;
-
-        // 1. Child tasks lookup
-        $tasks = self::ensureOrderTasks($pdo, $orderId);
-        $currentTask = null;
-        $remainingTasks = [];
-
-        $isMechanicalBay = ($bay && ($bay['bay_type'] === 'oil_change' || ($bay['skill_tag'] ?? '') === 'oil_only'));
-
-        foreach ($tasks as $t) {
-            if ($t['status'] === 'in_progress') {
-                if ($isMechanicalBay && $t['task_type'] === 'wash') {
-                    continue;
-                }
-                $currentTask = $t;
-            } elseif ($t['status'] !== 'completed') {
-                if ($isMechanicalBay && $t['task_type'] === 'wash') {
-                    continue;
-                }
-                $remainingTasks[] = $t;
-            }
-        }
-
-        // If no in_progress task found, find first uncompleted
-        if (!$currentTask && !empty($remainingTasks)) {
-            $currentTask = array_shift($remainingTasks);
-        }
+        $forUpdate = $isMySql ? ' FOR UPDATE' : '';
 
         if (!$pdo->inTransaction()) {
             $pdo->beginTransaction();
         }
 
         try {
-            // Save estimate answer: took_longer_than_expected
+            // 1. Fetch & lock order inside transaction
+            $oStmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?" . $forUpdate);
+            $oStmt->execute([$orderId]);
+            $order = $oStmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$order) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                return ['success' => false, 'error' => 'ORDER_NOT_FOUND', 'message' => "Order #{$orderId} not found"];
+            }
+
+            // Check if order already finished/paid/cancelled
+            if (in_array($order['status'], ['finished', 'paid', 'cancelled'], true)) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                return [
+                    'success' => false,
+                    'error' => 'ORDER_ALREADY_COMPLETED',
+                    'message' => "Order #{$orderId} is already completed (status: {$order['status']})"
+                ];
+            }
+
+            // 2. Fetch & lock bay if bayId provided or order has bay_id
+            $targetBayId = $bayId > 0 ? $bayId : (!empty($order['bay_id']) ? (int)$order['bay_id'] : null);
+            $bay = null;
+
+            if ($targetBayId) {
+                $bStmt = $pdo->prepare("SELECT * FROM bays WHERE id = ?" . $forUpdate);
+                $bStmt->execute([$targetBayId]);
+                $bay = $bStmt->fetch(PDO::FETCH_ASSOC);
+
+                if (!$bay) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    return ['success' => false, 'error' => 'BAY_NOT_FOUND', 'message' => "Bay #{$targetBayId} not found"];
+                }
+
+                // If caller explicitly provided bayId, validate strict assignment to this order
+                if ($bayId !== null && $bayId > 0) {
+                    if ($bay['status'] === 'free' && empty($bay['current_order_id'])) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        return [
+                            'success' => false,
+                            'error' => 'BAY_ALREADY_FREE',
+                            'message' => "Bay {$bay['bay_name']} is already free"
+                        ];
+                    }
+
+                    if ((int)($bay['current_order_id'] ?? 0) !== $orderId) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        return [
+                            'success' => false,
+                            'error' => 'BAY_ORDER_MISMATCH',
+                            'message' => "Bay {$bay['bay_name']} is currently occupied by order #{$bay['current_order_id']}, not order #{$orderId}"
+                        ];
+                    }
+                }
+            }
+
+            $effectiveBayId = $bay ? (int)$bay['id'] : null;
+            $bayName = $bay ? $bay['bay_name'] : 'Bay';
+            $now = date('Y-m-d H:i:s');
+
+            // 3. Child tasks lookup
+            $tasks = self::ensureOrderTasks($pdo, $orderId);
+            $currentTask = null;
+            $remainingTasks = [];
+
+            $isMechanicalBay = ($bay && ($bay['bay_type'] === 'oil_change' || ($bay['skill_tag'] ?? '') === 'oil_only'));
+
+            foreach ($tasks as $t) {
+                if ($t['status'] === 'in_progress') {
+                    if ($isMechanicalBay && $t['task_type'] === 'wash') {
+                        continue;
+                    }
+                    $currentTask = $t;
+                } elseif ($t['status'] !== 'completed') {
+                    if ($isMechanicalBay && $t['task_type'] === 'wash') {
+                        continue;
+                    }
+                    $remainingTasks[] = $t;
+                }
+            }
+
+            // If no in_progress task found, find first uncompleted
+            if (!$currentTask && !empty($remainingTasks)) {
+                $currentTask = array_shift($remainingTasks);
+            }
+
+            // 4. Check next task in sequence to determine if this is a handshake or final completion
+            $nextTask = null;
+            if ($currentTask) {
+                $nextTaskStmt = $pdo->prepare("
+                    SELECT * FROM order_tasks 
+                    WHERE order_id = ? AND id != ? AND status != 'completed' 
+                    ORDER BY sequence ASC, id ASC 
+                    LIMIT 1
+                ");
+                $nextTaskStmt->execute([$orderId, $currentTask['id']]);
+                $nextTask = $nextTaskStmt->fetch(PDO::FETCH_ASSOC);
+            } else {
+                $nextTaskStmt = $pdo->prepare("
+                    SELECT * FROM order_tasks 
+                    WHERE order_id = ? AND status != 'completed' 
+                    ORDER BY sequence ASC, id ASC 
+                    LIMIT 1
+                ");
+                $nextTaskStmt->execute([$orderId]);
+                $nextTask = $nextTaskStmt->fetch(PDO::FETCH_ASSOC);
+            }
+
+            // 5. MANDATORY GUIDED INSPECTION CHECK BEFORE ANY STATE CHANGE:
+            // If final step (no next task), technician/washer cannot finish until inspection checklist is complete.
+            if (!$nextTask) {
+                $checkInspection = TechnicalManager::validateInspectionChecklist($pdo, $orderId);
+                if (!$checkInspection['passed']) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    return [
+                        'success' => false,
+                        'error' => 'MANDATORY_INSPECTION_INCOMPLETE',
+                        'message' => $checkInspection['message']
+                    ];
+                }
+            }
+
+            // 6. Save estimate answer: took_longer_than_expected
+            $tookLongerVal = 0;
             if ($tookLonger !== null) {
                 $tookLongerVal = ($tookLonger === 1) ? 1 : 0;
                 $pdo->prepare("UPDATE orders SET took_longer_than_expected = ? WHERE id = ?")->execute([$tookLongerVal, $orderId]);
@@ -1358,7 +1681,7 @@ class BayManager {
                 }
             }
 
-            // Mark current task as completed
+            // 7. Mark current task as completed
             if ($currentTask) {
                 $pdo->prepare("
                     UPDATE order_tasks 
@@ -1367,7 +1690,7 @@ class BayManager {
                 ")->execute([$now, $now, $currentTask['id']]);
             }
 
-            // Calculate actual duration & check Learning Engine
+            // 8. Calculate actual duration & check Learning Engine
             $occupiedTs = !empty($bay['occupied_at']) ? strtotime($bay['occupied_at']) : (!empty($order['started_at']) ? strtotime($order['started_at']) : time());
             $actualMins = max(1, (int)round((time() - $occupiedTs) / 60));
 
@@ -1390,17 +1713,33 @@ class BayManager {
                 $currentTask ? (int)$currentTask['id'] : null,
                 $estMins,
                 $actualMins,
-                $tookLongerVal ?? 0
+                $tookLongerVal
             );
 
-            // Free the bay immediately
+            // 9. Free the bay using atomic conditional update
             if ($bay) {
-                $pdo->prepare("
+                $freeBayStmt = $pdo->prepare("
                     UPDATE bays 
                     SET status = 'free', current_order_id = NULL, occupied_at = NULL, last_freed_at = ?, updated_at = ? 
-                    WHERE id = ?
-                ")->execute([$now, $now, $bay['id']]);
+                    WHERE id = ? AND current_order_id = ?
+                ");
+                $freeBayStmt->execute([$now, $now, $bay['id'], $orderId]);
+                if ($freeBayStmt->rowCount() === 0) {
+                    // Check if bay was already free or assigned elsewhere
+                    $recheckBay = $pdo->query("SELECT id, current_order_id, status FROM bays WHERE id = " . (int)$bay['id'])->fetch(PDO::FETCH_ASSOC);
+                    if ($recheckBay && (int)($recheckBay['current_order_id'] ?? 0) !== $orderId) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        return [
+                            'success' => false,
+                            'error' => 'CONCURRENT_MODIFICATION',
+                            'message' => "Bay {$bayName} was concurrently modified by another transaction. Completion aborted."
+                        ];
+                    }
+                }
             } else {
+                // Free any bay associated with this order
                 $pdo->prepare("
                     UPDATE bays 
                     SET status = 'free', current_order_id = NULL, occupied_at = NULL, last_freed_at = ?, updated_at = ? 
@@ -1408,19 +1747,8 @@ class BayManager {
                 ")->execute([$now, $now, $orderId]);
             }
 
-            // Check if there is a next task in sequence (Handshake / Mixed Order)
-            $nextTaskStmt = $pdo->prepare("
-                SELECT * FROM order_tasks 
-                WHERE order_id = ? AND status != 'completed' 
-                ORDER BY sequence ASC, id ASC 
-                LIMIT 1
-            ");
-            $nextTaskStmt->execute([$orderId]);
-            $nextTask = $nextTaskStmt->fetch(PDO::FETCH_ASSOC);
-
             if ($nextTask) {
                 // Lift First — Wash Second Handshake:
-                // Transition next task to waiting (joins Wash Queue)
                 $pdo->prepare("
                     UPDATE order_tasks 
                     SET status = 'waiting', updated_at = ? 
@@ -1428,7 +1756,6 @@ class BayManager {
                 ")->execute([$now, $nextTask['id']]);
 
                 // Order moves to Wash Queue:
-                // Decision 2 (Option 2A): status = 'waiting', repair_status = 'finished', bay_id = NULL
                 $pdo->prepare("
                     UPDATE orders 
                     SET bay_id = NULL, status = 'waiting', repair_status = 'finished' 
@@ -1441,11 +1768,11 @@ class BayManager {
                     INSERT INTO bay_history (order_id, bay_id, bay_name, plate_number, action, performed_by, performed_by_name, performed_by_role, reason, details, created_at)
                     VALUES (?, ?, ?, ?, 'sent_to_wash_queue', ?, ?, ?, ?, ?, ?)
                 ")->execute([
-                    $orderId, $bayId, $bayName, $order['plate_number'],
+                    $orderId, $effectiveBayId, $bayName, $order['plate_number'],
                     $userId, $userName, $userRole, $reason, $details, $now
                 ]);
 
-                // Commit core lifecycle updates first before dispatching external/non-core notifications
+                // Commit before dispatching notifications
                 if ($pdo->inTransaction()) {
                     $pdo->commit();
                 }
@@ -1472,26 +1799,14 @@ class BayManager {
                     'is_handshake' => true,
                     'message' => "Step 1 finished and car sent to Wash Queue. {$bayName} is now Free.",
                     'order_id' => $orderId,
+                    'bay_id' => $effectiveBayId,
+                    'bay_name' => $bayName,
                     'next_task' => $nextTask['title'],
                     'plate_number' => $order['plate_number']
                 ];
             }
 
             // FINAL STEP: All tasks completed -> Car is Done ("Ready to pay")
-            // MANDATORY GUIDED INSPECTION CHECK:
-            // The technician cannot finish the job until every mandatory checklist item is passed.
-            $checkInspection = TechnicalManager::validateInspectionChecklist($pdo, $orderId);
-            if (!$checkInspection['passed']) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                return [
-                    'success' => false,
-                    'error' => 'MANDATORY_INSPECTION_INCOMPLETE',
-                    'message' => $checkInspection['message']
-                ];
-            }
-
             $pdo->prepare("
                 UPDATE orders 
                 SET status = 'finished',
@@ -1506,7 +1821,7 @@ class BayManager {
                 INSERT INTO bay_history (order_id, bay_id, bay_name, plate_number, action, performed_by, performed_by_name, performed_by_role, reason, details, created_at)
                 VALUES (?, ?, ?, ?, 'finished', ?, ?, ?, ?, ?, ?)
             ")->execute([
-                $orderId, $bayId, $bayName, $order['plate_number'],
+                $orderId, $effectiveBayId, $bayName, $order['plate_number'],
                 $userId, $userName, $userRole, $reason, $details, $now
             ]);
 
@@ -1519,7 +1834,7 @@ class BayManager {
                 'is_handshake' => false,
                 'message' => "Car {$order['plate_number']} finished! Bay is now Free and order is Ready to pay.",
                 'order_id' => $orderId,
-                'bay_id' => $bayId,
+                'bay_id' => $effectiveBayId,
                 'bay_name' => $bayName,
                 'plate_number' => $order['plate_number'],
                 'order_status' => 'finished'
@@ -1530,6 +1845,51 @@ class BayManager {
             }
             return ['success' => false, 'error' => 'FINISH_ERROR', 'message' => $e->getMessage()];
         }
+    }
+
+    /**
+     * Legacy wrapper for finishCar() accepting an ambiguous integer identifier (bay_id or order_id).
+     * Strictly resolves the identifier to explicit bay_id and order_id, then delegates to finishCar().
+     */
+    public static function finishCarLegacy(
+        PDO $pdo,
+        int $identifier,
+        int $userId,
+        string $userName,
+        string $userRole,
+        ?int $tookLonger = null,
+        ?string $reason = null
+    ): array {
+        self::ensureTables($pdo);
+
+        $bayId = null;
+        $orderId = null;
+
+        if ($identifier > 0) {
+            $bCheck = $pdo->prepare("SELECT id, current_order_id FROM bays WHERE id = ?");
+            $bCheck->execute([$identifier]);
+            $bayRow = $bCheck->fetch(PDO::FETCH_ASSOC);
+            if ($bayRow && !empty($bayRow['current_order_id'])) {
+                $bayId = (int)$bayRow['id'];
+                $orderId = (int)$bayRow['current_order_id'];
+            } else {
+                $oCheck = $pdo->prepare("SELECT id, bay_id FROM orders WHERE id = ?");
+                $oCheck->execute([$identifier]);
+                $ordRow = $oCheck->fetch(PDO::FETCH_ASSOC);
+                if ($ordRow) {
+                    $orderId = (int)$ordRow['id'];
+                    $bayId = !empty($ordRow['bay_id']) ? (int)$ordRow['bay_id'] : null;
+                } elseif ($bayRow) {
+                    $bayId = (int)$bayRow['id'];
+                }
+            }
+        }
+
+        if (!$orderId || $orderId <= 0) {
+            return ['success' => false, 'error' => 'ORDER_ID_REQUIRED', 'message' => 'Valid order_id is required'];
+        }
+
+        return self::finishCar($pdo, $bayId, $orderId, $userId, $userName, $userRole, $tookLonger, $reason);
     }
 
     /**

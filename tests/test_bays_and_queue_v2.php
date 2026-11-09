@@ -243,7 +243,7 @@ $washAssign = BayManager::assignCarToBay($pdo, (int)$bay1['id'], $car6Id, 3, 'Wa
 assertTest($washAssign['success'] === true, "Mixed car put into Bay 1 for Step 1 (Car Wash)", $washAssign['message']);
 
 // Washer Finishes Step 1 and taps "Send to Tech" answering longer question (Yes = 1)
-$handshakeRes = BayManager::finishCar($pdo, (int)$bay1['id'], 3, 'Washer Rathana', 'washer', 1, "Muddy exterior took longer");
+$handshakeRes = BayManager::finishCarLegacy($pdo, (int)$bay1['id'], 3, 'Washer Rathana', 'washer', 1, "Muddy exterior took longer");
 assertTest($handshakeRes['success'] === true && $handshakeRes['is_handshake'] === true, 
     "Washer finish triggers Handshake: Bay 1 freed & car sent to Tech", $handshakeRes['message']);
 
@@ -268,7 +268,7 @@ foreach ($chkItems as $ci) {
 $pdo->prepare("UPDATE order_tasks SET status = 'completed' WHERE order_id = ? AND task_type = 'inspection'")->execute([$car6Id]);
 
 // Technician Finishes Step 2 (Oil Change) with estimate answer (No = 0)
-$finalFinish = BayManager::finishCar($pdo, (int)$bay4['id'], 4, 'Tech Bunthoeun', 'mechanic', 0);
+$finalFinish = BayManager::finishCarLegacy($pdo, (int)$bay4['id'], 4, 'Tech Bunthoeun', 'mechanic', 0);
 assertTest($finalFinish['success'] === true && $finalFinish['is_handshake'] === false, 
     "Technician finishes Step 2: Bay 4 is freed and parent order is Done", $finalFinish['message']);
 
@@ -303,7 +303,7 @@ $reassignWithReason = BayManager::reassignBay($pdo, $car2Id, $bay2Id, 'Bay 1 wat
 assertTest($reassignWithReason['success'] === true, "Bay reassignment with reason SUCCEEDS", $reassignWithReason['message']);
 
 // Free bay 2
-BayManager::finishCar($pdo, $bay2Id, 2, 'Supervisor', 'wash_supervisor', 0);
+BayManager::finishCarLegacy($pdo, $bay2Id, 2, 'Supervisor', 'wash_supervisor', 0);
 
 // -------------------------------------------------------------
 // TEST 6: Concurrency Protection on Bay Assignment
@@ -320,7 +320,7 @@ assertTest($secondAssign['success'] === false && $secondAssign['error'] === 'BAY
     "Second staff member simultaneously blocked: 'Bay already taken'", $secondAssign['message']);
 
 // Free bay 1
-BayManager::finishCar($pdo, (int)$bay1['id'], 3, 'Staff A', 'washer', 0);
+BayManager::finishCarLegacy($pdo, (int)$bay1['id'], 3, 'Staff A', 'washer', 0);
 
 // -------------------------------------------------------------
 // TEST 7: Queue Health, Bottleneck Detection & Idle Bay Alert

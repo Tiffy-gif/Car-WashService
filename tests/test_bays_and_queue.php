@@ -196,7 +196,7 @@ assertTest(count($busyWashBays) === 3, "All 3 car wash bays (Bay 1, Bay 2, Bay 3
 // =========================================================
 echo "\n5. Testing Washer Finishes Car 1 in Bay 1...\n";
 
-$finishRes = BayManager::finishCar(
+$finishRes = BayManager::finishCarLegacy(
     $pdo,
     $bay1Id,
     $washerId,
@@ -391,7 +391,7 @@ assertTest($oilBayCheck['status'] === 'busy', "Oil Change Bay is now BUSY");
 assertTest($oilBayCheck['current_car']['plate_number'] === '2BC-TECH-99', "Oil Change Bay holds '2BC-TECH-99'");
 
 // Finish technical job
-$finishOil = BayManager::finishCar($pdo, $oilBayId, $ownerId, $ownerUser['full_name'], 'owner');
+$finishOil = BayManager::finishCarLegacy($pdo, $oilBayId, $ownerId, $ownerUser['full_name'], 'owner');
 assertTest($finishOil['success'] === true, "Finished car in Oil Change Bay");
 
 $oilBayFreed = array_values(array_filter(BayManager::getAllBays($pdo), fn($b) => $b['id'] === $oilBayId))[0];

@@ -2276,6 +2276,9 @@ if ($action === 'create_order') {
             }
         }
 
+        // Create initial tasks at order creation lifecycle event (prevents queue read DB writes)
+        BayManager::ensureOrderTasks($pdo, $orderId);
+
         // ALL operations successful -> Commit
         $pdo->commit();
 
@@ -3082,22 +3085,37 @@ if ($action === 'finish_car' || $action === 'finish_job' || $action === 'finish_
         exit;
     }
 
-    $bayId = (int)($inputData['bay_id'] ?? $_POST['bay_id'] ?? 0);
+    $bayId = (isset($inputData['bay_id']) || isset($_POST['bay_id'])) ? (int)($inputData['bay_id'] ?? $_POST['bay_id']) : null;
     $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
-    $targetId = $bayId > 0 ? $bayId : $orderId;
 
-    if ($targetId <= 0) {
+    // If order_id was not explicitly provided but bay_id was, resolve order_id strictly from that bay
+    if ($orderId <= 0 && $bayId !== null && $bayId > 0) {
+        $bayCheckStmt = $pdo->prepare("SELECT current_order_id FROM bays WHERE id = ?");
+        $bayCheckStmt->execute([$bayId]);
+        $orderId = (int)$bayCheckStmt->fetchColumn();
+    }
+
+    if ($orderId <= 0) {
         http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'bay_id or order_id is required']);
+        echo json_encode(['success' => false, 'error' => 'ORDER_ID_REQUIRED', 'message' => 'Valid order_id is required']);
         exit;
     }
 
     $tookLonger = isset($inputData['took_longer']) ? (int)$inputData['took_longer'] : (isset($_POST['took_longer']) ? (int)$_POST['took_longer'] : null);
     $reason = trim((string)($inputData['reason'] ?? $_POST['reason'] ?? ''));
 
-    $res = BayManager::finishCar($pdo, $targetId, $stfUser['id'], $stfUser['full_name'], $stfUser['effective_role'], $tookLonger, $reason);
+    $res = BayManager::finishCar($pdo, $bayId, $orderId, $stfUser['id'], $stfUser['full_name'], $stfUser['effective_role'], $tookLonger, $reason);
     if (!$res['success']) {
-        http_response_code(400);
+        $err = $res['error'] ?? '';
+        if (in_array($err, ['BAY_ORDER_MISMATCH', 'BAY_ALREADY_FREE', 'ORDER_ALREADY_COMPLETED', 'CONCURRENT_MODIFICATION'], true)) {
+            http_response_code(409); // Conflict
+        } elseif (in_array($err, ['ORDER_NOT_FOUND', 'BAY_NOT_FOUND'], true)) {
+            http_response_code(404); // Not Found
+        } elseif ($err === 'MANDATORY_INSPECTION_INCOMPLETE') {
+            http_response_code(422); // Unprocessable Entity
+        } else {
+            http_response_code(400);
+        }
     }
     echo json_encode($res);
     exit;
@@ -5407,8 +5425,7 @@ if ($action === 'appointment_arrived') {
         $pdo->prepare("INSERT INTO order_items (order_id, service_id, service_name, price_usd, price_khr, item_type, qty, created_at) VALUES (?, ?, ?, ?, ?, 'service', 1, CURRENT_TIMESTAMP)")
             ->execute([$orderId, $svcId, $svcRow['name_en'] ?? 'Car Wash', $price, $khr]);
 
-        $pdo->prepare("INSERT INTO order_tasks (order_id, task_type, title, sequence, status, created_at) VALUES (?, 'wash', 'Car Wash (Appointment)', 1, 'waiting', CURRENT_TIMESTAMP)")
-            ->execute([$orderId]);
+        BayManager::ensureOrderTasks($pdo, $orderId);
     }
 
     $arrivalResult = BayManager::markCustomerArrived($pdo, $orderId, (int)$stfUser['id'], (string)$stfUser['full_name'], (string)$stfUser['effective_role']);

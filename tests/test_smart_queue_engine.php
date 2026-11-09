@@ -12,14 +12,303 @@ require_once dirname(__DIR__) . '/core/Helpers.php';
 require_once dirname(__DIR__) . '/core/BayManager.php';
 require_once dirname(__DIR__) . '/core/SmartQueueEngine.php';
 require_once dirname(__DIR__) . '/core/NotificationManager.php';
-require_once dirname(__DIR__) . '/database/init.php';
 
-$pdo = Database::getInstance();
+// ISOLATED TEMPORARY SQLITE DATABASE SETUP
+$tempDbPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'test_sqe_' . uniqid() . '.sqlite';
+$pdo = new PDO('sqlite:' . $tempDbPath);
+$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$pdo->exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+
+// Polyfill SQLite functions
+$pdo->sqliteCreateFunction('NOW', fn() => date('Y-m-d H:i:s'));
+$pdo->sqliteCreateFunction('CURDATE', fn() => date('Y-m-d'));
+$pdo->sqliteCreateFunction('CURRENT_DATE', fn() => date('Y-m-d'));
+$pdo->sqliteCreateFunction('TIMESTAMPDIFF', function($unit, $dt1, $dt2) {
+    if (!$dt1 || !$dt2) return 0;
+    $t1 = strtotime((string)$dt1);
+    $t2 = strtotime((string)$dt2);
+    if ($t1 <= 0 || $t2 <= 0) return 0;
+    return (int)round(($t2 - $t1) / 60);
+});
+
+// Inject temporary PDO instance into Database singleton via reflection
+$refProp = new ReflectionProperty('Database', 'instance');
+$refProp->setAccessible(true);
+$refProp->setValue(null, $pdo);
+
+$refDriver = new ReflectionProperty('Database', 'driver');
+$refDriver->setAccessible(true);
+$refDriver->setValue(null, 'sqlite');
+
+// Initialize isolated schema
+$pdo->exec("
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        password_hash TEXT DEFAULT 'hash',
+        full_name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        effective_role TEXT DEFAULT 'washer',
+        status TEXT DEFAULT 'active',
+        is_active INTEGER DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS services (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name_en TEXT NOT NULL,
+        name_kh TEXT DEFAULT '',
+        category TEXT DEFAULT 'wash',
+        base_duration_minutes INTEGER DEFAULT 30,
+        price_usd REAL DEFAULT 5.00,
+        is_active INTEGER DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        category TEXT DEFAULT 'general',
+        price_usd REAL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS bays (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bay_number INTEGER NOT NULL,
+        bay_name TEXT NOT NULL,
+        bay_type TEXT NOT NULL DEFAULT 'wash',
+        skill_tag TEXT DEFAULT 'wash_only',
+        status TEXT NOT NULL DEFAULT 'free',
+        current_order_id INTEGER DEFAULT NULL,
+        occupied_at TEXT DEFAULT NULL,
+        last_freed_at TEXT DEFAULT NULL,
+        sort_order INTEGER DEFAULT 1,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_number TEXT NOT NULL,
+        order_uid TEXT DEFAULT NULL,
+        customer_id INTEGER DEFAULT NULL,
+        customer_name TEXT DEFAULT NULL,
+        customer_phone TEXT DEFAULT NULL,
+        plate_number TEXT NOT NULL,
+        vehicle_type TEXT DEFAULT 'small_car',
+        bay_id INTEGER DEFAULT NULL,
+        status TEXT NOT NULL DEFAULT 'waiting',
+        payment_status TEXT NOT NULL DEFAULT 'unpaid',
+        payment_method TEXT DEFAULT 'cash',
+        subtotal_usd REAL DEFAULT 0,
+        total_usd REAL DEFAULT 0,
+        total_khr INTEGER DEFAULT 0,
+        repair_status TEXT DEFAULT NULL,
+        repair_notes TEXT DEFAULT NULL,
+        next_oil_mileage INTEGER DEFAULT NULL,
+        estimated_duration_minutes INTEGER DEFAULT 25,
+        actual_duration_minutes INTEGER DEFAULT NULL,
+        took_longer_than_expected INTEGER DEFAULT NULL,
+        arrived_at TEXT DEFAULT NULL,
+        started_at TEXT DEFAULT NULL,
+        finished_at TEXT DEFAULT NULL,
+        paid_at TEXT DEFAULT NULL,
+        receipt_printed_at TEXT DEFAULT NULL,
+        receipt_issued_at TEXT DEFAULT NULL,
+        is_express INTEGER DEFAULT 0,
+        is_mixed INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        queue_priority INTEGER DEFAULT 0,
+        priority_level TEXT DEFAULT 'P3',
+        appointment_time TEXT DEFAULT NULL,
+        idempotency_key TEXT DEFAULT NULL,
+        pos_device_id TEXT DEFAULT NULL,
+        pos_device_name TEXT DEFAULT NULL,
+        source TEXT DEFAULT 'pos_app',
+        delay_reason TEXT DEFAULT NULL,
+        delay_logged_at DATETIME DEFAULT NULL,
+        delay_logged_by INTEGER DEFAULT NULL,
+        MINUTE TEXT DEFAULT 'MINUTE',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        log_uid TEXT NOT NULL,
+        user_id INTEGER DEFAULT NULL,
+        username TEXT DEFAULT NULL,
+        role TEXT DEFAULT NULL,
+        action TEXT NOT NULL,
+        entity_type TEXT DEFAULT NULL,
+        entity_id TEXT DEFAULT NULL,
+        details TEXT DEFAULT NULL,
+        ip_address TEXT DEFAULT NULL,
+        user_agent TEXT DEFAULT NULL,
+        device_name TEXT DEFAULT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS order_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        service_id INTEGER DEFAULT NULL,
+        product_id INTEGER DEFAULT NULL,
+        item_type TEXT DEFAULT 'service',
+        service_name TEXT NOT NULL,
+        price_usd REAL DEFAULT 0,
+        price_khr INTEGER DEFAULT 0,
+        qty INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS order_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        task_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        sequence INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'waiting',
+        assigned_user_id INTEGER DEFAULT NULL,
+        base_duration_minutes INTEGER DEFAULT 15,
+        estimated_duration_minutes INTEGER DEFAULT 15,
+        actual_duration_minutes INTEGER DEFAULT NULL,
+        took_longer_than_expected INTEGER DEFAULT NULL,
+        started_at TEXT DEFAULT NULL,
+        completed_at TEXT DEFAULT NULL,
+        MINUTE TEXT DEFAULT 'MINUTE',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS customers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        phone TEXT,
+        plate_number TEXT,
+        membership_level TEXT DEFAULT 'regular',
+        loyalty_points INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS order_washers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        washer_id INTEGER NOT NULL,
+        commission_usd REAL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS order_mechanics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        mechanic_id INTEGER NOT NULL,
+        commission_usd REAL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS bay_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        bay_id INTEGER DEFAULT NULL,
+        bay_name TEXT DEFAULT NULL,
+        plate_number TEXT NOT NULL,
+        action TEXT NOT NULL,
+        performed_by INTEGER DEFAULT NULL,
+        performed_by_name TEXT DEFAULT NULL,
+        performed_by_role TEXT DEFAULT NULL,
+        reason TEXT DEFAULT NULL,
+        details TEXT DEFAULT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS parts_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        request_uid TEXT NOT NULL UNIQUE,
+        order_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        product_name TEXT NOT NULL,
+        qty_requested INTEGER DEFAULT 1,
+        status TEXT DEFAULT 'pending',
+        requested_by_id INTEGER DEFAULT NULL,
+        requested_by_name TEXT DEFAULT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS appointments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_name TEXT NOT NULL,
+        customer_phone TEXT DEFAULT NULL,
+        plate_number TEXT NOT NULL,
+        vehicle_type TEXT DEFAULT 'small_car',
+        service_id INTEGER DEFAULT NULL,
+        appointment_date TEXT NOT NULL,
+        appointment_time TEXT NOT NULL,
+        status TEXT DEFAULT 'confirmed',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS service_duration_reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        service_id INTEGER DEFAULT NULL,
+        service_name TEXT NOT NULL,
+        vehicle_type TEXT NOT NULL,
+        order_id INTEGER NOT NULL,
+        task_id INTEGER DEFAULT NULL,
+        estimated_minutes INTEGER NOT NULL,
+        actual_minutes INTEGER NOT NULL,
+        over_percentage REAL NOT NULL,
+        washer_answered_longer INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        reviewed_by INTEGER DEFAULT NULL,
+        reviewed_at TEXT DEFAULT NULL,
+        resolution_notes TEXT DEFAULT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS system_notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        notification_uid TEXT NOT NULL UNIQUE,
+        target_role TEXT DEFAULT NULL,
+        target_user_id INTEGER DEFAULT NULL,
+        category TEXT NOT NULL,
+        title_en TEXT NOT NULL,
+        title_km TEXT DEFAULT NULL,
+        message_en TEXT NOT NULL,
+        message_km TEXT DEFAULT NULL,
+        action_url TEXT DEFAULT NULL,
+        sound_type TEXT DEFAULT 'chime',
+        reference_id TEXT DEFAULT NULL,
+        is_read INTEGER DEFAULT 0,
+        read_at TEXT DEFAULT NULL,
+        read_by_id INTEGER DEFAULT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT
+    );
+");
+
+// Populate isolated test fixtures
+$pdo->exec("
+    INSERT INTO services (id, name_en, category, base_duration_minutes, price_usd) VALUES
+    (1, 'Exterior Wash', 'wash', 30, 5.00),
+    (7, 'Tire Change & Wheel Balance', 'maintenance', 45, 25.00);
+
+    INSERT INTO users (id, username, full_name, role, effective_role, status, is_active) VALUES
+    (1, 'washer1', 'Washer Sopheap', 'washer', 'washer', 'active', 1),
+    (2, 'manager1', 'Owner Panha', 'owner', 'owner', 'active', 1),
+    (3, 'tech1', 'Tech Bunthoeun', 'mechanic', 'mechanic', 'active', 1);
+
+    INSERT INTO bays (id, bay_number, bay_name, bay_type, skill_tag, status, is_active) VALUES
+    (1, 1, 'Bay 1', 'wash', 'wash_only', 'free', 1),
+    (2, 2, 'Bay 2', 'wash', 'wash_only', 'free', 1),
+    (3, 3, 'Bay 3', 'wash', 'wash_only', 'free', 1),
+    (4, 4, 'Bay 4', 'oil_change', 'oil_only', 'free', 1);
+
+    INSERT INTO settings (setting_key, setting_value) VALUES
+    ('estimate_buffer_percent', '10');
+");
+
 BayManager::ensureTables($pdo);
-
-// Clean up any leftovers from prior runs
-$pdo->exec("DELETE FROM orders WHERE order_number LIKE 'CW-TEST-SQ-%' OR order_number LIKE 'CW-LOAD-%'");
-$pdo->exec("DELETE FROM appointments WHERE customer_name = 'Appt Tester'");
 
 $passed = 0;
 $failed = 0;
@@ -74,7 +363,7 @@ echo "\n[2] Testing Staff Efficiency Rolling Average...\n";
 // Fetch an existing washer or create test washer
 $testWasher = $pdo->query("SELECT id, full_name, username, role FROM users WHERE role IN ('washer', 'washer1', 'wash_supervisor') LIMIT 1")->fetch(PDO::FETCH_ASSOC);
 if (!$testWasher) {
-    $pdo->prepare("INSERT INTO users (username, password_hash, full_name, role, is_active) VALUES ('test_washer_sq', 'hash', 'Test Washer SQ', 'washer', 1)")->execute();
+    $pdo->prepare("INSERT INTO users (username, password_hash, full_name, role, status, is_active) VALUES ('test_washer_sq', 'hash', 'Test Washer SQ', 'washer', 'active', 1)")->execute();
     $testWasherId = (int)$pdo->lastInsertId();
 } else {
     $testWasherId = (int)$testWasher['id'];
@@ -320,6 +609,12 @@ $pdo->prepare("UPDATE bays SET status = 'free', current_order_id = NULL WHERE id
 $pdo->prepare("DELETE FROM orders WHERE id = ?")->execute([$testOrderId]);
 $pdo->prepare("DELETE FROM order_items WHERE order_id = ?")->execute([$testOrderId]);
 $pdo->prepare("DELETE FROM service_duration_reviews WHERE order_id = ?")->execute([$testOrderId]);
+
+// Clean up temporary database files
+unset($pdo);
+@unlink($tempDbPath);
+@unlink($tempDbPath . '-wal');
+@unlink($tempDbPath . '-shm');
 
 // ---------------------------------------------------------
 // SUMMARY
