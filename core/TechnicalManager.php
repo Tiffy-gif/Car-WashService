@@ -428,13 +428,13 @@ class TechnicalManager {
             throw new Exception($check['message']);
         }
 
-        // 2. Verify all child tasks are completed
-        $pendingTasks = (int)$pdo->query("SELECT COUNT(*) FROM order_tasks WHERE order_id = {$orderId} AND status != 'completed'")->fetchColumn();
+        // 2. Verify all technical child tasks are completed (excluding pending wash tasks belonging to Step 2)
+        $pendingTasks = (int)$pdo->query("SELECT COUNT(*) FROM order_tasks WHERE order_id = {$orderId} AND status != 'completed' AND task_type != 'wash'")->fetchColumn();
         if ($pendingTasks > 0) {
-            throw new Exception("Cannot finish job: There are {$pendingTasks} unfinished tasks in progress. All tasks in both lanes must be finished first.");
+            throw new Exception("Cannot finish job: There are {$pendingTasks} unfinished technical tasks in progress. All tasks in both lanes must be finished first.");
         }
 
-        // 3. Mark Order as Finished & Free Bay
+        // 3. Mark Order as Finished & Free Bay (hands over to wash queue if mixed)
         $finishRes = BayManager::finishCar($pdo, $orderId, $userId, $userName, $userRole, $tookLonger);
         if (empty($finishRes['success'])) {
             throw new Exception($finishRes['message'] ?? 'Could not complete job order.');
@@ -442,10 +442,15 @@ class TechnicalManager {
 
         AuditLogger::log('JOB_ORDER_FINISHED', "Technician {$userName} finished Job Order on vehicle Order #{$orderId}. All mandatory checklist items verified.", 'order', (string)$orderId, $userId, $userName, $userRole);
 
+        $msg = !empty($finishRes['is_handshake'])
+            ? "Mechanical service finished! Vehicle has joined the Wash Queue."
+            : "Technical Job Order completed! Vehicle is ready for cashier checkout.";
+
         return [
             'success' => true,
             'order_id' => $orderId,
-            'message' => "Technical Job Order completed! Vehicle is ready for cashier checkout."
+            'is_handshake' => !empty($finishRes['is_handshake']),
+            'message' => $msg
         ];
     }
 

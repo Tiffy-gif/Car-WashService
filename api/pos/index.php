@@ -4513,12 +4513,15 @@ if ($action === 'get_washer_jobs') {
     $queues = BayManager::getQueues($pdo);
     $washQueue = $queues['wash_queue'];
 
+    $isSqlite = (Database::getDriver() === 'sqlite');
+    $svcConcat = $isSqlite ? "GROUP_CONCAT(DISTINCT oi.service_name)" : "GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ')";
+
     // Fetch orders assigned to this washer or in progress in wash bays
     $jobs = [];
     if ($stfUser) {
         $jobsStmt = $pdo->prepare("
             SELECT o.*, ow.commission_usd,
-                   (SELECT GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ') FROM order_items oi WHERE oi.order_id = o.id) as service_names,
+                   (SELECT {$svcConcat} FROM order_items oi WHERE oi.order_id = o.id) as service_names,
                    b.bay_name,
                    (SELECT ot.status FROM order_tasks ot WHERE ot.order_id = o.id AND ot.task_type = 'wash' LIMIT 1) as wash_task_status
             FROM orders o
@@ -4580,10 +4583,13 @@ if ($action === 'get_technical_jobs') {
     $queues = BayManager::getQueues($pdo);
     $techQueue = $queues['technical_queue'];
 
+    $isSqlite = (Database::getDriver() === 'sqlite');
+    $svcConcat = $isSqlite ? "GROUP_CONCAT(DISTINCT oi.service_name)" : "GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ')";
+
     // Also find cars waiting for handshake / tech receive (ready_for_tech)
     $waitingHandoverStmt = $pdo->query("
         SELECT o.*,
-               (SELECT GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ') FROM order_items oi WHERE oi.order_id = o.id) as service_names
+               (SELECT {$svcConcat} FROM order_items oi WHERE oi.order_id = o.id) as service_names
         FROM orders o
         JOIN order_tasks ot ON o.id = ot.order_id
         WHERE ot.task_type = 'oil_change' AND ot.status = 'ready_for_tech' AND o.status != 'cancelled'
@@ -4599,7 +4605,7 @@ if ($action === 'get_technical_jobs') {
             SELECT o.*, om.commission_usd,
                    COALESCE(o.repair_status, o.status) as current_job_status,
                    b.bay_name,
-                   (SELECT GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ') FROM order_items oi WHERE oi.order_id = o.id) as service_names
+                   (SELECT {$svcConcat} FROM order_items oi WHERE oi.order_id = o.id) as service_names
             FROM orders o
             JOIN order_mechanics om ON o.id = om.order_id
             LEFT JOIN bays b ON o.bay_id = b.id
@@ -4620,7 +4626,7 @@ if ($action === 'get_technical_jobs') {
             SELECT o.*,
                    COALESCE(o.repair_status, o.status) as current_job_status,
                    b.bay_name,
-                   (SELECT GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ') FROM order_items oi WHERE oi.order_id = o.id) as service_names
+                   (SELECT {$svcConcat} FROM order_items oi WHERE oi.order_id = o.id) as service_names
             FROM orders o
             LEFT JOIN bays b ON o.bay_id = b.id
             WHERE (o.repair_status IN ('waiting_tech', 'working') OR b.bay_type = 'oil') AND o.status != 'cancelled'
