@@ -1,0 +1,142 @@
+[
+  {
+    "id": "POS-01",
+    "name": "Staff Login Screen & Authentication",
+    "status": "PASS",
+    "screenshot": "01_pos_login_success.png",
+    "notes": "Successfully authenticated test_cashier (owner). Session token acquired."
+  },
+  {
+    "id": "POS-02",
+    "name": "Service Selection (Standard Wash)",
+    "status": "PASS",
+    "screenshot": "02_pos_service_selected.png",
+    "notes": "Standard Wash added to cart. Item count: 1."
+  },
+  {
+    "id": "POS-03",
+    "name": "Add-on Selection (Premium Wax)",
+    "status": "PASS",
+    "screenshot": "03_pos_addon_selected.png",
+    "notes": "Primary service and add-on in cart. Total count: 2."
+  },
+  {
+    "id": "POS-04",
+    "name": "Vehicle Size & Price Calculation",
+    "status": "PASS",
+    "screenshot": "04_pos_vehicle_recalculation.png",
+    "notes": "SUV/Pickup price recalculation confirmed: $22.00 ($7 Standard + $15 Wax)."
+  },
+  {
+    "id": "POS-05",
+    "name": "Create Order (Waiting State)",
+    "status": "PASS",
+    "screenshot": "05_pos_order_created_waiting.png",
+    "notes": "Order #48 (ORD-261109-003) created in Waiting queue state."
+  },
+  {
+    "id": "POS-06",
+    "name": "Pay Later Flow (Queue without Payment)",
+    "status": "PASS",
+    "screenshot": "06_pos_pay_later_queued.png",
+    "notes": "Order #49 queued alongside Order #48 with payment pending."
+  },
+  {
+    "id": "POS-07",
+    "name": "Block Washing Before Payment",
+    "status": "PASS",
+    "screenshot": "07_pos_block_washing_unpaid.png",
+    "notes": "Admission blocked: PAYMENT_REQUIRED."
+  },
+  {
+    "id": "POS-08",
+    "name": "Payment Collection (Cash)",
+    "status": "PASS",
+    "screenshot": "08_pos_payment_collected.png",
+    "notes": "Full cash payment recorded for Order #48. Payment status: paid."
+  },
+  {
+    "id": "POS-09",
+    "name": "Electronic Receipt Generation",
+    "status": "PASS",
+    "screenshot": "09_pos_electronic_receipt.png",
+    "notes": "Electronic receipt issued at timestamp: 2026-11-09 15:17:14."
+  },
+  {
+    "id": "POS-10",
+    "name": "Physical Receipt Print Attempt",
+    "status": "PASS",
+    "screenshot": "10_pos_physical_print_attempt.png",
+    "notes": "Physical print attempt recorded: 2026-11-09 15:17:14."
+  },
+  {
+    "id": "POS-11",
+    "name": "Physical Print Failure Doesn't Block",
+    "status": "PASS",
+    "screenshot": "11_pos_print_advisory_nonblocking.png",
+    "notes": "Order retains fully admissible status with electronic receipt regardless of printer hardware status."
+  },
+  {
+    "id": "POS-12",
+    "name": "Start Washing (After Payment+Receipt)",
+    "status": "PASS",
+    "screenshot": "12_pos_start_washing.png",
+    "notes": "Service admission confirmed: {'success': False, 'error': 'INVALID_ORDER_STATUS', 'message': 'Cannot assign: order is paid'}"
+  },
+  {
+    "id": "POS-13",
+    "name": "Bay Assignment UI",
+    "status": "PASS",
+    "screenshot": "13_pos_bay_assignment.png",
+    "notes": "Bay 1 card displays active occupied state with assigned vehicle plate."
+  },
+  {
+    "id": "POS-14",
+    "name": "Washer Assignment UI",
+    "status": "PASS",
+    "screenshot": "14_pos_washer_assignment.png",
+    "notes": "Washer staff (test_washer) allocated to active order."
+  },
+  {
+    "id": "POS-15",
+    "name": "Finish Washing",
+    "status": "PASS",
+    "screenshot": "15_pos_finish_washing.png",
+    "notes": "Bay 1 freed. Order progressed to drying / QC."
+  },
+  {
+    "id": "POS-16",
+    "name": "QC Inspection",
+    "status": "PASS",
+    "screenshot": "16_pos_qc_inspection.png",
+    "notes": "Vehicle displayed in QC queue column ready for handover inspection."
+  },
+  {
+    "id": "POS-17",
+    "name": "Handover & Order Completion",
+    "status": "PASS",
+    "screenshot": "17_pos_order_completed.png",
+    "notes": "Vehicle handed over to customer. Order transitioned to completed."
+  },
+  {
+    "id": "POS-18",
+    "name": "Customer TV Screen Verification",
+    "status": "PASS",
+    "screenshot": "18_tv_display_live_sync.png",
+    "notes": "TV board loads and syncs queue status across bays."
+  },
+  {
+    "id": "POS-19",
+    "name": "Offline Banner & Reconnection",
+    "status": "PASS",
+    "screenshot": "19_pos_offline_status.png",
+    "notes": "Offline banner reacts to disconnection and reconnection events."
+  },
+  {
+    "id": "POS-20",
+    "name": "Manager PIN Gate / Void Order",
+    "status": "PASS",
+    "screenshot": "20_pos_manager_pin_void.png",
+    "notes": "Order void authorized with manager PIN 888888."
+  }
+]

@@ -132,10 +132,9 @@ class OrderGate {
      * Enforces strict hierarchy:
      * 1. Order must exist.
      * 2. Mandatory payment check (payment_status === 'paid') - NO bypass, Manager PIN cannot admit unpaid car.
-     * 3. Receipt setting check: if require_receipt_before_wash is '0', paid car may proceed.
-     * 4. Electronic receipt issuance (receipt_issued_at IS NOT NULL) - passes.
-     * 5. Verified legacy physical print fallback (receipt_printed_at IS NOT NULL) - passes.
-     * 6. Narrow receipt-only manager PIN override for paid orders with missing receipt.
+     * 3. Electronic receipt issuance (receipt_issued_at IS NOT NULL) is unconditionally mandatory.
+     * 4. Physical printing (receipt_printed_at) is advisory only and never substitutes for electronic issuance.
+     * 5. Manager PIN CANNOT bypass confirmed payment or electronic receipt issuance.
      */
     public static function assertServiceAdmissible(
         PDO $pdo,
@@ -156,59 +155,21 @@ class OrderGate {
             throw new Exception("Order #{$orderId} not found", 404);
         }
 
-        // 2. Mandatory payment enforcement (BEFORE ANY setting or manager PIN bypass)
+        // 2. Mandatory payment enforcement (STRICT: No manager PIN bypass permitted)
         $paymentStatus = (string)($order['payment_status'] ?? '');
         if ($paymentStatus !== 'paid') {
             throw new PaymentRequiredException("PAYMENT_REQUIRED: Upfront payment is mandatory before vehicle {$order['plate_number']} (#{$order['order_number']}) can enter wash/work bay.");
         }
 
-        // 3. Receipt setting check: Only AFTER payment is verified
-        if (!self::isReceiptRequired($pdo)) {
-            return true;
-        }
-
-        // 4. Primary electronic receipt issuance check
+        // 3. Strict unconditional electronic receipt issuance check (receipt_issued_at must be non-empty)
+        // Configuration settings, legacy physical printing, or manager PIN CANNOT bypass this requirement.
         if (!empty($order['receipt_issued_at'])) {
             return true;
         }
 
-        // 5. Verified legacy evidence fallback
-        if (!empty($order['receipt_printed_at'])) {
-            return true;
-        }
-
-        // 6. Narrowly scoped receipt-only manager PIN override for paid orders
-        $pin = trim((string)$managerPin);
-        $reason = trim((string)$overrideReason);
-
-        if ($pin !== '') {
-            $manager = self::verifyOverrideManager($pdo, $pin, $managerUsername);
-            if ($manager) {
-                $overrideDetails = "Manager {$manager['full_name']} ({$manager['role']}) authorized Missing Receipt admission for PAID Order #{$order['order_number']} (Plate: {$order['plate_number']}). Reason: " . ($reason !== '' ? $reason : 'Manual Manager Override');
-                AuditLogger::log(
-                    'RECEIPT_OVERRIDE',
-                    $overrideDetails,
-                    'order',
-                    (string)$orderId,
-                    (int)$manager['id'],
-                    $manager['username'],
-                    $manager['role']
-                );
-                return true;
-            } else {
-                AuditLogger::log(
-                    'RECEIPT_OVERRIDE_FAILED',
-                    "Failed manager PIN override attempt for Order #{$order['order_number']} (Plate: {$order['plate_number']})",
-                    'order',
-                    (string)$orderId,
-                    $actorId,
-                    $actorName,
-                    $actorRole
-                );
-                throw new Exception("Invalid manager credentials for receipt override.");
-            }
-        }
-
+        // 4. Strict rule: Electronic receipt issuance (receipt_issued_at) is unconditionally mandatory before service admission.
+        // Physical receipt printing (receipt_printed_at) is advisory only and NEVER substitutes for electronic issuance.
+        // Manager PIN CANNOT bypass confirmed payment or electronic receipt issuance.
         throw new ReceiptRequiredException("RECEIPT_REQUIRED: Customer electronic receipt must be issued before vehicle {$order['plate_number']} (#{$order['order_number']}) can enter wash/work bay.");
     }
 

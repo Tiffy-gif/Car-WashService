@@ -1653,7 +1653,17 @@ if ($action === 'create_order') {
             }
 
             $overrideDetails = "Manager {$verifiedOverrideManager['manager_name']} (#{$verifiedOverrideManager['manager_id']}) authorized order override for Cashier #{$staffUserId} on Device #{$authDeviceId}. Reasons: " . implode('; ', array_unique($overrideReasons));
-            AuditLogger::log('ORDER_OVERRIDE', $overrideDetails, 'order', null, $staffUserId, $stf['username'] ?? '', $stf['role'] ?? '');
+            try {
+                AuditLogger::logStrict($pdo, 'ORDER_OVERRIDE', $overrideDetails, 'order', null, $staffUserId, $stf['username'] ?? '', $stf['role'] ?? '');
+            } catch (Exception $ae) {
+                http_response_code(500);
+                echo json_encode([
+                    'success' => false,
+                    'error' => 'AUDIT_LOG_FAILED',
+                    'message' => 'Order override rejected: Failed to record mandatory audit record (' . $ae->getMessage() . ').'
+                ]);
+                exit;
+            }
         }
 
         // Validate payment permission if paid upfront
@@ -3056,6 +3066,12 @@ if ($action === 'assign_bay' || $action === 'assign_car_to_bay') {
             http_response_code(409); // Conflict
         } elseif ($res['error'] === 'RECEIPT_REQUIRED') {
             http_response_code(422); // Unprocessable Entity
+        } elseif ($res['error'] === 'PAYMENT_REQUIRED') {
+            http_response_code(402); // Payment Required
+        } elseif ($res['error'] === 'OVERRIDE_REASON_REQUIRED') {
+            http_response_code(422); // Unprocessable Entity
+        } elseif ($res['error'] === 'AUDIT_LOG_FAILED') {
+            http_response_code(500); // Internal Server Error
         } else {
             http_response_code(400);
         }

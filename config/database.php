@@ -5,7 +5,7 @@ return [
     'driver'   => 'mysql',
     'host'     => 'localhost',
     'port'     => 3306,
-    'dbname'   => 'carwash_db',
+    'dbname'   => getenv('CARWASH_DB_NAME') ?: 'carwash_db',
     'user'     => 'root',
     'pass'     => '',
     'charset'  => 'utf8mb4',

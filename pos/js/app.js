@@ -6968,30 +6968,33 @@ class PosApp {
                 await this.fetchBaysAndQueue();
                 await this.renderJobQueue();
             } else {
-                if (res?.error === 'RECEIPT_REQUIRED') {
-                    this.requestManagerPin(
-                        "Receipt Required Override",
-                        `Receipt not printed for ${plate}. Enter Manager PIN and override reason to proceed:`,
-                        async (mgr) => {
-                            const reason = prompt("Enter manager override reason:", "Customer requested wash before payment/receipt") || "Manager Override";
-                            try {
-                                const overrideRes = await PosApi.assignBay(bayId, orderId, {
-                                    manager_pin: mgr.pin,
-                                    manager_username: mgr.username,
-                                    reason: reason
-                                });
-                                if (overrideRes && overrideRes.success) {
-                                    this.showToastNotice(`Manager override authorized: ${plate} assigned to ${bayName}`, 'success');
-                                    await this.fetchBaysAndQueue();
-                                    await this.renderJobQueue();
-                                } else {
-                                    this.showAppAlert(overrideRes?.message || 'Override failed');
-                                }
-                            } catch (err) {
-                                this.showAppAlert(err?.data?.message || err.message || 'Override failed');
-                            }
+                if (res?.error === 'PAYMENT_REQUIRED') {
+                    this.showAppAlert(`Payment Required: Upfront payment is mandatory before vehicle ${plate} can enter service.`);
+                } else if (res?.error === 'RECEIPT_REQUIRED') {
+                    this.showAppAlert(`Receipt Required: Customer electronic receipt must be issued before vehicle ${plate} can enter service.`);
+                } else if (res?.error === 'OVERRIDE_REASON_REQUIRED') {
+                    const promptMsg = (res.message || 'An override reason is required to assign to an alternative bay.') +
+                        `\n\nPlease enter the override reason for assigning ${plate} to ${bayName}:`;
+                    const reason = prompt(promptMsg);
+                    if (!reason || reason.trim().length < 3) {
+                        this.showAppAlert('Bay assignment cancelled: A valid override reason (minimum 3 characters) is required when choosing an alternative bay.');
+                        return;
+                    }
+                    try {
+                        const retryRes = await PosApi.assignBay(bayId, orderId, {
+                            staff_id: this.currentUser?.id,
+                            reason: reason.trim()
+                        });
+                        if (retryRes && retryRes.success) {
+                            this.showToastNotice(`${plate} assigned to ${bayName} (Override recorded)`, 'success');
+                            await this.fetchBaysAndQueue();
+                            await this.renderJobQueue();
+                        } else {
+                            this.showAppAlert(retryRes?.message || 'Failed to assign bay');
                         }
-                    );
+                    } catch (retryErr) {
+                        this.showAppAlert(retryErr?.data?.message || retryErr.message || 'Failed to assign bay');
+                    }
                 } else if (res?.error === 'BAY_ALREADY_TAKEN' || res?.error === 'BAY_BUSY') {
                     this.showAppAlert(I18nManager.t('bayAlreadyTaken') || 'Bay already taken! Another terminal or washer just occupied this bay.');
                     await this.fetchBaysAndQueue();
@@ -7001,35 +7004,39 @@ class PosApp {
             }
         } catch (e) {
             console.error('Assign bay error:', e);
-            if (e.data?.error === 'RECEIPT_REQUIRED' || e.message?.includes('RECEIPT_REQUIRED')) {
-                this.requestManagerPin(
-                    "Receipt Required Override",
-                    `Receipt not printed for ${plate}. Enter Manager PIN and override reason to proceed:`,
-                    async (mgr) => {
-                        const reason = prompt("Enter manager override reason:", "Customer requested wash before payment/receipt") || "Manager Override";
-                        try {
-                            const overrideRes = await PosApi.assignBay(bayId, orderId, {
-                                manager_pin: mgr.pin,
-                                manager_username: mgr.username,
-                                reason: reason
-                            });
-                            if (overrideRes && overrideRes.success) {
-                                this.showToastNotice(`Manager override authorized: ${plate} assigned to ${bayName}`, 'success');
-                                await this.fetchBaysAndQueue();
-                                await this.renderJobQueue();
-                            } else {
-                                this.showAppAlert(overrideRes?.message || 'Override failed');
-                            }
-                        } catch (err) {
-                            this.showAppAlert(err?.data?.message || err.message || 'Override failed');
-                        }
+            const errCode = e.data?.error || '';
+            const errMsg = e.data?.message || e.message || '';
+            if (errCode === 'PAYMENT_REQUIRED' || errMsg.includes('PAYMENT_REQUIRED')) {
+                this.showAppAlert(`Payment Required: Upfront payment is mandatory before vehicle ${plate} can enter service.`);
+            } else if (errCode === 'RECEIPT_REQUIRED' || errMsg.includes('RECEIPT_REQUIRED')) {
+                this.showAppAlert(`Receipt Required: Customer electronic receipt must be issued before vehicle ${plate} can enter service.`);
+            } else if (errCode === 'OVERRIDE_REASON_REQUIRED' || errMsg.includes('OVERRIDE_REASON_REQUIRED') || errMsg.includes('override reason is required')) {
+                const promptMsg = errMsg + `\n\nPlease enter the override reason for assigning ${plate} to ${bayName}:`;
+                const reason = prompt(promptMsg);
+                if (!reason || reason.trim().length < 3) {
+                    this.showAppAlert('Bay assignment cancelled: A valid override reason (minimum 3 characters) is required when choosing an alternative bay.');
+                    return;
+                }
+                try {
+                    const retryRes = await PosApi.assignBay(bayId, orderId, {
+                        staff_id: this.currentUser?.id,
+                        reason: reason.trim()
+                    });
+                    if (retryRes && retryRes.success) {
+                        this.showToastNotice(`${plate} assigned to ${bayName} (Override recorded)`, 'success');
+                        await this.fetchBaysAndQueue();
+                        await this.renderJobQueue();
+                    } else {
+                        this.showAppAlert(retryRes?.message || 'Failed to assign bay');
                     }
-                );
-            } else if (e.data?.error === 'BAY_ALREADY_TAKEN' || e.message?.includes('taken') || e.message?.includes('busy')) {
+                } catch (retryErr) {
+                    this.showAppAlert(retryErr?.data?.message || retryErr.message || 'Failed to assign bay');
+                }
+            } else if (errCode === 'BAY_ALREADY_TAKEN' || errMsg.includes('taken') || errMsg.includes('busy')) {
                 this.showAppAlert(I18nManager.t('bayAlreadyTaken') || 'Bay already taken! Another terminal or washer just occupied this bay.');
                 await this.fetchBaysAndQueue();
             } else {
-                this.showAppAlert(e.data?.message || e.message || 'Failed to assign bay');
+                this.showAppAlert(errMsg || 'Failed to assign bay');
             }
         }
     }

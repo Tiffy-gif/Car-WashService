@@ -1,0 +1,181 @@
+{
+  "console_logs": [
+    {
+      "type": "log",
+      "text": "AquaGleam Car Wash POS initializing...",
+      "location": {
+        "url": "http://localhost/Car-WashService/pos/js/app.js?v=20261028_115",
+        "line": 643,
+        "column": 16,
+        "lineNumber": 643,
+        "columnNumber": 16
+      }
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "location": {
+        "url": "http://localhost/Car-WashService/api/pos/index.php",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "location": {
+        "url": "http://localhost/Car-WashService/api/pos/index.php",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "location": {
+        "url": "http://localhost/Car-WashService/api/pos/index.php",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "warning",
+      "text": "Background catalog sync failed (server unreachable): Error: Unauthorized: POS Device API Key is missing. Pass header X-Device-Key: <key>\n    at PosApi.request (http://localhost/Car-WashService/pos/js/api.js?v=20261028_115:69:29)\n    at async PosApi.syncCatalog (http://localhost/Car-WashService/pos/js/api.js?v=20261028_115:211:22)\n    at async PosApp.refreshCatalogSilently (http://localhost/Car-WashService/pos/js/app.js?v=20261028_115:2204:26)",
+      "location": {
+        "url": "http://localhost/Car-WashService/pos/js/app.js?v=20261028_115",
+        "line": 2240,
+        "column": 20,
+        "lineNumber": 2240,
+        "columnNumber": 20
+      }
+    },
+    {
+      "type": "log",
+      "text": "AquaGleam Car Wash POS initializing...",
+      "location": {
+        "url": "http://localhost/Car-WashService/pos/js/app.js?v=20261028_115",
+        "line": 643,
+        "column": 16,
+        "lineNumber": 643,
+        "columnNumber": 16
+      }
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "location": {
+        "url": "http://localhost/Car-WashService/api/pos/index.php",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "location": {
+        "url": "http://localhost/Car-WashService/api/pos/index.php",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "location": {
+        "url": "http://localhost/Car-WashService/api/pos/index.php",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "warning",
+      "text": "Background catalog sync failed (server unreachable): Error: Unauthorized: POS Device API Key is missing. Pass header X-Device-Key: <key>\n    at PosApi.request (http://localhost/Car-WashService/pos/js/api.js?v=20261028_115:69:29)\n    at async PosApi.syncCatalog (http://localhost/Car-WashService/pos/js/api.js?v=20261028_115:211:22)\n    at async PosApp.refreshCatalogSilently (http://localhost/Car-WashService/pos/js/app.js?v=20261028_115:2204:26)",
+      "location": {
+        "url": "http://localhost/Car-WashService/pos/js/app.js?v=20261028_115",
+        "line": 2240,
+        "column": 20,
+        "lineNumber": 2240,
+        "columnNumber": 20
+      }
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+      "location": {
+        "url": "http://localhost/Car-WashService/tv.php?code=tv-office-88",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "log",
+      "text": "AquaGleam Car Wash POS initializing...",
+      "location": {
+        "url": "http://localhost/Car-WashService/pos/js/app.js?v=20261028_115",
+        "line": 643,
+        "column": 16,
+        "lineNumber": 643,
+        "columnNumber": 16
+      }
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "location": {
+        "url": "http://localhost/Car-WashService/api/pos/index.php",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "location": {
+        "url": "http://localhost/Car-WashService/api/pos/index.php",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "location": {
+        "url": "http://localhost/Car-WashService/api/pos/index.php",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "type": "warning",
+      "text": "Background catalog sync failed (server unreachable): Error: Unauthorized: POS Device API Key is missing. Pass header X-Device-Key: <key>\n    at PosApi.request (http://localhost/Car-WashService/pos/js/api.js?v=20261028_115:69:29)\n    at async PosApi.syncCatalog (http://localhost/Car-WashService/pos/js/api.js?v=20261028_115:211:22)\n    at async PosApp.refreshCatalogSilently (http://localhost/Car-WashService/pos/js/app.js?v=20261028_115:2204:26)",
+      "location": {
+        "url": "http://localhost/Car-WashService/pos/js/app.js?v=20261028_115",
+        "line": 2240,
+        "column": 20,
+        "lineNumber": 2240,
+        "columnNumber": 20
+      }
+    }
+  ],
+  "failed_requests": []
+}

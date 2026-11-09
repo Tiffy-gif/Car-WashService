@@ -204,12 +204,14 @@ function audit_log(
     ?string $entityId = null,
     ?int $userId = null,
     ?string $username = null,
-    ?string $role = null
+    ?string $role = null,
+    ?PDO $pdo = null,
+    bool $throwOnError = false
 ): string {
     if (!class_exists('AuditLogger')) {
         require_once __DIR__ . '/AuditLogger.php';
     }
-    return AuditLogger::log($action, $details, $entityType, $entityId, $userId, $username, $role);
+    return AuditLogger::log($action, $details, $entityType, $entityId, $userId, $username, $role, $pdo, $throwOnError);
 }
 
 /**

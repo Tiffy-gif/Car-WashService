@@ -95,7 +95,7 @@ class BayManager {
                 $pdo->exec("ALTER TABLE bays ADD COLUMN skill_tag VARCHAR(50) NOT NULL DEFAULT 'wash_only'");
             }
             if (!in_array('last_freed_at', $existing, true)) {
-                $pdo->exec("ALTER TABLE bays ADD COLUMN last_freed_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+                $pdo->exec("ALTER TABLE bays ADD COLUMN last_freed_at DATETIME DEFAULT NULL");
             }
         }
 
@@ -1219,11 +1219,12 @@ class BayManager {
         $suggestedBay = !empty($scoredBays) ? $scoredBays[0] : null;
         $isOverride = ($suggestedBay && (int)$suggestedBay['bay_id'] !== $bayId && $suggestedBay['score'] > 0);
 
-        if ($isOverride && (empty($reason) || trim((string)$reason) === '')) {
+        $trimmedReason = trim((string)$reason);
+        if ($isOverride && ($trimmedReason === '' || mb_strlen($trimmedReason) < 3)) {
             return [
                 'success' => false,
                 'error' => 'OVERRIDE_REASON_REQUIRED',
-                'message' => "Bay override: Bay #{$suggestedBay['bay_number']} ({$suggestedBay['bay_name']}) was recommended as the optimal choice. To assign to {$bay['bay_name']} instead, an override reason is required."
+                'message' => "Bay override: Bay #{$suggestedBay['bay_number']} ({$suggestedBay['bay_name']}) was recommended as the optimal choice. To assign to {$bay['bay_name']} instead, an override reason is required (minimum 3 characters)."
             ];
         }
 
@@ -1274,11 +1275,15 @@ class BayManager {
                 WHERE id = ?
             ")->execute([$bayId, $newStatus, $now, $suggestedId, $isOverride ? $reason : null, $orderId]);
 
-            // If override, log to audit_logs
+            // If override, record mandatory audit log (override must fail if audit log fails)
             if ($isOverride) {
-                audit_log(
+                if (!class_exists('AuditLogger')) {
+                    require_once __DIR__ . '/AuditLogger.php';
+                }
+                AuditLogger::logStrict(
+                    $pdo,
                     'BAY_OVERRIDE',
-                    "Supervisor/Staff {$userName} overrode recommended Bay #{$suggestedBay['bay_number']} for Bay #{$bay['bay_number']}. Reason: {$reason}",
+                    "Supervisor/Staff {$userName} ({$userRole}) overrode recommended Bay #{$suggestedBay['bay_number']} for Bay #{$bay['bay_number']}. Reason: {$trimmedReason}",
                     'orders',
                     (string)$orderId,
                     $userId,
@@ -1288,14 +1293,14 @@ class BayManager {
             }
 
             // 7. History audit
-            $reasonText = !empty($reason) ? " Reason: {$reason}" : "";
+            $reasonText = !empty($trimmedReason) ? " Reason: {$trimmedReason}" : "";
             $details = "Staff {$userName} ({$userRole}) assigned car {$order['plate_number']} to {$bay['bay_name']} [{$skillTag}].{$reasonText}";
             $pdo->prepare("
                 INSERT INTO bay_history (order_id, bay_id, bay_name, plate_number, action, performed_by, performed_by_name, performed_by_role, reason, details, created_at)
                 VALUES (?, ?, ?, ?, 'assigned', ?, ?, ?, ?, ?, ?)
             ")->execute([
                 $orderId, $bayId, $bay['bay_name'], $order['plate_number'],
-                $userId, $userName, $userRole, $reason, $details, $now
+                $userId, $userName, $userRole, $trimmedReason !== '' ? $trimmedReason : null, $details, $now
             ]);
 
             if ($pdo->inTransaction()) {
@@ -1314,6 +1319,9 @@ class BayManager {
         } catch (Exception $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
+            }
+            if (str_contains($e->getMessage(), 'Audit log write failed')) {
+                return ['success' => false, 'error' => 'AUDIT_LOG_FAILED', 'message' => 'Override rejected: Failed to record mandatory audit record (' . $e->getMessage() . ')'];
             }
             return ['success' => false, 'error' => 'ASSIGN_ERROR', 'message' => $e->getMessage()];
         }
@@ -2101,8 +2109,9 @@ class BayManager {
 
             $currentCar = $b['current_car'] ?? null;
             $orderStatus = $currentCar['status'] ?? '';
+            $repairStatus = $currentCar['repair_status'] ?? '';
 
-            // Status badges required: In Progress, Waiting, Detailing, Ready for Pickup
+            // Status badges required: In Progress, Waiting, Detailing, Ready for Pickup, Under Mechanical Service
             if (!$isActive) {
                 $badgeKey = 'inactive';
                 $badgeEn = 'Inactive';
@@ -2112,6 +2121,10 @@ class BayManager {
                     $badgeKey = 'ready';
                     $badgeEn = 'Ready for Pickup';
                     $badgeKm = 'រួចរាល់សម្រាប់ទទួល';
+                } elseif ($isOil || $skillTag === 'oil_only' || $repairStatus === 'working') {
+                    $badgeKey = 'mechanical_service';
+                    $badgeEn = 'Under Mechanical Service';
+                    $badgeKm = 'កំពុងជួសជុល / ប្តូរប្រេង';
                 } elseif ($skillTag === 'detailing' || str_contains(strtolower($currentCar['service_names'] ?? ''), 'detail')) {
                     $badgeKey = 'detailing';
                     $badgeEn = 'Detailing';
@@ -2179,11 +2192,41 @@ class BayManager {
         foreach ($waitOrders as $idx => $ord) {
             $pos = $idx + 1;
             if ($pos <= $maxShow) {
+                $isMixed = ((int)($ord['is_mixed'] ?? 0) === 1);
+                $isPostMech = (!empty($ord['is_post_mechanical']) || ($isMixed && ($ord['repair_status'] ?? '') === 'finished'));
+                $isTechNext = (!empty($ord['is_technical']));
+
+                if ($isPostMech) {
+                    $statusKey = 'waiting_wash';
+                    $statusEn = 'Awaiting Wash (Mechanical Done)';
+                    $statusKm = 'រង់ចាំលាង (ជួសជុលរួចរាល់)';
+                } elseif ($isTechNext) {
+                    $statusKey = 'waiting_mechanical';
+                    $statusEn = $isMixed ? 'Awaiting Mechanical (Step 1)' : 'Waiting for Mechanical';
+                    $statusKm = $isMixed ? 'រង់ចាំជួសជុល (វគ្គ ១)' : 'រង់ចាំជួសជុល';
+                } else {
+                    $statusKey = 'waiting_wash';
+                    $statusEn = 'Waiting for Wash';
+                    $statusKm = 'រង់ចាំលាងសម្អាត';
+                }
+
+                $statusLabel = match($lang) {
+                    'km' => $statusKm,
+                    'en' => $statusEn,
+                    default => "{$statusEn} / {$statusKm}"
+                };
+
                 $waitingList[] = [
                     'position' => $pos,
                     'plate_number' => self::formatTvPlate($ord['plate_number']),
                     'is_next' => ($pos === 1),
-                    'priority_code' => $ord['priority_code']
+                    'priority_code' => $ord['priority_code'],
+                    'status_key' => $statusKey,
+                    'status_en' => $statusEn,
+                    'status_km' => $statusKm,
+                    'status_label' => $statusLabel,
+                    'is_mixed' => $isMixed,
+                    'is_post_mechanical' => $isPostMech
                 ];
             }
         }

@@ -24,9 +24,11 @@ class AuditLogger {
         ?string $entityId = null,
         ?int $userId = null,
         ?string $username = null,
-        ?string $role = null
+        ?string $role = null,
+        ?PDO $pdo = null,
+        bool $throwOnError = false
     ): string {
-        $pdo = Database::getInstance();
+        $db = $pdo ?? Database::getInstance();
         $logUid = self::generateUid('LOG');
 
         // Resolve user information from session if not explicitly provided
@@ -41,7 +43,7 @@ class AuditLogger {
         $deviceName = self::parseDeviceName($userAgent);
 
         try {
-            $stmt = $pdo->prepare("
+            $stmt = $db->prepare("
                 INSERT INTO audit_logs (
                     log_uid, user_id, username, role, action, entity_type, entity_id,
                     details, ip_address, user_agent, device_name, created_at
@@ -61,11 +63,30 @@ class AuditLogger {
                 $deviceName
             ]);
         } catch (Exception $e) {
-            // Fail silently or write to error log to avoid breaking normal operations if table not ready
             @error_log("AuditLogger Error: " . $e->getMessage());
+            if ($throwOnError) {
+                throw new RuntimeException("Audit log write failed: " . $e->getMessage(), 0, $e);
+            }
         }
 
         return $logUid;
+    }
+
+    /**
+     * Strict audit log method: guarantees audit record is written within current transaction/connection,
+     * and strictly throws RuntimeException if the insert fails.
+     */
+    public static function logStrict(
+        PDO $pdo,
+        string $action,
+        string $details,
+        ?string $entityType = null,
+        ?string $entityId = null,
+        ?int $userId = null,
+        ?string $username = null,
+        ?string $role = null
+    ): string {
+        return self::log($action, $details, $entityType, $entityId, $userId, $username, $role, $pdo, true);
     }
 
     /**

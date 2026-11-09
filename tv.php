@@ -397,7 +397,29 @@ $t = [
             animation: pulse-border 2s infinite;
         }
 
-        .pill-oil {
+        .pill-oil,
+        .pill-mechanical_service {
+            background: #ffedd5;
+            color: #c2410c;
+            border: 1px solid rgba(234, 88, 12, 0.3);
+        }
+
+        .waiting-status-tag {
+            font-size: 12px;
+            font-weight: 800;
+            padding: 4px 10px;
+            border-radius: 6px;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }
+
+        .waiting-status-tag.waiting_wash {
+            background: #e0f2fe;
+            color: #0369a1;
+            border: 1px solid rgba(2, 132, 199, 0.3);
+        }
+
+        .waiting-status-tag.waiting_mechanical {
             background: #ffedd5;
             color: #c2410c;
             border: 1px solid rgba(234, 88, 12, 0.3);
@@ -865,6 +887,11 @@ $t = [
                                 <div style="display: flex; align-items: center; gap: 14px;">
                                     <div class="pos-badge"><?= $item['position'] ?></div>
                                     <div class="waiting-plate"><?= htmlspecialchars($item['plate_number']) ?></div>
+                                    <?php if (!empty($item['status_label'])): ?>
+                                        <span class="waiting-status-tag <?= htmlspecialchars($item['status_key'] ?? 'waiting_wash') ?>">
+                                            <?= htmlspecialchars($item['status_label']) ?>
+                                        </span>
+                                    <?php endif; ?>
                                 </div>
                                 <?php if ($item['is_next']): ?>
                                     <span class="next-tag"><i class="fa-solid fa-arrow-right mr-1"></i> <?= htmlspecialchars($t['next']) ?></span>
@@ -1153,11 +1180,13 @@ $t = [
                 } else {
                     let wHtml = '';
                     data.waiting_list.forEach(item => {
+                        const statusTag = item.status_label ? `<span class="waiting-status-tag ${escapeHtml(item.status_key || 'waiting_wash')}">${escapeHtml(item.status_label)}</span>` : '';
                         wHtml += `
                             <div class="waiting-item ${item.is_next ? 'is-next' : ''}">
                                 <div style="display: flex; align-items: center; gap: 14px;">
                                     <div class="pos-badge">${item.position}</div>
                                     <div class="waiting-plate">${escapeHtml(item.plate_number)}</div>
+                                    ${statusTag}
                                 </div>
                                 ${item.is_next ? `
                                     <span class="next-tag"><i class="fa-solid fa-arrow-right mr-1"></i> ${escapeHtml(translations.next)}</span>
