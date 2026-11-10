@@ -58,17 +58,19 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         }
     }
 
-    // 2. Finish Car (Bay becomes Free & order is "Ready to pay", or handshake to tech)
+    // 2. Finish Car (Bay becomes Free & order moves to QC or handshake)
     elseif ($action === 'finish_car') {
+        $bayId = !empty($_POST['bay_id']) ? (int)$_POST['bay_id'] : null;
+        $orderId = !empty($_POST['order_id']) ? (int)$_POST['order_id'] : 0;
         $targetId = (int)($_POST['bay_id'] ?? $_POST['order_id'] ?? 0);
         $tookLonger = isset($_POST['took_longer']) ? (int)$_POST['took_longer'] : null;
         $reason = trim((string)($_POST['reason'] ?? ''));
 
-        if ($targetId <= 0) {
+        if ($targetId <= 0 && $orderId <= 0) {
             $message = 'Invalid bay or vehicle selected.';
             $messageType = 'danger';
         } else {
-            $res = BayManager::finishCar($pdo, $targetId, $currentUserId, $currentUserName, $currentUserRole, $tookLonger, $reason ?: null);
+            $res = BayManager::finishCar($pdo, $bayId, $orderId ?: $targetId, $currentUserId, $currentUserName, $currentUserRole, $tookLonger, $reason ?: null);
             if (!empty($res['success'])) {
                 $message = $res['message'];
                 $messageType = 'success';
@@ -76,6 +78,53 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                 $message = $res['message'] ?? 'Could not finish vehicle.';
                 $messageType = 'danger';
             }
+        }
+    }
+
+    // 2b. Finishing Pad QC Pass (Supervisor approves vehicle after physical inspection)
+    elseif ($action === 'qc_pass') {
+        $orderId = (int)($_POST['order_id'] ?? 0);
+        $checklist = $_POST['checklist'] ?? [];
+        $notes = trim((string)($_POST['qc_notes'] ?? ''));
+        $res = BayManager::passQc($pdo, $orderId, $currentUserId, $currentUserName, $currentUserRole, $checklist, $notes ?: null);
+        if (!empty($res['success'])) {
+            $message = $res['message'];
+            $messageType = 'success';
+        } else {
+            $message = $res['message'] ?? 'Could not approve QC.';
+            $messageType = 'danger';
+        }
+    }
+
+    // 2c. Finishing Pad QC Fail (Supervisor rejects checklist and returns vehicle to Wash Queue for rework)
+    elseif ($action === 'qc_fail') {
+        $orderId = (int)($_POST['order_id'] ?? 0);
+        $reason = trim((string)($_POST['qc_reason'] ?? ''));
+        if ($reason === '') {
+            $message = 'A specific failure reason is required to reject QC.';
+            $messageType = 'danger';
+        } else {
+            $res = BayManager::failQc($pdo, $orderId, $reason, $currentUserId, $currentUserName, $currentUserRole);
+            if (!empty($res['success'])) {
+                $message = $res['message'];
+                $messageType = 'success';
+            } else {
+                $message = $res['message'] ?? 'Could not reject QC.';
+                $messageType = 'danger';
+            }
+        }
+    }
+
+    // 2d. Customer Handover Verification (Permitted only after QC inspection passes)
+    elseif ($action === 'customer_handover') {
+        $orderId = (int)($_POST['order_id'] ?? 0);
+        $res = BayManager::handoverToCustomer($pdo, $orderId, $currentUserId, $currentUserName, $currentUserRole);
+        if (!empty($res['success'])) {
+            $message = $res['message'];
+            $messageType = 'success';
+        } else {
+            $message = $res['message'] ?? 'Could not hand over vehicle.';
+            $messageType = 'danger';
         }
     }
 
@@ -127,20 +176,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         }
     }
 
-    // 5. Receive from Wash (Technical Screen Handshake)
-    elseif ($action === 'receive_from_wash') {
-        $orderId = (int)($_POST['order_id'] ?? 0);
-        $bayId = (int)($_POST['bay_id'] ?? 4); // Default to Bay 4 (Oil bay)
-
-        $res = BayManager::receiveFromWash($pdo, $orderId, $bayId, $currentUserId, $currentUserName, $currentUserRole);
-        if (!empty($res['success'])) {
-            $message = $res['message'];
-            $messageType = 'success';
-        } else {
-            $message = $res['message'] ?? 'Could not receive vehicle.';
-            $messageType = 'danger';
-        }
-    }
 
     // 6. Mark Customer Arrived
     elseif ($action === 'customer_arrived') {
@@ -210,6 +245,7 @@ $bays = BayManager::getAllBays($pdo);
 $queues = BayManager::getQueues($pdo);
 $washQueue = $queues['wash_queue'];
 $techQueue = $queues['technical_queue'];
+$qcQueue = $queues['qc_queue'] ?? [];
 $queueHealth = BayManager::getQueueHealth($pdo);
 $historyLogs = BayManager::getHistory($pdo, 25);
 $availableDelayReasons = SmartQueueEngine::getAvailableDelayReasons($pdo);
@@ -567,9 +603,12 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <button type="button" 
                                     class="btn btn-primary btn-sm" 
                                     style="flex: 1; background: var(--success); border-color: var(--success);"
-                                    onclick="openFinishModal(<?= $b['id'] ?>, <?= $car['order_id'] ?>, '<?= htmlspecialchars($car['plate_number'], ENT_QUOTES) ?>', <?= (int)$car['is_mixed'] ?>)">
-                                <i class="fa-solid <?= !empty($car['is_mixed']) ? 'fa-paper-plane' : 'fa-check-double' ?> mr-1"></i> 
-                                <?= !empty($car['is_mixed']) ? 'Finish &amp; Send to Tech' : 'Finish Job (Free Bay)' ?>
+                                    onclick="openFinishModal(<?= $b['id'] ?>, <?= $car['order_id'] ?>, '<?= htmlspecialchars($car['plate_number'], ENT_QUOTES) ?>', <?= (int)$car['is_mixed'] ?>, <?= $isOil ? 1 : 0 ?>)">
+                                <i class="fa-solid fa-check-double mr-1"></i> 
+                                <?= $isOil 
+                                    ? (!empty($car['is_mixed']) ? 'Finish Lift &amp; Send to Wash' : 'Finish Mechanical Job') 
+                                    : (!empty($car['is_mixed']) && in_array(($car['repair_status'] ?? ''), ['waiting_wash_first', 'waiting'], true) ? 'Finish Wash &amp; Send to Bay 4' : 'Finish Wash (Send to QC)') 
+                                ?>
                             </button>
                             <?php if ($canSupervisorOverride): ?>
                                 <button type="button" 
@@ -788,9 +827,9 @@ include dirname(__DIR__) . '/layouts/header.php';
                                     <span class="badge <?= $q['priority_badge'] ?>" style="font-weight: 800; font-size: 11px;">
                                         <?= htmlspecialchars($q['priority_label']) ?>
                                     </span>
-                                    <?php if (!empty($q['is_waiting_tech_handover'])): ?>
-                                        <span class="badge" style="background: #ea580c; color: #fff; font-weight: 800; font-size: 10px;">
-                                            <i class="fa-solid fa-handshake mr-1"></i> Transferred from Wash
+                                    <?php if (!empty($q['is_mixed'])): ?>
+                                        <span class="badge badge-purple" style="font-size: 10px;">
+                                            <i class="fa-solid fa-layer-group mr-1"></i> Mixed Order (Step 1 Lift)
                                         </span>
                                     <?php endif; ?>
                                 </div>
@@ -846,6 +885,88 @@ include dirname(__DIR__) . '/layouts/header.php';
                                     <i class="fa-solid fa-arrows-up-down mr-1" style="color: #ea580c;"></i> Change Place
                                 </button>
                             <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <!-- FINISHING PAD (QUALITY CONTROL & SIGN-OFF) -->
+    <div class="card" style="padding: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 12px; margin-bottom: 16px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="width: 32px; height: 32px; border-radius: 6px; background: #ecfdf5; color: var(--success); display: flex; align-items: center; justify-content: center; font-size: 16px;">
+                    <i class="fa-solid fa-clipboard-check"></i>
+                </div>
+                <div>
+                    <h3 style="font-size: 17px; font-weight: 800; color: var(--text-main); margin: 0;">
+                        Finishing Pad (QC Inspection)
+                    </h3>
+                    <div class="text-xs text-muted">Quality Gate • 5-point physical check before customer handover</div>
+                </div>
+            </div>
+            <div>
+                <span class="badge badge-success" style="font-size: 13px; font-weight: 700; padding: 4px 10px;">
+                    <?= count($qcQueue) ?> on pad
+                </span>
+            </div>
+        </div>
+
+        <?php if (empty($qcQueue)): ?>
+            <div style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                <i class="fa-solid fa-square-check" style="font-size: 40px; opacity: 0.3; margin-bottom: 10px;"></i>
+                <div style="font-size: 15px; font-weight: 600;">Finishing Pad is Empty</div>
+                <div class="text-xs">Vehicles completing wash bays appear here for final QC inspection.</div>
+            </div>
+        <?php else: ?>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <?php foreach ($qcQueue as $q): ?>
+                    <div class="car-queue-card" style="border: 1px solid #bbf7d0; border-radius: var(--radius-md); padding: 14px; background: #f0fdf4; display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <div style="width: 44px; height: 44px; border-radius: 50%; background: var(--success); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: 900; font-size: 14px; border: 2px solid var(--success); flex-shrink: 0;">
+                                <?= $q['position_label'] ?>
+                            </div>
+                            <div>
+                                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                    <span style="font-family: var(--font-mono); font-size: 16px; font-weight: 800; background: #fff; padding: 2px 8px; border-radius: 4px; border: 1px solid #bbf7d0;">
+                                        <?= htmlspecialchars($q['plate_number']) ?>
+                                    </span>
+                                    <span class="badge badge-success" style="font-size: 10px; font-weight: 800;">
+                                        <i class="fa-solid fa-sparkles mr-1"></i> Wash Complete • Awaiting QC
+                                    </span>
+                                    <?= vehicleTypeBadge($q['vehicle_type']) ?>
+                                </div>
+                                <div style="font-size: 13px; font-weight: 700; color: var(--text-main); margin-top: 4px;">
+                                    <?= htmlspecialchars($q['service_names'] ?: 'Car Wash Service') ?>
+                                </div>
+                                <div class="text-xs text-muted" style="margin-top: 2px;">
+                                    <?= htmlspecialchars($q['customer_name']) ?> • Arrived: <?= date('h:i A', strtotime($q['arrived_at'])) ?> (<strong><?= $q['wait_minutes'] ?>m</strong>)
+                                </div>
+                                <div style="margin-top: 6px; font-size: 11px; color: #166534; display: flex; gap: 8px; flex-wrap: wrap;">
+                                    <span><i class="fa-solid fa-check mr-1"></i>Rims/Tires</span>
+                                    <span><i class="fa-solid fa-check mr-1"></i>Windshield</span>
+                                    <span><i class="fa-solid fa-check mr-1"></i>Carpets</span>
+                                    <span><i class="fa-solid fa-check mr-1"></i>Sills Dry</span>
+                                    <span><i class="fa-solid fa-check mr-1"></i>Appearance</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- QC Supervisor Actions -->
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <form action="" method="POST" style="margin: 0;">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="action" value="qc_pass">
+                                <input type="hidden" name="order_id" value="<?= $q['order_id'] ?>">
+                                <button type="submit" class="btn btn-primary btn-sm" style="background: var(--success); border-color: var(--success); font-weight: 700;" title="Confirm all 5 checklist items pass and mark vehicle Ready for Pickup">
+                                    <i class="fa-solid fa-circle-check mr-1"></i> Pass QC
+                                </button>
+                            </form>
+
+                            <button type="button" class="btn btn-secondary btn-sm" style="color: var(--danger); border-color: #fca5a5; font-weight: 700;" onclick="openQcFailPrompt(<?= $q['order_id'] ?>, '<?= htmlspecialchars($q['plate_number'], ENT_QUOTES) ?>')">
+                                <i class="fa-solid fa-rotate-left mr-1"></i> Fail QC (Rework)
+                            </button>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -1092,7 +1213,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                     -
                 </div>
                 <div class="text-xs text-muted" id="modalFinishMixedNotice" style="display: none; color: #9333ea; font-weight: 700; margin-top: 4px;">
-                    <i class="fa-solid fa-layer-group mr-1"></i> Mixed Order: Finishing wash will send car to Technical screen.
+                    <i class="fa-solid fa-layer-group mr-1"></i> Mixed Order: Finishing Lift in Bay 4 will send vehicle to Wash Queue.
                 </div>
             </div>
 
@@ -1445,16 +1566,57 @@ function scrollDownToQueue() {
 }
 
 // Modal 1: Finish Car
-function openFinishModal(bayId, orderId, plateNumber, isMixed) {
+function openFinishModal(bayId, orderId, plateNumber, isMixed, isOil = 0) {
     document.getElementById('modalFinishBayId').value = bayId;
     document.getElementById('modalFinishOrderId').value = orderId;
     document.getElementById('modalFinishPlateNumber').textContent = plateNumber;
-    document.getElementById('modalFinishMixedNotice').style.display = isMixed ? 'block' : 'none';
-    document.getElementById('btnFinishConfirmSubmit').innerHTML = isMixed 
-        ? '<i class="fa-solid fa-paper-plane mr-1"></i> Send to Tech' 
-        : '<i class="fa-solid fa-check mr-1"></i> Confirm & Finish';
+    document.getElementById('modalFinishMixedNotice').style.display = (isMixed && isOil) ? 'block' : 'none';
+    
+    let btnText = '<i class="fa-solid fa-check mr-1"></i> Confirm & Finish';
+    if (isOil && isMixed) {
+        btnText = '<i class="fa-solid fa-paper-plane mr-1"></i> Send to Wash Queue';
+    } else if (!isOil) {
+        btnText = '<i class="fa-solid fa-clipboard-check mr-1"></i> Send to Finishing Pad (QC)';
+    }
+    document.getElementById('btnFinishConfirmSubmit').innerHTML = btnText;
     selectTookLonger(0);
     document.getElementById('finishCarModal').style.display = 'flex';
+}
+
+function openQcFailPrompt(orderId, plate) {
+    const reason = prompt('Vehicle ' + plate + ' - Enter QC failure reason (car will return to Wash Queue for rework):');
+    if (reason && reason.trim()) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.style.display = 'none';
+        
+        const csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = 'csrf_token';
+        csrfInput.value = '<?= csrf_token() ?>';
+        form.appendChild(csrfInput);
+
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'qc_fail';
+        form.appendChild(actionInput);
+
+        const orderInput = document.createElement('input');
+        orderInput.type = 'hidden';
+        orderInput.name = 'order_id';
+        orderInput.value = orderId;
+        form.appendChild(orderInput);
+
+        const reasonInput = document.createElement('input');
+        reasonInput.type = 'hidden';
+        reasonInput.name = 'qc_reason';
+        reasonInput.value = reason.trim();
+        form.appendChild(reasonInput);
+
+        document.body.appendChild(form);
+        form.submit();
+    }
 }
 function selectTookLonger(val) {
     document.getElementById('modalFinishTookLonger').value = val;

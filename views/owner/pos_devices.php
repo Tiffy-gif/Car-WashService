@@ -128,9 +128,9 @@ if ($detailDevice):
     // Today's stats
     $dTodayStmt = $pdo->prepare("
         SELECT 
-            COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid_count,
-            COALESCE(SUM(CASE WHEN status = 'paid' THEN total_usd ELSE 0 END), 0) as sales_usd,
-            COALESCE(SUM(CASE WHEN status = 'paid' THEN total_khr ELSE 0 END), 0) as sales_khr
+            COUNT(CASE WHEN (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled' THEN 1 END) as paid_count,
+            COALESCE(SUM(CASE WHEN (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled' THEN total_usd ELSE 0 END), 0) as sales_usd,
+            COALESCE(SUM(CASE WHEN (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled' THEN total_khr ELSE 0 END), 0) as sales_khr
         FROM orders 
         WHERE pos_device_id = ? AND DATE(COALESCE(paid_at, created_at)) = CURDATE()
     ");
@@ -140,8 +140,8 @@ if ($detailDevice):
     // This month's stats
     $dMonthStmt = $pdo->prepare("
         SELECT 
-            COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid_count,
-            COALESCE(SUM(CASE WHEN status = 'paid' THEN total_usd ELSE 0 END), 0) as sales_usd
+            COUNT(CASE WHEN (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled' THEN 1 END) as paid_count,
+            COALESCE(SUM(CASE WHEN (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled' THEN total_usd ELSE 0 END), 0) as sales_usd
         FROM orders 
         WHERE pos_device_id = ? 
           AND MONTH(COALESCE(paid_at, created_at)) = MONTH(CURDATE()) 
@@ -154,8 +154,8 @@ if ($detailDevice):
     $dLifeStmt = $pdo->prepare("
         SELECT 
             COUNT(*) as total_orders,
-            COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid_count,
-            COALESCE(SUM(CASE WHEN status = 'paid' THEN total_usd ELSE 0 END), 0) as sales_usd,
+            COUNT(CASE WHEN (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled' THEN 1 END) as paid_count,
+            COALESCE(SUM(CASE WHEN (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled' THEN total_usd ELSE 0 END), 0) as sales_usd,
             COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_count,
             COALESCE(SUM(CASE WHEN status != 'cancelled' AND payment_status = 'unpaid' THEN total_usd ELSE 0 END), 0) as unpaid_usd
         FROM orders 
@@ -633,15 +633,15 @@ foreach ($devices as $d) {
 
 // Fetch orders synced from POS app
 $posOrdersCount = (int)$pdo->query("SELECT COUNT(*) FROM orders WHERE source = 'pos_app'")->fetchColumn();
-$posOrdersTotal = (float)$pdo->query("SELECT COALESCE(SUM(total_usd), 0) FROM orders WHERE source = 'pos_app' AND status = 'paid'")->fetchColumn();
+$posOrdersTotal = (float)$pdo->query("SELECT COALESCE(SUM(total_usd), 0) FROM orders WHERE source = 'pos_app' AND (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled'")->fetchColumn();
 
 // Query per-device metrics (Today, Month, Last Order, 7-day sales sparkline)
 $deviceMetrics = [];
 $todayDevRows = $pdo->query("
     SELECT 
         pos_device_id,
-        COUNT(CASE WHEN status = 'paid' THEN 1 END) as today_paid_orders,
-        COALESCE(SUM(CASE WHEN status = 'paid' THEN total_usd ELSE 0 END), 0) as today_sales_usd
+        COUNT(CASE WHEN (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled' THEN 1 END) as today_paid_orders,
+        COALESCE(SUM(CASE WHEN (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled' THEN total_usd ELSE 0 END), 0) as today_sales_usd
     FROM orders
     WHERE pos_device_id IS NOT NULL AND DATE(COALESCE(paid_at, created_at)) = CURDATE()
     GROUP BY pos_device_id
@@ -655,7 +655,7 @@ foreach ($todayDevRows as $tr) {
 $monthDevRows = $pdo->query("
     SELECT 
         pos_device_id,
-        COALESCE(SUM(CASE WHEN status = 'paid' THEN total_usd ELSE 0 END), 0) as month_sales_usd
+        COALESCE(SUM(CASE WHEN (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled' THEN total_usd ELSE 0 END), 0) as month_sales_usd
     FROM orders
     WHERE pos_device_id IS NOT NULL 
       AND MONTH(COALESCE(paid_at, created_at)) = MONTH(CURDATE()) 
@@ -685,7 +685,7 @@ $sevenDaysSalesStmt = $pdo->query("
         DATE(COALESCE(o.paid_at, o.created_at)) as sale_date,
         COALESCE(SUM(o.total_usd), 0) as daily_usd
     FROM orders o
-    WHERE o.status = 'paid'
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled'
       AND o.pos_device_id IS NOT NULL
       AND DATE(COALESCE(o.paid_at, o.created_at)) >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
     GROUP BY o.pos_device_id, DATE(COALESCE(o.paid_at, o.created_at))

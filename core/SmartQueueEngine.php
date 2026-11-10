@@ -111,6 +111,17 @@ class SmartQueueEngine {
         $userRow = $nameStmt->fetch(PDO::FETCH_ASSOC);
         $staffName = $userRow['full_name'] ?? ('Staff #' . $staffId);
 
+        try {
+            $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        } catch (Throwable $t) {
+            $driver = 'mysql';
+        }
+        $isSqlite = ($driver === 'sqlite');
+
+        $elapsedExpr = $isSqlite
+            ? "CAST(ROUND((julianday(ot.completed_at) - julianday(ot.created_at)) * 1440) AS INTEGER) as elapsed_minutes"
+            : "TIMESTAMPDIFF(MINUTE, ot.created_at, ot.completed_at) as elapsed_minutes";
+
         // Fetch up to 30 completed tasks or orders by this staff member
         $sql = "
             SELECT 
@@ -118,7 +129,7 @@ class SmartQueueEngine {
                 ot.base_duration_minutes,
                 ot.estimated_duration_minutes,
                 ot.actual_duration_minutes,
-                TIMESTAMPDIFF(MINUTE, ot.created_at, ot.completed_at) as elapsed_minutes
+                {$elapsedExpr}
             FROM order_tasks ot
             WHERE ot.assigned_user_id = ? AND ot.status = 'completed' AND ot.completed_at IS NOT NULL
             ORDER BY ot.completed_at DESC
@@ -130,11 +141,15 @@ class SmartQueueEngine {
 
         // Also check order_washers if task history is light
         if (count($tasks) < 5) {
+            $orderElapsedExpr = $isSqlite
+                ? "COALESCE(o.actual_duration_minutes, CAST(ROUND((julianday(o.finished_at) - julianday(o.arrived_at)) * 1440) AS INTEGER)) as actual_duration_minutes"
+                : "COALESCE(o.actual_duration_minutes, TIMESTAMPDIFF(MINUTE, o.arrived_at, o.finished_at)) as actual_duration_minutes";
+
             $washSql = "
                 SELECT 
                     o.id,
                     COALESCE(o.estimated_duration_minutes, 15) as estimated_duration_minutes,
-                    COALESCE(o.actual_duration_minutes, TIMESTAMPDIFF(MINUTE, o.arrived_at, o.finished_at)) as actual_duration_minutes
+                    {$orderElapsedExpr}
                 FROM order_washers ow
                 JOIN orders o ON ow.order_id = o.id
                 WHERE ow.washer_id = ? AND o.status IN ('finished', 'completed', 'paid') AND o.finished_at IS NOT NULL

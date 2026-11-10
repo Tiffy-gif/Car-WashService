@@ -453,7 +453,7 @@ function commandReset(PDO $pdo, array $dbConfig, string $dbname, array $options)
 
         echo "3. Infrastructure & Stock Resets:\n";
         echo "   - products: stock_qty set to 0, reserved_qty set to 0\n";
-        echo "   - bays: current_order_id set to NULL, status set to 'available', is_active set to 1\n";
+        echo "   - bays: current_order_id set to NULL, status set to 'free', is_active set to 1\n";
         echo "   - categories & membership_tiers: KEPT INTACT (system taxonomy)\n\n";
 
         echo "4. Settings to be reset to neutral defaults:\n";
@@ -558,7 +558,7 @@ function commandReset(PDO $pdo, array $dbConfig, string $dbname, array $options)
     // Reset products stock
     $pdo->exec("UPDATE products SET stock_qty = 0, reserved_qty = 0");
     // Reset bays
-    $pdo->exec("UPDATE bays SET current_order_id = NULL, status = 'available', is_active = 1");
+    $pdo->exec("UPDATE bays SET current_order_id = NULL, status = 'free', is_active = 1");
     $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
     echo "All DATA tables wiped cleanly.\n";
 

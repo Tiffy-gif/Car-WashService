@@ -16,9 +16,35 @@ $totalCustomers = (int)$pdo->query("SELECT COUNT(*) FROM customers")->fetchColum
 $totalVehicles = (int)$pdo->query("SELECT COUNT(*) FROM vehicles")->fetchColumn();
 $activeServices = (int)$pdo->query("SELECT COUNT(*) FROM services WHERE is_active = 1")->fetchColumn();
 
-// Today's orders & revenue
-$todayOrdersStmt = $pdo->query("SELECT COUNT(*) as count, COALESCE(SUM(total_usd), 0) as revenue_usd, COALESCE(SUM(total_khr), 0) as revenue_khr FROM orders WHERE DATE(created_at) = CURDATE() AND payment_status = 'paid' AND status != 'cancelled'");
+// Today's orders & revenue (Net Settled Revenue: Confirmed Gross Payments - Settled Refunds)
+$todayOrdersStmt = $pdo->query("SELECT COUNT(*) as count, COALESCE(SUM(total_usd), 0) as revenue_usd, COALESCE(SUM(total_khr), 0) as revenue_khr FROM orders WHERE DATE(COALESCE(paid_at, created_at)) = CURDATE() AND (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled'");
 $todayStats = $todayOrdersStmt->fetch() ?: ['count' => 0, 'revenue_usd' => 0.00, 'revenue_khr' => 0];
+
+$hasRefundCols = false;
+try {
+    $pdo->query("SELECT refund_amount_usd FROM orders LIMIT 0");
+    $hasRefundCols = true;
+} catch (Throwable $e) {}
+
+$todayRefundUsd = 0.00;
+if ($hasRefundCols) {
+    try {
+        $todayRefundUsd = (float)$pdo->query("
+            SELECT COALESCE(SUM(
+                CASE 
+                    WHEN refund_amount_usd > 0 THEN refund_amount_usd
+                    WHEN refund_status = 'refunded' OR payment_status = 'refunded' THEN total_usd
+                    ELSE 0
+                END
+            ), 0)
+            FROM orders
+            WHERE DATE(COALESCE(refunded_at, paid_at, created_at)) = CURDATE() AND status != 'cancelled'
+        ")->fetchColumn();
+    } catch (Throwable $e) {}
+}
+$todayGrossUsd = (float)$todayStats['revenue_usd'];
+$todayNetUsd = max(0.0, $todayGrossUsd - $todayRefundUsd);
+$todayNetKhr = (int)round($todayNetUsd * get_exchange_rate());
 
 // Order status breakdown
 $statusCountsStmt = $pdo->query("SELECT status, COUNT(*) as count FROM orders WHERE DATE(created_at) = CURDATE() GROUP BY status");
@@ -41,9 +67,9 @@ $todayDeviceStmt = $pdo->query("
         COALESCE(pd.device_name, o.pos_device_name, 'Back Office (Web POS)') as device_name,
         COALESCE(pd.location, 'Front Desk') as location,
         COALESCE(pd.device_uid, 'WEB') as device_uid,
-        COUNT(CASE WHEN o.status = 'paid' THEN 1 END) as paid_orders_count,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.total_usd ELSE 0 END), 0) as total_sales_usd,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.total_khr ELSE 0 END), 0) as total_sales_khr
+        COUNT(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN 1 END) as paid_orders_count,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.total_usd ELSE 0 END), 0) as total_sales_usd,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.total_khr ELSE 0 END), 0) as total_sales_khr
     FROM orders o
     LEFT JOIN pos_devices pd ON o.pos_device_id = pd.id
     WHERE DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()
@@ -124,8 +150,13 @@ foreach ($uCheck as $uc) {
             <i class="fa-solid fa-sack-dollar"></i>
         </div>
         <div>
-            <div class="stat-value"><?= formatUSD((float)$todayStats['revenue_usd']) ?></div>
-            <div class="stat-label"><?= htmlspecialchars(__('today_income')) ?> <span class="text-xs text-muted">(<?= formatKHR((int)$todayStats['revenue_khr']) ?>)</span></div>
+            <div class="stat-value"><?= formatUSD($todayNetUsd) ?></div>
+            <div class="stat-label">
+                <?= htmlspecialchars(__('today_income')) ?> <span class="text-xs text-muted">(<?= formatKHR($todayNetKhr) ?>)</span>
+                <?php if ($todayRefundUsd > 0): ?>
+                    <span class="badge badge-warning" style="font-size: 10px; margin-left: 4px;" title="Gross: <?= formatUSD($todayGrossUsd) ?>, Refunds: -<?= formatUSD($todayRefundUsd) ?>">Net</span>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 

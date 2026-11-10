@@ -33,12 +33,12 @@ if ($period === 'today') {
 // 1. Overall stats for selected period (Washers + Mechanics)
 $kpiSql = "
     SELECT 
-        (COALESCE((SELECT SUM(commission_usd) FROM order_washers ow JOIN orders o ON ow.order_id = o.id WHERE o.status = 'paid' {$whereClause}), 0) +
-         COALESCE((SELECT SUM(commission_usd) FROM order_mechanics om JOIN orders o ON om.order_id = o.id WHERE o.status = 'paid' {$whereClause}), 0)) as total_commission,
+        (COALESCE((SELECT SUM(commission_usd) FROM order_washers ow JOIN orders o ON ow.order_id = o.id WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$whereClause}), 0) +
+         COALESCE((SELECT SUM(commission_usd) FROM order_mechanics om JOIN orders o ON om.order_id = o.id WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$whereClause}), 0)) as total_commission,
         COUNT(DISTINCT o.id) as total_jobs,
         COALESCE(SUM(o.total_usd), 0) as total_revenue
     FROM orders o
-    WHERE o.status = 'paid' {$whereClause}
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$whereClause}
 ";
 $kpiStmt = $pdo->prepare($kpiSql);
 $kpiStmt->execute($dateParams);
@@ -64,7 +64,7 @@ foreach ($allStaff as $s) {
             COALESCE(SUM(o.total_usd), 0) as period_revenue
         FROM orders o
         JOIN {$tbl} c ON o.id = c.order_id
-        WHERE c.{$colId} = ? AND o.status = 'paid' {$whereClause}
+        WHERE c.{$colId} = ? AND (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$whereClause}
     ";
     $pStmt = $pdo->prepare($periodSql);
     $pStmt->execute(array_merge([$sId], $dateParams));
@@ -75,7 +75,7 @@ foreach ($allStaff as $s) {
         SELECT COALESCE(SUM(c.commission_usd), 0) as today_earn, COUNT(DISTINCT o.id) as today_jobs
         FROM orders o
         JOIN {$tbl} c ON o.id = c.order_id
-        WHERE c.{$colId} = ? AND o.status = 'paid' AND DATE(o.created_at) = CURDATE()
+        WHERE c.{$colId} = ? AND (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND DATE(o.created_at) = CURDATE()
     ";
     $tStmt = $pdo->prepare($todaySql);
     $tStmt->execute([$sId]);
@@ -86,7 +86,7 @@ foreach ($allStaff as $s) {
         SELECT COALESCE(SUM(c.commission_usd), 0) as month_earn, COUNT(DISTINCT o.id) as month_jobs
         FROM orders o
         JOIN {$tbl} c ON o.id = c.order_id
-        WHERE c.{$colId} = ? AND o.status = 'paid' AND MONTH(o.created_at) = MONTH(CURDATE()) AND YEAR(o.created_at) = YEAR(CURDATE())
+        WHERE c.{$colId} = ? AND (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND MONTH(o.created_at) = MONTH(CURDATE()) AND YEAR(o.created_at) = YEAR(CURDATE())
     ";
     $mStmt = $pdo->prepare($monthSql);
     $mStmt->execute([$sId]);
@@ -109,12 +109,12 @@ $logsSql = "
     SELECT ow.washer_id as staff_id, ow.commission_usd, o.order_number, o.plate_number, o.vehicle_type, o.total_usd, o.created_at, 'Washer' as duty_role
     FROM order_washers ow
     JOIN orders o ON ow.order_id = o.id
-    WHERE o.status = 'paid'
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled'
     UNION ALL
     SELECT om.mechanic_id as staff_id, om.commission_usd, o.order_number, o.plate_number, o.vehicle_type, o.total_usd, o.created_at, 'Mechanic' as duty_role
     FROM order_mechanics om
     JOIN orders o ON om.order_id = o.id
-    WHERE o.status = 'paid'
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled'
     ORDER BY created_at DESC
 ";
 $logs = $pdo->query($logsSql)->fetchAll();

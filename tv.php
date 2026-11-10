@@ -123,9 +123,9 @@ $t = [
         default => 'Ready for Pickup / រួចរាល់សម្រាប់ទទួល'
     },
     'ready_sub' => match($lang) {
-        'km' => 'រថយន្តបានរួចរាល់ សូមអញ្ជើញមកទទួល និងទូទាត់ប្រាក់',
-        'en' => 'Vehicles ready for collection. Please proceed to cashier counter',
-        default => 'Ready for pickup & payment / រួចរាល់សម្រាប់ទទួល'
+        'km' => 'រថយន្តបានបញ្ចប់ការសម្អាត និងត្រួតពិនិត្យរួចរាល់ សូមអញ្ជើញមកទទួល',
+        'en' => 'Vehicles inspected and ready for customer collection',
+        default => 'Vehicles inspected and ready for pickup / រួចរាល់សម្រាប់ទទួល'
     },
     'next' => match($lang) {
         'km' => 'បន្ទាប់',

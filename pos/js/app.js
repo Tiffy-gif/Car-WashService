@@ -345,6 +345,56 @@ class PosApp {
         return 'fa-box';
     }
 
+    /**
+     * WP3: Distinguish mechanical/repair service from wash service
+     */
+    static isMechanicalService(svc) {
+        if (!svc) return false;
+        const cat = String(svc.category || '').toLowerCase();
+        const name = String(svc.name_en || svc.name || '').toLowerCase();
+        const code = String(svc.code || '').toLowerCase();
+        return cat === 'oil' || cat === 'oil_change' || cat === 'repair' || cat === 'maintenance' || cat === 'technical'
+            || name.includes('oil change') || name.includes('engine oil') || name.includes('repair') || name.includes('maintenance') || name.includes('inspection')
+            || code.includes('oil') || code.includes('repair');
+    }
+
+    /**
+     * WP3: Friendly non-intrusive toast feedback
+     */
+    static showCartToast(msg) {
+        let toast = document.getElementById('posCartToast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'posCartToast';
+            toast.className = 'pos-cart-toast';
+            document.body.appendChild(toast);
+        }
+        toast.innerHTML = `<i class="fa-solid fa-circle-info text-cyan"></i> <span>${this.escapeHtml(msg)}</span>`;
+        toast.style.display = 'flex';
+        toast.style.opacity = '1';
+        clearTimeout(this._toastTimer);
+        this._toastTimer = setTimeout(() => {
+            if (toast) {
+                toast.style.opacity = '0';
+                setTimeout(() => { if (toast) toast.style.display = 'none'; }, 300);
+            }
+        }, 2200);
+    }
+
+    /**
+     * WP3: Inline payment modal error feedback (replaces alert popups)
+     */
+    static showPaymentModalError(msg) {
+        const alertEl = document.getElementById('payModalAlert');
+        const alertText = document.getElementById('payModalAlertText');
+        if (alertEl && alertText) {
+            alertText.textContent = msg;
+            alertEl.style.display = 'flex';
+        } else {
+            alert(msg);
+        }
+    }
+
     // POS State
     static selectedVehicleType = 'small_car'; // motorbike, small_car, suv_pickup, van_truck
     static selectedCategory = 'all';
@@ -1370,10 +1420,53 @@ class PosApp {
             }
         });
 
-        // Customer Search Input & Autocomplete
+        // Customer Search / Plate Input & Autocomplete (WP3 Task 1)
+        const plateInput = document.getElementById('custPlateInput');
         const searchInput = document.getElementById('custSearchInput');
-        if (searchInput) {
-            searchInput.addEventListener('input', (e) => {
+        const nameInput = document.getElementById('custNameInput');
+        const phoneInput = document.getElementById('custPhoneInput');
+        const activeIntakeInput = plateInput || searchInput;
+
+        if (activeIntakeInput) {
+            const handleIntakeInput = (e) => {
+                const val = (e.target.value || '').toUpperCase();
+                e.target.value = val;
+                activeIntakeInput.classList.remove('has-error');
+                const valMsg = document.getElementById('intakeValidationMsg');
+                if (valMsg) valMsg.style.display = 'none';
+
+                if (plateInput && searchInput && e.target === plateInput) {
+                    searchInput.value = val;
+                }
+
+                // Update currentCustomer live from intake inputs
+                const currentName = (nameInput?.value || '').trim() || 'Walk-in Guest';
+                const currentPhone = (phoneInput?.value || '').trim();
+                if (val.trim()) {
+                    this.currentCustomer = {
+                        ...(this.currentCustomer || {}),
+                        plate: val.trim(),
+                        name: currentName,
+                        phone: currentPhone,
+                        vehicle_type: this.selectedVehicleType
+                    };
+                }
+
+                const panel = document.getElementById('panelSavedCustomers');
+                if (panel && panel.style.display !== 'none') {
+                    document.getElementById('custDropdown')?.classList.remove('open');
+                    this.handleSavedCustomersSearch(val);
+                } else {
+                    this.handleCustomerSearch(val);
+                }
+            };
+
+            activeIntakeInput.addEventListener('input', handleIntakeInput);
+            if (searchInput && plateInput && searchInput !== plateInput) {
+                searchInput.addEventListener('input', handleIntakeInput);
+            }
+
+            activeIntakeInput.addEventListener('focus', (e) => {
                 const panel = document.getElementById('panelSavedCustomers');
                 if (panel && panel.style.display !== 'none') {
                     document.getElementById('custDropdown')?.classList.remove('open');
@@ -1382,16 +1475,8 @@ class PosApp {
                     this.handleCustomerSearch(e.target.value);
                 }
             });
-            searchInput.addEventListener('focus', (e) => {
-                const panel = document.getElementById('panelSavedCustomers');
-                if (panel && panel.style.display !== 'none') {
-                    document.getElementById('custDropdown')?.classList.remove('open');
-                    this.handleSavedCustomersSearch(e.target.value);
-                } else {
-                    this.handleCustomerSearch(e.target.value);
-                }
-            });
-            searchInput.addEventListener('keydown', (e) => {
+
+            activeIntakeInput.addEventListener('keydown', (e) => {
                 const dropdown = document.getElementById('custDropdown');
                 const isDropdownOpen = dropdown && dropdown.classList.contains('open');
 
@@ -1427,18 +1512,36 @@ class PosApp {
                     }
                 }
             });
+
             document.addEventListener('click', (e) => {
-                if (!e.target.closest('.search-box-wrap')) {
+                if (!e.target.closest('.search-box-wrap') && !e.target.closest('.intake-plate-field')) {
                     document.getElementById('custDropdown')?.classList.remove('open');
                     this.custSearchHighlightedIndex = -1;
                     this.closeSavedCustomersPanel();
                 }
             });
+
             window.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape') {
                     this.closeSavedCustomersPanel();
                     document.getElementById('custDropdown')?.classList.remove('open');
                     this.custSearchHighlightedIndex = -1;
+                }
+            });
+        }
+
+        if (nameInput) {
+            nameInput.addEventListener('input', (e) => {
+                if (this.currentCustomer) {
+                    this.currentCustomer.name = e.target.value.trim() || 'Walk-in Guest';
+                }
+            });
+        }
+
+        if (phoneInput) {
+            phoneInput.addEventListener('input', (e) => {
+                if (this.currentCustomer) {
+                    this.currentCustomer.phone = e.target.value.trim();
                 }
             });
         }
@@ -1690,11 +1793,6 @@ class PosApp {
             btnRefreshOil.addEventListener('click', () => this.renderOilReminders());
         }
 
-        // Pay Later Button
-        const btnPayLater = document.getElementById('btnPayLater');
-        if (btnPayLater) {
-            btnPayLater.addEventListener('click', () => this.handlePayLaterOrder());
-        }
 
         // Change Crew Modal Close Buttons
         const modalChangeCrew = document.getElementById('modalChangeCrew');
@@ -3620,6 +3718,13 @@ class PosApp {
             const svcImgWithVer = svcImg ? `${svcImg}?v=${encodeURIComponent(svc.image_updated_at || '')}` : null;
 
             const isKm = (I18nManager.getLang() === 'km');
+            const isMech = this.isMechanicalService(svc);
+            const svcBadgeHtml = isMech
+                ? `<span class="card-tag-type mechanical"><i class="fa-solid fa-wrench"></i> MECHANICAL</span>`
+                : `<span class="card-tag-type wash"><i class="fa-solid fa-shower"></i> WASH</span>`;
+            const compactBadgeHtml = isMech
+                ? `<span class="item-badge mechanical" style="background:#fef3c7;color:#b45309;font-weight:700;"><i class="fa-solid fa-wrench"></i> Mech</span>`
+                : `<span class="item-badge wash" style="background:#e0f2fe;color:#0369a1;font-weight:700;"><i class="fa-solid fa-shower"></i> Wash</span>`;
             const svcWait = (this.currentWaitData?.services_wait || this.currentWaitData?.services)?.[svc.id];
             const svcWaitText = svcWait ? (isKm ? (svcWait.wait_text_km || svcWait.wait_text_en) : svcWait.wait_text_en) : '';
             const hideWait = (!this.isOnline || !navigator.onLine || (Date.now() - (this.lastSyncSuccessTime || Date.now()) > 60000));
@@ -3638,7 +3743,7 @@ class PosApp {
                          ontouchstart="PosApp.handleCardPressStart(event, 'svc_${svc.id}')"
                          ontouchend="PosApp.handleCardPressEnd(event)"
                          ontouchmove="PosApp.handleCardPressMove(event)">
-                        <span class="card-tag-type service">SERVICE</span>
+                        ${svcBadgeHtml}
                         <span class="card-tag-status duration"><i class="fa-regular fa-clock"></i> ${svc.duration_min || 20}m</span>
                         <span class="service-wait-time-badge" data-service-id="${svc.id}" style="display: ${waitDisplay};"><i class="fa-regular fa-clock"></i> ${svcWaitText || ''}</span>
                         <div class="item-card-media-box">
@@ -3682,7 +3787,7 @@ class PosApp {
                         <div class="compact-card-badges">
                             <span class="item-duration-badge"><i class="fa-regular fa-clock"></i> ${svc.duration_min || 20}m</span>
                             <span class="service-wait-time-badge" data-service-id="${svc.id}" style="display: ${waitDisplay};"><i class="fa-regular fa-clock"></i> ${svcWaitText || ''}</span>
-                            <span class="item-badge service">Service</span>
+                            ${compactBadgeHtml}
                         </div>
                         <div class="item-icon">
                             ${svcIconHtml}
@@ -3857,6 +3962,11 @@ class PosApp {
         }
     }
 
+    static setPreferredWorkflowSequence(seq) {
+        this.preferredWorkflowSequence = seq;
+        this.renderCart();
+    }
+
     // ========================================================
     // CART OPERATIONS
     // ========================================================
@@ -3899,23 +4009,26 @@ class PosApp {
             }
         }
 
-        const existing = this.cart.find(it => it.type === 'service' && it.service_id === svc.id && Math.abs(it.price_usd - finalPriceUsd) < 0.001);
+        // Prevent accidental duplicate service selections (Task 2)
+        const existing = this.cart.find(it => it.type === 'service' && it.service_id === svc.id);
         if (existing) {
-            existing.qty += 1;
-        } else {
-            this.cart.push({
-                type: 'service',
-                service_id: svc.id,
-                product_id: null,
-                name_en: svc.name_en,
-                name_km: svc.name_km,
-                price_usd: finalPriceUsd,
-                price_khr: finalPriceKhr,
-                is_member_benefit: isMemberBenefit,
-                note: benefitNote,
-                qty: 1
-            });
+            this.showCartToast(I18nManager.t('serviceAlreadyInCart') || 'សេវាកម្មនេះបានបញ្ចូលក្នុងកន្ត្រករួចរាល់ (Service already in cart)');
+            return;
         }
+
+        this.cart.push({
+            type: 'service',
+            service_id: svc.id,
+            product_id: null,
+            name_en: svc.name_en,
+            name_km: svc.name_km,
+            category: svc.category,
+            price_usd: finalPriceUsd,
+            price_khr: finalPriceKhr,
+            is_member_benefit: isMemberBenefit,
+            note: benefitNote,
+            qty: 1
+        });
 
         this.renderCart();
     }
@@ -4008,6 +4121,7 @@ class PosApp {
 
     static clearCart() {
         this.cart = [];
+        this.currentAppointmentId = null;
         this.currentDiscount = { type: 'none', value: 0 };
         this.loyaltyRewardGiven = null;
         this.loyaltyRewardActionChosen = false;
@@ -4288,6 +4402,9 @@ class PosApp {
         const btnCartPillClear = document.getElementById('btnCartPillClear');
 
         if (this.cart.length === 0) {
+            const wfBadge = document.getElementById('cartOrderWorkflowBadge');
+            if (wfBadge) wfBadge.style.display = 'none';
+
             cartList.innerHTML = `
                 <div class="cart-empty-state">
                     <div class="cart-empty-icon-wrap">
@@ -4298,8 +4415,6 @@ class PosApp {
                 </div>
             `;
             if (checkoutBtn) checkoutBtn.disabled = true;
-            const payLaterBtn = document.getElementById('btnPayLater');
-            if (payLaterBtn) payLaterBtn.disabled = true;
             if (btnCartPillClear) btnCartPillClear.disabled = true;
             const btnCartPillDiscount = document.getElementById('btnCartPillDiscount');
             if (btnCartPillDiscount) {
@@ -4310,6 +4425,55 @@ class PosApp {
             const cartDiscountBadge = document.getElementById('cartDiscountBadge');
             if (cartDiscountBadge) cartDiscountBadge.style.display = 'none';
         } else {
+            // Operational Workflow Badge & Service Crew Visibility (Tasks 2 & 5)
+            const wfBadge = document.getElementById('cartOrderWorkflowBadge');
+            const hasWash = this.cart.some(it => it.type === 'service' && !this.isMechanicalService(it));
+            const hasMechanical = this.cart.some(it => it.type === 'service' && this.isMechanicalService(it));
+            const hasProducts = this.cart.some(it => it.type === 'product');
+
+            if (wfBadge) {
+                if (hasWash && hasMechanical) {
+                    const curSeq = this.preferredWorkflowSequence || 'lift_first';
+                    wfBadge.className = 'cart-order-workflow-badge mixed';
+                    wfBadge.innerHTML = `
+                        <div style="display: flex; flex-direction: column; width: 100%; gap: 6px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span><i class="fa-solid fa-layer-group"></i> <strong>MIXED ORDER WORKFLOW</strong></span>
+                                <span style="font-size: 11px; opacity: 0.85;">Bay 4 busy? Tap to switch</span>
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 2px;">
+                                <button type="button" class="btn btn-sm ${curSeq === 'lift_first' ? 'btn-primary' : 'btn-outline'}" style="font-size: 11px; padding: 4px 6px; font-weight: 700;" onclick="PosApp.setPreferredWorkflowSequence('lift_first')">
+                                    <i class="fa-solid fa-wrench"></i> 1. Lift &rarr; 2. Wash
+                                </button>
+                                <button type="button" class="btn btn-sm ${curSeq === 'wash_first' ? 'btn-primary' : 'btn-outline'}" style="font-size: 11px; padding: 4px 6px; font-weight: 700; ${curSeq === 'wash_first' ? 'background: #0284c7; border-color: #0284c7; color: #fff;' : 'border-color: #0284c7; color: #0284c7;'}" onclick="PosApp.setPreferredWorkflowSequence('wash_first')">
+                                    <i class="fa-solid fa-shower"></i> 1. Wash &rarr; 2. Lift
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    wfBadge.style.display = 'flex';
+                } else if (hasWash) {
+                    wfBadge.className = 'cart-order-workflow-badge wash';
+                    wfBadge.innerHTML = `<i class="fa-solid fa-shower"></i> <span><strong>WASH SERVICE</strong>: Bay 1, 2, or 3</span>`;
+                    wfBadge.style.display = 'flex';
+                } else if (hasMechanical) {
+                    wfBadge.className = 'cart-order-workflow-badge mechanical';
+                    wfBadge.innerHTML = `<i class="fa-solid fa-wrench"></i> <span><strong>MECHANICAL SERVICE</strong>: Bay 4 Lift</span>`;
+                    wfBadge.style.display = 'flex';
+                } else if (hasProducts) {
+                    wfBadge.className = 'cart-order-workflow-badge retail';
+                    wfBadge.innerHTML = `<i class="fa-solid fa-box"></i> <span><strong>RETAIL PRODUCTS</strong>: Counter pickup</span>`;
+                    wfBadge.style.display = 'flex';
+                } else {
+                    wfBadge.style.display = 'none';
+                }
+            }
+
+            const washerGroup = document.getElementById('cartWasherGroup');
+            const mechGroup = document.getElementById('cartMechanicGroup');
+            if (washerGroup) washerGroup.style.display = hasWash ? 'block' : 'none';
+            if (mechGroup) mechGroup.style.display = hasMechanical ? 'block' : 'none';
+
             if (btnCartPillClear) btnCartPillClear.disabled = false;
             const btnCartPillDiscount = document.getElementById('btnCartPillDiscount');
             if (btnCartPillDiscount) {
@@ -4351,8 +4515,6 @@ class PosApp {
             });
             cartList.innerHTML = html;
             if (checkoutBtn) checkoutBtn.disabled = false;
-            const payLaterBtn = document.getElementById('btnPayLater');
-            if (payLaterBtn) payLaterBtn.disabled = false;
         }
 
         // Update Totals Summary
@@ -4849,10 +5011,22 @@ class PosApp {
             vehicle_id: vehicleId
         };
 
-        // Update UI
+        // Update UI & Intake Inputs (Task 1)
         document.getElementById('custDropdown')?.classList.remove('open');
         this.closeSavedCustomersPanel();
-        document.getElementById('custSearchInput').value = '';
+        const plateInp = document.getElementById('custPlateInput');
+        if (plateInp) {
+            plateInp.value = cleanPlate;
+            plateInp.classList.remove('has-error');
+        }
+        const nameInp = document.getElementById('custNameInput');
+        if (nameInp) nameInp.value = cleanName;
+        const phoneInp = document.getElementById('custPhoneInput');
+        if (phoneInp) phoneInp.value = phone || '';
+        const intakeVal = document.getElementById('intakeValidationMsg');
+        if (intakeVal) intakeVal.style.display = 'none';
+
+        document.getElementById('custSearchInput').value = cleanPlate;
         document.getElementById('selectedCustBadgeWrap').style.display = 'block';
         document.getElementById('badgePlate').textContent = cleanPlate;
         document.getElementById('badgeName').textContent = cleanName;
@@ -4884,8 +5058,10 @@ class PosApp {
     }
 
     static setCustomerToWalkIn() {
-        const randomPlate = 'W-' + Math.floor(1000 + Math.random() * 9000);
-        this.selectCustomer(randomPlate, 'Walk-in Guest', '', this.selectedVehicleType);
+        const plateInp = document.getElementById('custPlateInput') || document.getElementById('custSearchInput');
+        const typedPlate = (plateInp?.value || '').trim();
+        const plate = typedPlate ? typedPlate.toUpperCase() : ('W-' + Math.floor(1000 + Math.random() * 9000));
+        this.selectCustomer(plate, 'Walk-in Guest', '', this.selectedVehicleType);
     }
 
     static resetCustomer() {
@@ -4899,6 +5075,19 @@ class PosApp {
         if (this._dismissedUpsellIds) this._dismissedUpsellIds.clear();
         document.getElementById('modalUpsellPrompt')?.classList.remove('open');
         document.getElementById('selectedCustBadgeWrap').style.display = 'none';
+
+        const plateInp = document.getElementById('custPlateInput');
+        if (plateInp) {
+            plateInp.value = '';
+            plateInp.classList.remove('has-error');
+        }
+        const nameInp = document.getElementById('custNameInput');
+        if (nameInp) nameInp.value = '';
+        const phoneInp = document.getElementById('custPhoneInput');
+        if (phoneInp) phoneInp.value = '';
+        const intakeVal = document.getElementById('intakeValidationMsg');
+        if (intakeVal) intakeVal.style.display = 'none';
+
         document.getElementById('custSearchInput').value = '';
         const topCustName = document.getElementById('topbarCustomerName');
         if (topCustName) {
@@ -4909,7 +5098,8 @@ class PosApp {
         document.getElementById('profMemberPanel')?.setAttribute('style', 'display: none;');
         document.getElementById('cartLoyaltyRewardBanner')?.setAttribute('style', 'display: none;');
         document.getElementById('cartLoyaltyRewardStatusBadge')?.setAttribute('style', 'display: none;');
-        document.getElementById('custSearchInput').focus();
+        if (plateInp) plateInp.focus();
+        else document.getElementById('custSearchInput')?.focus();
     }
 
     // ========================================================
@@ -5440,10 +5630,6 @@ class PosApp {
             btnPay.disabled = false;
             btnPay.innerHTML = `<i class="fa-solid fa-print"></i> ${I18nManager.t('confirmPayment') || 'Complete & Print'}`;
         }
-        const btnLater = document.getElementById('btnPayLater');
-        if (btnLater) {
-            btnLater.disabled = false;
-        }
         const btnCheckout = document.getElementById('btnOpenCheckout');
         if (btnCheckout) {
             btnCheckout.disabled = false;
@@ -5470,7 +5656,10 @@ class PosApp {
     }
 
     static openPaymentModal() {
-        if (this.cart.length === 0) return;
+        if (!this.cart || this.cart.length === 0) {
+            this.showCartToast('Cart is empty. Add services or products first.');
+            return;
+        }
 
         if (this.isDayClosed || this.isDayLocked) {
             this.showSaleBlockedNotice(I18nManager.t('salesBlockedDayClosed') || 'Register is closed for today! New sales are blocked until reopened by a manager.', true);
@@ -5482,14 +5671,61 @@ class PosApp {
             return;
         }
 
-        // Auto assign walk-in if no customer selected
-        if (!this.currentCustomer) {
-            this.setCustomerToWalkIn();
+        // Validate Customer Intake (Task 1: Mandatory License Plate, No disruptive popups)
+        const plateInp = document.getElementById('custPlateInput') || document.getElementById('custSearchInput');
+        const rawPlate = (plateInp?.value || this.currentCustomer?.plate || '').trim().toUpperCase();
+        if (!rawPlate || rawPlate.length < 2) {
+            const msgEl = document.getElementById('intakeValidationMsg');
+            if (msgEl) msgEl.style.display = 'flex';
+            if (plateInp) {
+                plateInp.classList.add('has-error');
+                plateInp.focus();
+            }
+            this.showCartToast('សូមបញ្ចូលស្លាកលេខយានយន្តជាមុន (Please enter vehicle plate number)');
+            return;
         }
+
+        // Plate is valid: Clear validation message & error highlight
+        const msgEl = document.getElementById('intakeValidationMsg');
+        if (msgEl) msgEl.style.display = 'none';
+        if (plateInp) plateInp.classList.remove('has-error');
+
+        // Customer Name defaults to 'Walk-in Guest' if empty
+        const nameInp = document.getElementById('custNameInput');
+        const phoneInp = document.getElementById('custPhoneInput');
+        const custName = (nameInp?.value || '').trim() || (this.currentCustomer?.name && this.currentCustomer.name !== 'Customer' ? this.currentCustomer.name : 'Walk-in Guest');
+        const custPhone = (phoneInp?.value || '').trim() || (this.currentCustomer?.phone || '');
+
+        this.currentCustomer = {
+            ...(this.currentCustomer || {}),
+            plate: rawPlate,
+            name: custName,
+            phone: custPhone,
+            vehicle_type: this.selectedVehicleType
+        };
 
         const totals = this.calculateTotals();
         document.getElementById('payModalTotalUsd').textContent = `$${totals.totalUsd.toFixed(2)}`;
         document.getElementById('payModalTotalKhr').textContent = `${totals.totalKhr.toLocaleString()} ៛`;
+
+        // Update Duty Staff Summary inside modal (Task 5: Consolidated display from Cart)
+        const hasWash = this.cart.some(it => it.type === 'service' && !this.isMechanicalService(it));
+        const hasMechanical = this.cart.some(it => it.type === 'service' && this.isMechanicalService(it));
+        const wSelect = document.getElementById('cartWasherSelect');
+        const mSelect = document.getElementById('cartMechanicSelect');
+        const wText = (wSelect && wSelect.selectedIndex > 0) ? wSelect.options[wSelect.selectedIndex].text : '';
+        const mText = (mSelect && mSelect.selectedIndex > 0) ? mSelect.options[mSelect.selectedIndex].text : '';
+        let crewDesc = [];
+        if (hasWash && wText && !wText.includes('--')) crewDesc.push(`Washer: ${wText}`);
+        if (hasMechanical && mText && !mText.includes('--')) crewDesc.push(`Mechanic: ${mText}`);
+        const crewNamesEl = document.getElementById('payModalCrewNames');
+        if (crewNamesEl) {
+            crewNamesEl.textContent = crewDesc.length ? crewDesc.join(' | ') : 'Queue automatic dispatch';
+        }
+
+        // Hide payment modal alert on open
+        const payAlert = document.getElementById('payModalAlert');
+        if (payAlert) payAlert.style.display = 'none';
 
         // Reset slip upload
         this.currentBankSlipBase64 = null;
@@ -5618,68 +5854,103 @@ class PosApp {
     /**
      * Submit Order (Online or Offline with Idempotency)
      */
+    static isSubmittingPayment = false;
+
     static async handleConfirmPayment() {
+        if (this.isSubmittingPayment) return;
+        this.isSubmittingPayment = true;
+
         const btn = document.getElementById('btnConfirmPaymentAndPrint');
         btn.disabled = true;
         btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing...`;
 
-        // Requirement 20: Block sales after day closing unless reopened by manager
+        // Clear previous payment alert in modal
+        const payAlert = document.getElementById('payModalAlert');
+        if (payAlert) payAlert.style.display = 'none';
+
+        // Block sales after day closing unless reopened by manager
         if (this.isDayClosed || this.isDayLocked) {
             this.lastPaymentError = 'Day Closed or Locked';
+            this.isSubmittingPayment = false;
             btn.disabled = false;
             btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
-            alert(I18nManager.t('salesBlockedDayClosed') || 'Register is closed for today! New sales are blocked until reopened by a manager.');
+            this.showPaymentModalError(I18nManager.t('salesBlockedDayClosed') || 'Register is closed for today! New sales are blocked until reopened by a manager.');
             return;
         }
 
         if (this.currentUser?.role === 'cashier' && !this.activeShift) {
             this.lastPaymentError = 'No Active Cashier Shift';
+            this.isSubmittingPayment = false;
             btn.disabled = false;
             btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
             this.showStartShiftModal();
             return;
         }
 
-        // Requirement 4: Slip Photo required for ABA and KHQR
-        if ((this.paymentMethod === 'aba' || this.paymentMethod === 'khqr') && !this.currentBankSlipBase64) {
-            this.lastPaymentError = 'Slip Photo Required for ABA/KHQR';
-            btn.disabled = false;
-            btn.innerHTML = `<i class="fa-solid fa-print"></i> ${I18nManager.t('confirmPayment') || 'Confirm Payment'}`;
-            alert('A photo of the bank transfer slip is required for ABA and KHQR payments. Please take or attach a photo of the customer slip.');
-            return;
+        // Slip photo is advisory/optional; merchant phone statement verification is required for ABA and KHQR
+        let paymentRef = '';
+        let statementVerified = false;
+        if (this.paymentMethod === 'aba') {
+            paymentRef = (document.getElementById('abaRefInput')?.value || '').trim();
+            statementVerified = !!document.getElementById('abaStatementVerifiedCheck')?.checked;
+            if (!paymentRef || paymentRef.length < 4 || paymentRef.startsWith('TRX-')) {
+                this.isSubmittingPayment = false;
+                btn.disabled = false;
+                btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
+                this.showPaymentModalError('Please enter a genuine bank transaction reference (minimum 4 characters) from the merchant phone banking statement.');
+                document.getElementById('abaRefInput')?.focus();
+                return;
+            }
+            if (!statementVerified) {
+                this.isSubmittingPayment = false;
+                btn.disabled = false;
+                btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
+                this.showPaymentModalError('Please confirm that you have verified the payment on the store merchant phone banking app.');
+                return;
+            }
+        } else if (this.paymentMethod === 'khqr') {
+            paymentRef = (document.getElementById('khqrRefInput')?.value || document.getElementById('abaRefInput')?.value || '').trim();
+            statementVerified = !!document.getElementById('khqrStatementVerifiedCheck')?.checked;
+            if (!paymentRef || paymentRef.length < 4 || paymentRef.startsWith('TRX-')) {
+                this.isSubmittingPayment = false;
+                btn.disabled = false;
+                btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
+                this.showPaymentModalError('Please enter a genuine bank transaction reference (minimum 4 characters) from the merchant phone banking statement.');
+                document.getElementById('khqrRefInput')?.focus();
+                return;
+            }
+            if (!statementVerified) {
+                this.isSubmittingPayment = false;
+                btn.disabled = false;
+                btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
+                this.showPaymentModalError('Please confirm that you have verified the payment on the store merchant phone banking app.');
+                return;
+            }
         }
 
         const totals = this.calculateTotals();
         const customer = this.currentCustomer || {
-            plate: 'WALK-IN',
+            plate: '',
             name: 'Walk-in Guest',
             phone: '',
             vehicle_type: this.selectedVehicleType
         };
 
-        // Requirement 2: Clean app window for vehicle plate & type prompt
-        let plate = (customer.plate || '').trim();
-        if (!plate || plate.toUpperCase() === 'WALK-IN') {
-            const plateRes = await this.promptVehiclePlate(customer.vehicle_type || this.selectedVehicleType || 'small_car');
-            if (!plateRes || !plateRes.plate) {
-                btn.disabled = false;
-                btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
-                return;
-            }
-            plate = plateRes.plate;
-            customer.plate = plate;
-            if (plateRes.vehicleType) {
-                customer.vehicle_type = plateRes.vehicleType;
-                this.selectedVehicleType = plateRes.vehicleType;
-                this.updateVehicleTypeUI(plateRes.vehicleType);
-            }
-            if (this.currentCustomer) {
-                this.currentCustomer.plate = plate;
-                this.currentCustomer.vehicle_type = customer.vehicle_type;
-            }
-            const pInput = document.getElementById('searchCustomerInput');
-            if (pInput) pInput.value = plate;
+        // Ensure plate is present (already validated at intake, fallback check)
+        let plate = (customer.plate || '').trim().toUpperCase();
+        if (!plate) {
+            const plateInp = document.getElementById('custPlateInput') || document.getElementById('custSearchInput');
+            plate = (plateInp?.value || '').trim().toUpperCase();
         }
+        if (!plate || plate.length < 2) {
+            this.isSubmittingPayment = false;
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
+            this.showPaymentModalError('Vehicle plate number is required before collecting payment.');
+            return;
+        }
+        customer.plate = plate;
+        if (!customer.name) customer.name = 'Walk-in Guest';
 
         const mileage = parseInt(document.getElementById('cartMileageInput')?.value) || null;
         const nextOilMileage = parseInt(document.getElementById('cartNextOilMileageInput')?.value) || null;
@@ -5691,23 +5962,24 @@ class PosApp {
         if (this.paymentMethod === 'cash') {
             const rawTendered = document.getElementById('cashTenderInput').value.trim();
             if (rawTendered === '' || isNaN(parseFloat(rawTendered))) {
+                this.isSubmittingPayment = false;
                 btn.disabled = false;
                 btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
-                alert(I18nManager.t('cashTenderEmpty') || 'Please enter cash amount tendered');
+                this.showPaymentModalError(I18nManager.t('cashTenderEmpty') || 'Please enter cash amount tendered');
                 document.getElementById('cashTenderInput').focus();
                 return;
             }
             tendered = parseFloat(rawTendered);
             if (tendered < (totals.totalUsd - 0.009)) {
+                this.isSubmittingPayment = false;
                 btn.disabled = false;
                 btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
-                alert(I18nManager.t('cashTenderInsufficient') || 'Cash tendered is less than the total order amount');
+                this.showPaymentModalError(I18nManager.t('cashTenderInsufficient') || 'Cash tendered is less than the total order amount');
                 document.getElementById('cashTenderInput').focus();
                 return;
             }
             change = Math.max(0, tendered - totals.totalUsd);
         }
-        const paymentRef = (this.paymentMethod === 'aba') ? document.getElementById('abaRefInput').value.trim() : '';
 
         // Requirement 1 & 3: Washers, Mechanics, and Repair Notes
         const selectedWasher = document.getElementById('selectDutyWasher')?.value || document.getElementById('cartWasherSelect')?.value;
@@ -5725,6 +5997,7 @@ class PosApp {
             vehicle_type: customer.vehicle_type || this.selectedVehicleType,
             customer_id: customer.customer_id,
             vehicle_id: customer.vehicle_id,
+            appointment_id: this.currentAppointmentId || null,
             items: this.cart.map(it => ({
                 id: it.service_id || it.product_id,
                 service_id: it.service_id,
@@ -5740,11 +6013,14 @@ class PosApp {
             loyalty_reward_given: this.loyaltyRewardGiven,
             loyalty_reward_name: this.activeLoyaltyReward ? this.activeLoyaltyReward.reward_name : null,
             discount_usd: totals.discountUsd,
+            status: 'waiting',
             is_paid: 1,
+            payment_status: 'paid',
             payment_method: this.paymentMethod,
             amount_tendered_usd: tendered,
             change_usd: change,
             payment_ref: paymentRef,
+            statement_verified: statementVerified ? 1 : 0,
             current_mileage: mileage,
             next_oil_mileage: nextOilMileage,
             next_oil_date: nextOilDate,
@@ -5754,7 +6030,8 @@ class PosApp {
             manager_username: (this.cart.find(it => it.manager_override)?.manager_username) || null,
             manager_pin: (this.cart.find(it => it.manager_override)?.manager_pin) || null,
             washers: selectedWasher ? [parseInt(selectedWasher)] : [],
-            mechanics: selectedMechanic ? [parseInt(selectedMechanic)] : []
+            mechanics: selectedMechanic ? [parseInt(selectedMechanic)] : [],
+            service_sequence: (this.cart.some(it => it.type === 'service' && !this.isMechanicalService(it)) && this.cart.some(it => it.type === 'service' && this.isMechanicalService(it))) ? (this.preferredWorkflowSequence || 'lift_first') : 'lift_first'
         };
 
         let completedOrderRecord = null;
@@ -5770,8 +6047,9 @@ class PosApp {
                     ...orderPayload,
                     id: res.order?.id || res.order_id,
                     order_number: res.order?.order_number || `ORD-${Date.now()}`,
-                    status: res.order?.status || 'in_progress',
-                    payment_status: res.order?.payment_status || (this.paymentMethod === 'cash' ? 'paid' : 'pending_verification'),
+                    status: res.order?.status || 'waiting',
+                    payment_status: res.order?.payment_status || 'paid',
+                    receipt_issued_at: res.order?.receipt_issued_at || new Date().toISOString().replace('T', ' ').substring(0, 19),
                     total_usd: finalTotalUsd,
                     total_khr: finalTotalKhr,
                     created_at: new Date().toISOString().replace('T', ' ').substring(0, 19),
@@ -5813,6 +6091,7 @@ class PosApp {
                 return;
             }
         } finally {
+            this.isSubmittingPayment = false;
             btn.disabled = false;
             btn.innerHTML = `<i class="fa-solid fa-print"></i> ${I18nManager.t('confirmPayment')}`;
         }
@@ -5852,186 +6131,7 @@ class PosApp {
     static lastCreatedOrderRecord = null;
 
     static async handlePayLaterOrder() {
-        if (this.isSubmittingPayLater) return; // Prevent duplicate click
-        if (this.cart.length === 0) return;
-
-        const btn = document.getElementById('btnPayLater');
-        const alertBox = document.getElementById('posNoticeAlert');
-        const alertContent = document.getElementById('posNoticeAlertContent');
-        if (alertBox) alertBox.style.display = 'none';
-
-        // Requirement 20: Block sales after day closing unless reopened by manager
-        if (this.isDayClosed) {
-            this.showSaleBlockedNotice(I18nManager.t('salesBlockedDayClosed') || 'Register is closed for today! New sales are blocked until reopened by a manager.', true);
-            return;
-        }
-
-        const customer = this.currentCustomer || {
-            plate: 'WALK-IN',
-            name: 'Walk-in Guest',
-            phone: '',
-            vehicle_type: this.selectedVehicleType
-        };
-
-        // Requirement 2: Clean app window for vehicle plate & type prompt (Pay Later continues ONLY after plate is entered)
-        let plate = (customer.plate || '').trim();
-        if (!plate || plate.toUpperCase() === 'WALK-IN') {
-            const plateRes = await this.promptVehiclePlate(customer.vehicle_type || this.selectedVehicleType || 'small_car');
-            if (!plateRes || !plateRes.plate) {
-                // User cancelled or provided no plate: Pay Later does NOT proceed
-                return;
-            }
-            plate = plateRes.plate;
-            customer.plate = plate;
-            if (plateRes.vehicleType) {
-                customer.vehicle_type = plateRes.vehicleType;
-                this.selectedVehicleType = plateRes.vehicleType;
-                this.updateVehicleTypeUI(plateRes.vehicleType);
-            }
-            if (this.currentCustomer) {
-                this.currentCustomer.plate = plate;
-                this.currentCustomer.vehicle_type = customer.vehicle_type;
-            }
-            const pInput = document.getElementById('searchCustomerInput');
-            if (pInput) pInput.value = plate;
-        }
-
-        this.isSubmittingPayLater = true;
-        if (btn) {
-            btn.disabled = true;
-            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saving...`;
-        }
-
-        const totals = this.calculateTotals();
-
-        const mileageVal = document.getElementById('cartMileageInput')?.value?.trim();
-        const mileage = (mileageVal && !isNaN(parseInt(mileageVal))) ? parseInt(mileageVal) : null;
-        const nextOilMileage = parseInt(document.getElementById('cartNextOilMileageInput')?.value) || null;
-        const nextOilDate = document.getElementById('cartNextOilDateInput')?.value || null;
-        const selectedWasher = document.getElementById('cartWasherSelect')?.value || document.getElementById('selectDutyWasher')?.value;
-        const selectedMechanic = document.getElementById('cartMechanicSelect')?.value || document.getElementById('selectDutyMechanic')?.value;
-        const repairNotes = document.getElementById('cartRepairNotesInput')?.value?.trim() || '';
-
-        const idempotencyKey = this.generateIdempotencyKey();
-
-        const orderPayload = {
-            idempotency_key: idempotencyKey,
-            plate_number: customer.plate,
-            customer_name: customer.name,
-            customer_phone: customer.phone,
-            vehicle_type: customer.vehicle_type || this.selectedVehicleType,
-            customer_id: customer.customer_id,
-            vehicle_id: customer.vehicle_id,
-            items: this.cart.map(it => ({
-                id: it.service_id || it.product_id,
-                service_id: it.service_id,
-                product_id: it.product_id,
-                type: it.type,
-                name: it.name_en,
-                price_usd: it.price_usd,
-                qty: it.qty,
-                is_member_benefit: it.is_member_benefit || false,
-                is_upsell: it.is_upsell || false,
-                offer_price_usd: it.offer_price_usd !== undefined ? it.offer_price_usd : null
-            })),
-            loyalty_reward_given: this.loyaltyRewardGiven,
-            loyalty_reward_name: this.activeLoyaltyReward ? this.activeLoyaltyReward.reward_name : null,
-            discount_usd: totals.discountUsd,
-            is_paid: 0,
-            status: 'waiting',
-            payment_status: 'unpaid',
-            payment_method: 'unpaid',
-            current_mileage: mileage,
-            next_oil_mileage: nextOilMileage,
-            next_oil_date: nextOilDate,
-            repair_notes: repairNotes,
-            staff_id: this.currentUser?.id || null,
-            washers: (selectedWasher && parseInt(selectedWasher) > 0) ? [parseInt(selectedWasher)] : [],
-            mechanics: (selectedMechanic && parseInt(selectedMechanic) > 0) ? [parseInt(selectedMechanic)] : []
-        };
-
-        let savedOrderRecord = null;
-
-        try {
-            const res = await PosApi.createOrder(orderPayload, idempotencyKey);
-            if (res.success && res.order) {
-                const finalTotalUsd = (res.order.total_usd !== undefined) ? parseFloat(res.order.total_usd) : totals.totalUsd;
-                const finalTotalKhr = (res.order.total_khr !== undefined) ? parseInt(res.order.total_khr) : totals.totalKhr;
-
-                savedOrderRecord = {
-                    ...orderPayload,
-                    order_number: res.order.order_number,
-                    total_usd: finalTotalUsd,
-                    total_khr: finalTotalKhr,
-                    created_at: res.order.created_at || new Date().toISOString().replace('T', ' ').substring(0, 19),
-                    cashier_name: this.currentUser?.full_name || 'Cashier',
-                    synced: true
-                };
-                PosStorage.addSyncedOrder(savedOrderRecord);
-                this.lastCreatedOrderRecord = savedOrderRecord;
-
-                // Clear current order
-                this.clearCart();
-                this.resetCustomer();
-                if (document.getElementById('cartMileageInput')) document.getElementById('cartMileageInput').value = '';
-                if (document.getElementById('cartNextOilMileageInput')) document.getElementById('cartNextOilMileageInput').value = '';
-                if (document.getElementById('cartNextOilDateInput')) document.getElementById('cartNextOilDateInput').value = '';
-                if (document.getElementById('cartRepairNotesInput')) document.getElementById('cartRepairNotesInput').value = '';
-                if (document.getElementById('cartOilReminderBox')) document.getElementById('cartOilReminderBox').style.display = 'none';
-
-                // Show clear green order success modal offering to print ticket
-                this.showOrderSuccessModal(savedOrderRecord, false);
-            } else {
-                throw new Error(res.message || res.error || 'Server rejected order creation');
-            }
-        } catch (err) {
-            if (err.isOffline) {
-                // Offline fallback: save order on device and queue
-                const offlineNum = `ORD-OFFLINE-${Date.now().toString().slice(-6)}`;
-                savedOrderRecord = {
-                    ...orderPayload,
-                    order_number: offlineNum,
-                    total_usd: totals.totalUsd,
-                    total_khr: totals.totalKhr,
-                    failure_reason: err.originalMessage || err.message || 'Connection offline: Server unreachable',
-                    created_at: new Date().toISOString().replace('T', ' ').substring(0, 19),
-                    created_by_staff_id: this.currentUser?.id || null,
-                    is_offline_sync: true,
-                    cashier_name: this.currentUser?.full_name || 'Cashier',
-                    synced: false
-                };
-
-                PosStorage.addPendingOrder(savedOrderRecord);
-                PosStorage.addSyncedOrder(savedOrderRecord);
-                this.updatePendingSyncBadge();
-                this.lastCreatedOrderRecord = savedOrderRecord;
-
-                // Clear cart
-                this.clearCart();
-                this.resetCustomer();
-                if (document.getElementById('cartMileageInput')) document.getElementById('cartMileageInput').value = '';
-                if (document.getElementById('cartNextOilMileageInput')) document.getElementById('cartNextOilMileageInput').value = '';
-                if (document.getElementById('cartNextOilDateInput')) document.getElementById('cartNextOilDateInput').value = '';
-                if (document.getElementById('cartRepairNotesInput')) document.getElementById('cartRepairNotesInput').value = '';
-                if (document.getElementById('cartOilReminderBox')) document.getElementById('cartOilReminderBox').style.display = 'none';
-
-                // Show clear green success modal with offline note
-                this.showOrderSuccessModal(savedOrderRecord, true);
-            } else {
-                // Real server error: display clear red message on screen and block sale
-                const realReason = err.data?.message || err.message || 'An unknown error occurred while saving the order';
-                console.error('Pay Later rejected by server:', err);
-                const isClosed = err.code === 'DAY_CLOSED' || err.data?.error === 'DAY_CLOSED' || realReason.toLowerCase().includes('closed');
-                this.showSaleBlockedNotice(realReason, isClosed);
-                return;
-            }
-        } finally {
-            this.isSubmittingPayLater = false;
-            if (btn) {
-                btn.disabled = (this.cart.length === 0);
-                btn.innerHTML = `<i class="fa-solid fa-clock"></i> <span data-i18n="payLater">${I18nManager.t('payLater')}</span>`;
-            }
-        }
+        alert(I18nManager.t('payLaterDecommissioned') || 'Pay Later is permanently decommissioned. Payment must be confirmed before service admission.');
     }
 
     static showOrderSuccessModal(order, isOffline = false) {
@@ -6962,6 +7062,13 @@ class PosApp {
             return;
         }
 
+        const qcList = this.currentBaysData?.qc_queue || [];
+        const isQc = qcList.some(q => parseInt(q.order_id) === parseInt(orderId));
+        if (isQc) {
+            this.showAppAlert(`Vehicle ${plateNumber || ''} has already finished wash and is waiting for Quality Control on the Finishing Pad.`);
+            return;
+        }
+
         try {
             const res = await PosApi.assignBay(bayId, orderId, this.currentUser?.id);
             if (res && res.success) {
@@ -6971,6 +7078,20 @@ class PosApp {
                 if (res?.error === 'PAYMENT_REQUIRED') {
                     this.showAppAlert(`Payment Required: Upfront payment is mandatory before vehicle ${plate} can enter service.`);
                 } else if (res?.error === 'RECEIPT_REQUIRED') {
+                    try {
+                        const ack = await PosApi.ackReceiptIssued(orderId);
+                        if (ack && ack.success) {
+                            const retryRes = await PosApi.assignBay(bayId, orderId, this.currentUser?.id);
+                            if (retryRes && retryRes.success) {
+                                this.showToastNotice(`${plate} assigned to ${bayName} (Electronic receipt issued)`, 'success');
+                                await this.fetchBaysAndQueue();
+                                await this.renderJobQueue();
+                                return;
+                            }
+                        }
+                    } catch (ackErr) {
+                        console.warn('Auto ack receipt error:', ackErr);
+                    }
                     this.showAppAlert(`Receipt Required: Customer electronic receipt must be issued before vehicle ${plate} can enter service.`);
                 } else if (res?.error === 'OVERRIDE_REASON_REQUIRED') {
                     const promptMsg = (res.message || 'An override reason is required to assign to an alternative bay.') +
@@ -6995,6 +7116,28 @@ class PosApp {
                     } catch (retryErr) {
                         this.showAppAlert(retryErr?.data?.message || retryErr.message || 'Failed to assign bay');
                     }
+                } else if (res?.error === 'PREREQUISITE_STEP_INCOMPLETE' && res?.can_wash_first) {
+                    const confirmWashFirst = confirm(`Bay 4 (Oil Change) is busy.\n\nWould you like to assign ${plate} to Wash First?\n\nSequence: Wash in ${bayName} ➔ Oil Change in Bay 4 ➔ QC Finishing Pad`);
+                    if (confirmWashFirst) {
+                        try {
+                            const retryRes = await PosApi.assignBay(bayId, orderId, {
+                                staff_id: this.currentUser?.id,
+                                allow_wash_first: 1
+                            });
+                            if (retryRes && retryRes.success) {
+                                this.showToastNotice(`${plate} assigned to ${bayName} (Switched to Wash First)`, 'success');
+                                await this.fetchBaysAndQueue();
+                                await this.renderJobQueue();
+                                return;
+                            } else {
+                                this.showAppAlert(retryRes?.message || 'Failed to assign bay');
+                            }
+                        } catch (swErr) {
+                            console.error('Wash first error:', swErr);
+                            this.showAppAlert(swErr?.data?.message || swErr.message || 'Failed to switch to Wash First');
+                        }
+                    }
+                    return;
                 } else if (res?.error === 'BAY_ALREADY_TAKEN' || res?.error === 'BAY_BUSY') {
                     this.showAppAlert(I18nManager.t('bayAlreadyTaken') || 'Bay already taken! Another terminal or washer just occupied this bay.');
                     await this.fetchBaysAndQueue();
@@ -7009,6 +7152,20 @@ class PosApp {
             if (errCode === 'PAYMENT_REQUIRED' || errMsg.includes('PAYMENT_REQUIRED')) {
                 this.showAppAlert(`Payment Required: Upfront payment is mandatory before vehicle ${plate} can enter service.`);
             } else if (errCode === 'RECEIPT_REQUIRED' || errMsg.includes('RECEIPT_REQUIRED')) {
+                try {
+                    const ack = await PosApi.ackReceiptIssued(orderId);
+                    if (ack && ack.success) {
+                        const retryRes = await PosApi.assignBay(bayId, orderId, this.currentUser?.id);
+                        if (retryRes && retryRes.success) {
+                            this.showToastNotice(`${plate} assigned to ${bayName} (Electronic receipt issued)`, 'success');
+                            await this.fetchBaysAndQueue();
+                            await this.renderJobQueue();
+                            return;
+                        }
+                    }
+                } catch (ackErr) {
+                    console.warn('Auto ack receipt error in catch:', ackErr);
+                }
                 this.showAppAlert(`Receipt Required: Customer electronic receipt must be issued before vehicle ${plate} can enter service.`);
             } else if (errCode === 'OVERRIDE_REASON_REQUIRED' || errMsg.includes('OVERRIDE_REASON_REQUIRED') || errMsg.includes('override reason is required')) {
                 const promptMsg = errMsg + `\n\nPlease enter the override reason for assigning ${plate} to ${bayName}:`;
@@ -7032,6 +7189,32 @@ class PosApp {
                 } catch (retryErr) {
                     this.showAppAlert(retryErr?.data?.message || retryErr.message || 'Failed to assign bay');
                 }
+            } else if (errCode === 'PREREQUISITE_STEP_INCOMPLETE' || errMsg.includes('PREREQUISITE_STEP_INCOMPLETE') || errMsg.includes('Wash First')) {
+                const canWashFirst = e.data?.can_wash_first || errMsg.includes('Wash First');
+                if (canWashFirst) {
+                    const confirmWashFirst = confirm(`Bay 4 (Oil Change) is busy.\n\nWould you like to assign ${plate} to Wash First?\n\nSequence: Wash in ${bayName} ➔ Oil Change in Bay 4 ➔ QC Finishing Pad`);
+                    if (confirmWashFirst) {
+                        try {
+                            const retryRes = await PosApi.assignBay(bayId, orderId, {
+                                staff_id: this.currentUser?.id,
+                                allow_wash_first: 1
+                            });
+                            if (retryRes && retryRes.success) {
+                                this.showToastNotice(`${plate} assigned to ${bayName} (Switched to Wash First)`, 'success');
+                                await this.fetchBaysAndQueue();
+                                await this.renderJobQueue();
+                                return;
+                            } else {
+                                this.showAppAlert(retryRes?.message || 'Failed to assign bay');
+                            }
+                        } catch (swErr) {
+                            console.error('Wash first error:', swErr);
+                            this.showAppAlert(swErr?.data?.message || swErr.message || 'Failed to switch to Wash First');
+                        }
+                    }
+                    return;
+                }
+                this.showAppAlert(errMsg || 'Prerequisite step incomplete');
             } else if (errCode === 'BAY_ALREADY_TAKEN' || errMsg.includes('taken') || errMsg.includes('busy')) {
                 this.showAppAlert(I18nManager.t('bayAlreadyTaken') || 'Bay already taken! Another terminal or washer just occupied this bay.');
                 await this.fetchBaysAndQueue();
@@ -7086,9 +7269,19 @@ class PosApp {
                 if (res && res.success) {
                     this.showToastNotice('Technical Job completed! Vehicle is ready for cashier checkout.', 'success');
                     this.playChimeSound();
+                    await this.fetchBaysAndQueue(true);
                     await this.renderMechanicScreen();
+                    if (document.getElementById('queueGrid')) {
+                        await this.renderJobQueue();
+                    }
                 } else {
-                    this.showAppAlert(res?.message || res?.error || 'Failed to complete technical job');
+                    if (res?.error === 'ORDER_ALREADY_COMPLETED' || (typeof res?.message === 'string' && res.message.includes('already completed'))) {
+                        this.showToastNotice('This technical job is already completed!', 'info');
+                        await this.fetchBaysAndQueue(true);
+                        await this.renderMechanicScreen();
+                    } else {
+                        this.showAppAlert(res?.message || res?.error || 'Failed to complete technical job');
+                    }
                 }
             } else {
                 res = await PosApi.finishWasherCar(bayId > 0 ? bayId : null, effectiveOrderId, tookLonger);
@@ -7101,6 +7294,9 @@ class PosApp {
                     this.playChimeSound();
                     await this.fetchBaysAndQueue(true);
                     await this.renderWasherScreen();
+                    if (document.getElementById('queueGrid')) {
+                        await this.renderJobQueue();
+                    }
                 } else {
                     this.showAppAlert(res?.message || res?.error || 'Failed to finish wash');
                 }
@@ -7117,6 +7313,13 @@ class PosApp {
     static openChooseBayModal(orderId, plateNumber) {
         if (!this.isOnline) {
             this.showAppAlert(I18nManager.t('offlineAssignDisabled') || 'Offline: cannot assign bay while disconnected.');
+            return;
+        }
+
+        const qcList = this.currentBaysData?.qc_queue || [];
+        const isQc = qcList.some(q => parseInt(q.order_id) === parseInt(orderId));
+        if (isQc) {
+            this.showAppAlert(`Vehicle ${plateNumber || ''} has already finished wash and is waiting for Quality Control on the Finishing Pad.`);
             return;
         }
 
@@ -7177,6 +7380,31 @@ class PosApp {
             }
         } catch (e) {
             this.showAppAlert(e.data?.message || e.message || 'Failed to register customer arrival');
+        }
+    }
+
+    static async handlePassQc(orderId, plateNumber) {
+        if (!this.isOnline) {
+            this.showAppAlert('Offline: QC inspection cannot be approved while disconnected.');
+            return;
+        }
+
+        try {
+            const res = await PosApi.request('pass_qc', {
+                order_id: orderId,
+                staff_id: this.currentUser?.id || 1,
+                checklist: ['exterior_wash', 'interior_vacuum', 'wheels_tires', 'mirrors_glass', 'wipe_down'],
+                qc_notes: 'QC passed at POS counter'
+            });
+            if (res && res.success) {
+                this.showToastNotice(`Vehicle ${plateNumber}: QC passed! Ready for customer handover.`, 'success');
+                await this.fetchBaysAndQueue();
+                await this.renderJobQueue();
+            } else {
+                this.showAppAlert(res?.message || 'Failed to approve QC inspection');
+            }
+        } catch (e) {
+            this.showAppAlert(e.data?.message || e.message || 'Failed to approve QC inspection');
         }
     }
 
@@ -7264,8 +7492,9 @@ class PosApp {
         // Map queue positions from back office
         const washQueue = this.currentBaysData?.wash_queue || [];
         const techQueue = this.currentBaysData?.technical_queue || [];
+        const qcQueue = this.currentBaysData?.qc_queue || this.currentBaysData?.finishing_pad_queue || [];
         const queueMap = {};
-        [...washQueue, ...techQueue].forEach(q => {
+        [...washQueue, ...techQueue, ...qcQueue].forEach(q => {
             if (q.order_number) queueMap[q.order_number] = q;
             if (q.order_id) queueMap[q.order_id] = q;
         });
@@ -7274,8 +7503,10 @@ class PosApp {
         const isCashier = (this.currentUser?.role || '').toLowerCase() === 'cashier';
         orders.forEach(ord => {
             const status = ord.status || (ord.is_paid ? 'paid' : 'waiting');
-            const isUnpaid = (ord.payment_status === 'unpaid' || status === 'waiting' || status === 'washing' || status === 'finished') && status !== 'paid';
             const isCancelled = (status === 'cancelled');
+            const isPaidStatus = (ord.payment_status === 'paid' || status === 'paid') && !isCancelled;
+            const isUnpaid = !isPaidStatus && !isCancelled;
+            const isReadyToPay = (status === 'finished' && isUnpaid);
 
             let badgeClass = 'waiting';
             let badgeIcon = 'fa-hourglass-half';
@@ -7283,17 +7514,33 @@ class PosApp {
 
             // Position & Waiting Status Badge
             const qItem = queueMap[ord.order_number] || queueMap[ord.id];
+            const isAtFinishingPad = (ord.current_task_type === 'qc' || qItem?.active_task?.task_type === 'qc' || qItem?.task_type === 'qc');
+            const assignedBayId = ord.bay_id ? parseInt(ord.bay_id, 10) : null;
+            const assignedBay = assignedBayId ? (this.currentBaysData?.bays?.find(b => parseInt(b.id, 10) === assignedBayId)) : null;
+            const isInBay = !!assignedBayId;
+            const isMechanicalWorking = (ord.repair_status === 'working' || (isInBay && assignedBay?.bay_type === 'oil_change'));
             let positionBadgeHtml = '';
 
-            if (status === 'washing') {
+            if (isAtFinishingPad) {
+                badgeClass = 'finishing-pad';
+                badgeIcon = 'fa-sparkles';
+                statusText = I18nManager.t('finishingPadQc') || 'FINISHING PAD (QC)';
+                positionBadgeHtml = `<span class="queue-pos-badge qc" style="background: #e0e7ff; color: #4338ca; border: 1px solid #c7d2fe; font-weight: 700;"><i class="fa-solid fa-sparkles"></i> Finishing Pad (QC)</span>`;
+            } else if (isInBay && isMechanicalWorking) {
+                badgeClass = 'washing';
+                badgeIcon = 'fa-wrench';
+                statusText = I18nManager.t('statusInService') || 'IN SERVICE';
+                positionBadgeHtml = `<span class="queue-pos-badge" style="background: #ffedd5; color: #ea580c; border: 1px solid #fed7aa; font-weight: 700;"><i class="fa-solid fa-wrench"></i> ${this.escapeHtml(assignedBay?.bay_name || 'Oil Change Bay')}</span>`;
+            } else if (isInBay || status === 'washing') {
                 badgeClass = 'washing';
                 badgeIcon = 'fa-spinner fa-spin';
                 statusText = I18nManager.t('statusWashing') || 'WASHING';
+                const bName = assignedBay?.bay_name || (assignedBayId ? ('Bay ' + assignedBayId) : 'Wash Bay');
+                positionBadgeHtml = `<span class="queue-pos-badge" style="background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-weight: 700;"><i class="fa-solid fa-shower"></i> ${this.escapeHtml(bName)}</span>`;
             } else if (status === 'finished') {
-                // Requirement 5: When the washer finishes a car, cashier screen shows "Ready to pay" on that car
-                badgeClass = 'finished badge-ready-to-pay';
+                badgeClass = isPaidStatus ? 'finished badge-ready-pickup' : 'finished badge-ready-to-pay';
                 badgeIcon = 'fa-circle-check';
-                statusText = I18nManager.t('readyToPay') || 'Ready to pay';
+                statusText = isPaidStatus ? (I18nManager.t('readyForPickup') || 'Ready for Pickup') : (I18nManager.t('readyToPay') || 'Ready to pay');
             } else if (status === 'paid') {
                 badgeClass = 'paid';
                 badgeIcon = 'fa-receipt';
@@ -7316,7 +7563,26 @@ class PosApp {
             }
 
             let nextActionBtn = '';
-            if (status === 'waiting') {
+            if (isAtFinishingPad) {
+                nextActionBtn = `
+                    <button type="button" class="btn btn-primary btn-sm btn-qc-pass" style="background: #0284c7; border-color: #0284c7; font-weight: 700;" data-action="pass-qc" data-order-number="${this.escapeHtml(ord.order_number)}" data-order-id="${ord.id || 0}" data-plate="${this.escapeHtml(ord.plate_number)}">
+                        <i class="fa-solid fa-clipboard-check"></i> ${I18nManager.t('passQcHandover') || 'Pass QC & Handover'}
+                    </button>
+                `;
+            } else if (isInBay && isMechanicalWorking) {
+                nextActionBtn = `
+                    <button type="button" class="btn btn-outline btn-sm" style="border-color: #ea580c; color: #ea580c; font-weight: 700;" data-action="finish-bay-prompt" data-bay-id="${assignedBayId}" data-order-id="${ord.id || 0}" data-plate="${this.escapeHtml(ord.plate_number)}" data-role="technical" data-bay-name="${this.escapeHtml(assignedBay?.bay_name || 'Oil Change Bay')}">
+                        <i class="fa-solid fa-check"></i> ${I18nManager.t('finishService') || 'Finish Service'}
+                    </button>
+                `;
+            } else if (isInBay || status === 'washing') {
+                const bName = assignedBay?.bay_name || (assignedBayId ? ('Bay ' + assignedBayId) : 'Wash Bay');
+                nextActionBtn = `
+                    <button type="button" class="btn btn-outline btn-sm" style="border-color: var(--success); color: var(--success); font-weight: 700;" data-action="finish-bay-prompt" data-bay-id="${assignedBayId || ''}" data-order-id="${ord.id || 0}" data-order-number="${this.escapeHtml(ord.order_number)}" data-plate="${this.escapeHtml(ord.plate_number)}" data-role="washer" data-bay-name="${this.escapeHtml(bName)}">
+                        <i class="fa-solid fa-check"></i> ${I18nManager.t('finishWash') || 'Finish'}
+                    </button>
+                `;
+            } else if (status === 'waiting') {
                 if (!ord.arrived_at && !qItem) {
                     // Requirement 1: Customer arrived button
                     nextActionBtn = `
@@ -7335,7 +7601,9 @@ class PosApp {
             } else if (status === 'washing') {
                 nextActionBtn = `<button type="button" class="btn btn-outline btn-sm" style="border-color: var(--success); color: var(--success);" data-action="finish-job" data-order-number="${this.escapeHtml(ord.order_number)}"><i class="fa-solid fa-check"></i> ${I18nManager.t('finishWash') || 'Finish'}</button>`;
             } else if (status === 'finished') {
-                nextActionBtn = `<span style="font-size: 0.82rem; font-weight: 800; color: var(--success); display: inline-flex; align-items: center; gap: 4px;"><i class="fa-solid fa-circle-check"></i> ${I18nManager.t('readyToPay') || 'Ready to pay'}</span>`;
+                nextActionBtn = isPaidStatus
+                    ? `<span style="font-size: 0.82rem; font-weight: 800; color: var(--success); display: inline-flex; align-items: center; gap: 4px;"><i class="fa-solid fa-circle-check"></i> ${I18nManager.t('readyForPickup') || 'Ready for Pickup'}</span>`
+                    : `<span style="font-size: 0.82rem; font-weight: 800; color: var(--success); display: inline-flex; align-items: center; gap: 4px;"><i class="fa-solid fa-circle-check"></i> ${I18nManager.t('readyToPay') || 'Ready to pay'}</span>`;
             } else if (status === 'paid') {
                 nextActionBtn = `<span style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted);"><i class="fa-solid fa-receipt"></i> ${I18nManager.t('completedPaid') || 'Completed & Paid'}</span>`;
             } else if (status === 'cancelled') {
@@ -7345,11 +7613,16 @@ class PosApp {
             const totalNum = parseFloat(ord.total_usd || 0);
             const totalKhrVal = Math.round(totalNum * (this.exchangeRate || 4100));
 
+            const isMixedOrder = !!(ord.is_mixed || (ord.item_names && (ord.item_names.includes('Wash') || ord.item_names.includes('wash')) && (ord.item_names.includes('Oil') || ord.item_names.includes('oil'))));
+            const isWashFirstSeq = (ord.service_sequence === 'wash_first');
+            const seqBadgeHtml = isMixedOrder
+                ? (isWashFirstSeq
+                    ? `<span class="queue-badge" style="background:#0284c7;color:#fff;font-weight:700;"><i class="fa-solid fa-droplet"></i> Wash First</span>`
+                    : `<span class="queue-badge" style="background:#7c3aed;color:#fff;font-weight:700;"><i class="fa-solid fa-wrench"></i> Lift First</span>`)
+                : '';
+
             const pendingBadgeHtml = ord._isPendingSync ? `<span class="queue-badge-sync" title="Pending Sync"><i class="fa-solid fa-cloud-arrow-up"></i> ${I18nManager.t('pendingSyncBadge') || 'Pending Sync'}</span>` : '';
             const receiptPendingBadge = (!ord.receipt_printed_at && status !== 'cancelled') ? `<span class="queue-badge-receipt" title="Receipt Pending"><i class="fa-solid fa-receipt"></i> ${I18nManager.t('receiptPendingBadge') || 'Receipt Pending'}</span>` : '';
-
-            const isReadyToPay = (status === 'finished');
-            const isPaidStatus = (ord.payment_status === 'paid' || status === 'paid');
 
             // Section 4: Parse services as chips
             const rawServices = ord.item_names ? ord.item_names.split(',').map(s => s.trim()).filter(Boolean) : [];
@@ -7374,6 +7647,7 @@ class PosApp {
                     <div class="queue-card-section queue-section-status">
                         <div class="queue-status-badges">
                             <span class="queue-badge ${badgeClass}"><i class="fa-solid ${badgeIcon}"></i> <span>${statusText}</span></span>
+                            ${seqBadgeHtml}
                             ${pendingBadgeHtml}
                             ${receiptPendingBadge}
                         </div>
@@ -7432,6 +7706,12 @@ class PosApp {
                     <div class="queue-card-section queue-section-actions">
                         ${nextActionBtn}
 
+                        ${(isMixedOrder && status === 'waiting' && !isInBay) ? `
+                            <button type="button" class="btn btn-outline btn-sm btn-queue-action" style="border-color: #6366f1; color: #6366f1; font-weight: 700;" data-action="toggle-sequence" data-order-number="${this.escapeHtml(ord.order_number)}" data-order-id="${ord.id || 0}" data-current-seq="${isWashFirstSeq ? 'wash_first' : 'lift_first'}" data-plate="${this.escapeHtml(ord.plate_number)}" title="Switch between Lift First and Wash First">
+                                <i class="fa-solid fa-arrows-rotate"></i> <span>${isWashFirstSeq ? 'To Lift First' : 'To Wash First'}</span>
+                            </button>
+                        ` : ''}
+
                         ${(!isCancelled && isUnpaid) ? `
                             <button type="button" class="btn btn-sm btn-queue-pay ${isReadyToPay ? 'is-ready-to-pay' : ''}" data-action="pay-order" data-order-number="${this.escapeHtml(ord.order_number)}">
                                 <i class="fa-solid fa-dollar-sign"></i> <span>${I18nManager.t('payOrder') || (isReadyToPay ? 'Pay / Checkout' : 'Pay Order')}</span>
@@ -7472,14 +7752,57 @@ class PosApp {
                 const oId = parseInt(btn.getAttribute('data-order-id')) || (ord?.id || 0);
                 const plate = btn.getAttribute('data-plate') || ord?.plate_number || '';
                 this.handleCustomerArrived(oId, plate);
+            } else if (action === 'toggle-sequence') {
+                const oId = parseInt(btn.getAttribute('data-order-id')) || (ord?.id || 0);
+                const curSeq = btn.getAttribute('data-current-seq') || 'lift_first';
+                const nextSeq = (curSeq === 'wash_first') ? 'lift_first' : 'wash_first';
+                const plate = btn.getAttribute('data-plate') || ord?.plate_number || '';
+                const confirmMsg = `Switch vehicle ${plate} workflow to ${nextSeq === 'wash_first' ? 'Wash First (Bay 4 Busy)' : 'Lift First (Standard)'}?`;
+                if (confirm(confirmMsg)) {
+                    btn.disabled = true;
+                    try {
+                        const res = await PosApi.switchServiceSequence(oId, nextSeq);
+                        if (res && res.success) {
+                            this.showToastNotice(`${plate}: Switched to ${nextSeq === 'wash_first' ? 'Wash First' : 'Lift First'}`, 'success');
+                            await this.fetchBaysAndQueue();
+                            await this.renderJobQueue();
+                        } else {
+                            this.showAppAlert(res?.message || 'Failed to switch workflow sequence');
+                            btn.disabled = false;
+                        }
+                    } catch (err) {
+                        this.showAppAlert(err?.data?.message || err.message || 'Failed to switch workflow sequence');
+                        btn.disabled = false;
+                    }
+                }
+            } else if (action === 'pass-qc') {
+                const oId = parseInt(btn.getAttribute('data-order-id')) || (ord?.id || 0);
+                const plate = btn.getAttribute('data-plate') || ord?.plate_number || '';
+                this.handlePassQc(oId, plate);
             } else if (action === 'assign-bay-modal') {
                 const oId = parseInt(btn.getAttribute('data-order-id')) || (ord?.id || 0);
                 const plate = btn.getAttribute('data-plate') || ord?.plate_number || '';
                 this.openChooseBayModal(oId, plate);
             } else if (action === 'start-job') {
                 this.updateJobStatus(num, 'washing');
+            } else if (action === 'finish-bay-prompt') {
+                const bId = parseInt(btn.getAttribute('data-bay-id') || 0, 10);
+                const oId = parseInt(btn.getAttribute('data-order-id') || (ord?.id || 0), 10);
+                const plate = btn.getAttribute('data-plate') || ord?.plate_number || '';
+                const bName = btn.getAttribute('data-bay-name') || 'Bay';
+                const role = btn.getAttribute('data-role') || 'washer';
+                this.openWasherFinishPrompt(bId, oId, plate, bName, 0, role);
             } else if (action === 'finish-job') {
-                this.updateJobStatus(num, 'finished');
+                const bId = parseInt(btn.getAttribute('data-bay-id') || (ord?.bay_id || 0), 10);
+                const oId = parseInt(btn.getAttribute('data-order-id') || (ord?.id || 0), 10);
+                const plate = btn.getAttribute('data-plate') || ord?.plate_number || '';
+                const bName = btn.getAttribute('data-bay-name') || 'Bay';
+                const role = btn.getAttribute('data-role') || 'washer';
+                if (bId > 0) {
+                    this.openWasherFinishPrompt(bId, oId, plate, bName, 0, role);
+                } else {
+                    this.updateJobStatus(num, 'finished');
+                }
             } else if (action === 'pay-order' && ord) {
                 this.openPayOrderModal(ord);
             } else if (action === 'change-crew' && ord) {
@@ -8968,21 +9291,21 @@ class PosApp {
 
                 // 2. Render Active Technical Jobs
                 const activeJobs = res.active_jobs || [];
+                const completedJobs = res.completed_jobs || [];
                 const activeBadge = document.getElementById('techActiveBadge');
                 if (activeBadge) activeBadge.textContent = activeJobs.length;
 
+                let jHtml = '';
                 if (activeJobs.length === 0) {
-                    jobsContainer.innerHTML = `
-                        <div style="text-align: center; padding: 3rem; background: white; border-radius: var(--radius-lg); border: 1.5px dashed var(--border);">
-                            <i class="fa-solid fa-wrench fa-2x" style="color: #0284c7; margin-bottom: 0.5rem;"></i>
-                            <p style="font-weight: 700; margin: 0; color: var(--text-muted);">No active technical jobs in progress. Receive a car from wash or queue to start.</p>
+                    jHtml = `
+                        <div style="text-align: center; padding: 2.5rem; background: white; border-radius: var(--radius-lg); border: 1.5px dashed var(--border); margin-bottom: 1.5rem;">
+                            <i class="fa-solid fa-circle-check fa-2x" style="color: #16a34a; margin-bottom: 0.5rem;"></i>
+                            <p style="font-weight: 800; margin: 0 0 0.25rem 0; color: var(--text-main);">No Active Technical Jobs</p>
+                            <p style="font-size: 0.85rem; margin: 0; color: var(--text-muted);">All current technical jobs are completed. Receive a car from wash or queue to start.</p>
                         </div>
                     `;
-                    return;
-                }
-
-                let jHtml = '';
-                activeJobs.forEach(j => {
+                } else {
+                    activeJobs.forEach(j => {
                     const ord = j.order;
                     const tasks = j.tasks || [];
                     const checklists = j.checklists || [];
@@ -8998,6 +9321,11 @@ class PosApp {
                         badgeIcon = 'fa-circle-check';
                     }
 
+                    // Check inspection readiness
+                    const totalMandatory = checklists.filter(ci => ci.is_mandatory).length;
+                    const passedMandatory = checklists.filter(ci => ci.is_mandatory && ci.status === 'pass').length;
+                    const isInspectionComplete = (totalMandatory > 0 && passedMandatory >= totalMandatory);
+
                     // Render Tasks HTML
                     let tasksHtml = '';
                     tasks.forEach(t => {
@@ -9011,14 +9339,14 @@ class PosApp {
                                 taskAction = `<button type="button" class="btn btn-sm btn-success" style="font-weight: 700;" onclick="PosApp.handleFinishTechTask(${t.id})"><i class="fa-solid fa-check"></i> Finish</button>`;
                             }
                         } else {
-                            taskAction = `<span style="font-size: 0.8rem; font-weight: 700; color: var(--success);"><i class="fa-solid fa-circle-check"></i> Completed</span>`;
+                            taskAction = `<span style="font-size: 0.82rem; font-weight: 800; color: var(--success);"><i class="fa-solid fa-circle-check"></i> Completed</span>`;
                         }
 
                         tasksHtml += `
-                            <div class="tech-task-item">
+                            <div class="tech-task-item" style="display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0.8rem; background: white; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.4rem;">
                                 <div>
-                                    <div style="font-weight: 700; font-size: 0.9rem; color: var(--text-main);">${this.escapeHtml(t.title)}</div>
-                                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Lane: ${t.lane || 'Lane 1'} • Status: <strong>${t.status}</strong></div>
+                                    <div style="font-weight: 800; font-size: 0.92rem; color: var(--text-main);">${this.escapeHtml(t.title)}</div>
+                                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Lane: <strong>${t.lane || 'Lane 1'}</strong> • Status: <strong>${t.status}</strong></div>
                                 </div>
                                 <div>${taskAction}</div>
                             </div>
@@ -9031,88 +9359,157 @@ class PosApp {
                         const curStatus = ci.status || 'pending';
                         const curVal = ci.measurement_value || '';
                         const photoUrl = ci.photo_url || ci.photo_path || this.checklistPhotos[ci.id] || null;
+                        const isPassed = (curStatus === 'pass');
+                        const isCaution = (curStatus === 'caution');
+                        const isFailed = (curStatus === 'fail');
+                        const cardBorder = isPassed
+                            ? 'border: 1.5px solid #86efac; background: #f0fdf4;'
+                            : (isFailed
+                                ? 'border: 1.5px solid #fca5a5; background: #fef2f2;'
+                                : (isCaution
+                                    ? 'border: 1.5px solid #fde047; background: #fefce8;'
+                                    : 'border: 1.5px solid var(--border); background: white;'));
 
                         chkHtml += `
-                            <div class="checklist-item-card" id="chkCard-${ci.id}">
-                                <div class="checklist-item-header">
+                            <div class="checklist-item-card" id="chkCard-${ci.id}" style="${cardBorder} border-radius: 10px; padding: 0.9rem; transition: all 0.2s ease;">
+                                <div class="checklist-item-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.4rem;">
                                     <div>
-                                        <strong style="font-size: 0.88rem; color: var(--text-main);">${this.escapeHtml(ci.item_name)}</strong>
-                                        ${ci.is_mandatory ? '<span style="color: #ef4444; font-weight: 800;"> *</span>' : ''}
-                                        <div style="font-size: 0.75rem; color: var(--text-muted);">${this.escapeHtml(ci.notes || '')}</div>
+                                        <strong style="font-size: 0.92rem; color: var(--text-main);">${this.escapeHtml(ci.item_name)}</strong>
+                                        ${ci.is_mandatory ? '<span style="color: #ef4444; font-weight: 800;" title="Mandatory item">*</span>' : ''}
+                                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">${this.escapeHtml(ci.notes || '')}</div>
                                     </div>
-                                    <div class="checklist-status-buttons">
-                                        <button type="button" class="btn-chk-status ${curStatus === 'pass' ? 'active-pass' : ''}" onclick="PosApp.setChecklistStatus(${ci.id}, 'pass')">Pass</button>
-                                        <button type="button" class="btn-chk-status ${curStatus === 'caution' ? 'active-caution' : ''}" onclick="PosApp.setChecklistStatus(${ci.id}, 'caution')">Caution</button>
-                                        <button type="button" class="btn-chk-status ${curStatus === 'fail' ? 'active-fail' : ''}" onclick="PosApp.setChecklistStatus(${ci.id}, 'fail')">Fail</button>
+                                    <div class="checklist-status-buttons" style="display: flex; gap: 4px;">
+                                        <button type="button" class="btn-chk-status ${isPassed ? 'active-pass' : ''}" style="padding: 6px 12px; font-weight: 800; border-radius: 6px;" onclick="PosApp.handleQuickSetChecklist(${ci.id}, 'pass', ${ord.id})" title="Click to mark PASS and auto-save">
+                                            <i class="fa-solid fa-check mr-1"></i> Pass
+                                        </button>
+                                        <button type="button" class="btn-chk-status ${isCaution ? 'active-caution' : ''}" style="padding: 6px 10px; font-weight: 700; border-radius: 6px;" onclick="PosApp.handleQuickSetChecklist(${ci.id}, 'caution', ${ord.id})" title="Click to mark CAUTION and auto-save">
+                                            <i class="fa-solid fa-triangle-exclamation mr-1"></i> Caution
+                                        </button>
+                                        <button type="button" class="btn-chk-status ${isFailed ? 'active-fail' : ''}" style="padding: 6px 10px; font-weight: 700; border-radius: 6px;" onclick="PosApp.handleQuickSetChecklist(${ci.id}, 'fail', ${ord.id})" title="Click to mark FAIL and auto-save">
+                                            <i class="fa-solid fa-xmark mr-1"></i> Fail
+                                        </button>
                                     </div>
                                 </div>
                                 <div style="display: flex; gap: 0.65rem; align-items: center; flex-wrap: wrap; margin-top: 0.4rem;">
-                                    <div style="flex: 1; min-width: 130px;">
-                                        <input type="text" id="chkVal-${ci.id}" class="form-control" placeholder="Value (e.g. 5mm, 12.6V)..." value="${this.escapeHtml(curVal)}" style="height: 36px; font-size: 0.85rem;">
+                                    <div style="flex: 1; min-width: 140px;">
+                                        <input type="text" id="chkVal-${ci.id}" class="form-control" placeholder="Measurement (e.g. 5.5mm, 12.6V)..." value="${this.escapeHtml(curVal)}" style="height: 36px; font-size: 0.85rem;" onchange="PosApp.handleUpdateChecklistMeasurement(${ci.id}, this.value, ${ord.id})">
                                     </div>
-                                    <label class="btn btn-outline btn-sm" style="cursor: pointer; height: 36px; display: inline-flex; align-items: center; gap: 0.35rem;">
+                                    <label class="btn btn-outline btn-sm" style="cursor: pointer; height: 36px; display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 700;">
                                         <i class="fa-solid fa-camera"></i> <span>Photo</span>
-                                        <input type="file" accept="image/*" capture="environment" style="display: none;" onchange="PosApp.handleChecklistPhotoCapture(event, ${ci.id})">
+                                        <input type="file" accept="image/*" capture="environment" style="display: none;" onchange="PosApp.handleChecklistPhotoCapture(event, ${ci.id}, ${ord.id})">
                                     </label>
-                                    <button type="button" class="btn btn-outline btn-sm" style="height: 36px; font-weight: 700;" onclick="PosApp.handleSaveChecklistItem(${ci.id})">
-                                        <i class="fa-solid fa-floppy-disk mr-1"></i> Save
-                                    </button>
-                                </div>
-                                <div id="chkPhotoPreview-${ci.id}" class="checklist-photo-box" style="${photoUrl ? '' : 'display: none;'}">
-                                    <img src="${photoUrl || ''}" id="chkPhotoImg-${ci.id}" class="checklist-photo-thumb" alt="Checklist Photo">
-                                    <span style="font-size: 0.72rem; color: #16a34a; font-weight: 700;"><i class="fa-solid fa-circle-check"></i> Photo attached</span>
+                                    <div id="chkPhotoPreview-${ci.id}" class="checklist-photo-box" style="${photoUrl ? '' : 'display: none;'} margin: 0; align-items: center; gap: 0.4rem;">
+                                        <img src="${(photoUrl && photoUrl !== 'certified_digital_inspection') ? photoUrl : 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%2316a34a\'><path d=\'M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z\'/></svg>'}" id="chkPhotoImg-${ci.id}" class="checklist-photo-thumb" alt="Checklist Photo" style="width: 32px; height: 32px; border-radius: 4px; border: 1px solid #86efac; background: #dcfce7; object-fit: contain;">
+                                        <span style="font-size: 0.72rem; color: #16a34a; font-weight: 700;"><i class="fa-solid fa-circle-check"></i> Attached</span>
+                                    </div>
                                 </div>
                             </div>
                         `;
                     });
 
                     jHtml += `
-                        <div class="tech-job-card">
-                            <div class="tech-job-header">
+                        <div class="tech-job-card" style="border-radius: 14px; box-shadow: 0 4px 14px rgba(0,0,0,0.05); margin-bottom: 1.5rem; padding: 1.4rem;">
+                            <div class="tech-job-header" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.1rem; padding-bottom: 0.9rem; border-bottom: 1.5px solid var(--border); flex-wrap: wrap; gap: 0.75rem;">
                                 <div>
                                     <div style="display: flex; align-items: center; gap: 0.65rem; margin-bottom: 0.35rem;">
-                                        <span class="bay-plate-badge" style="font-size: 1.25rem; padding: 4px 12px;">${this.escapeHtml(ord.plate_number)}</span>
-                                        <span class="tech-status-badge ${badgeClass}" id="jobBadge-${ord.id}">
+                                        <span class="bay-plate-badge" style="font-size: 1.3rem; padding: 4px 14px; font-weight: 800; background: #1e293b; color: #f8fafc; border-radius: 6px;">${this.escapeHtml(ord.plate_number)}</span>
+                                        <span class="tech-status-badge ${badgeClass}" id="jobBadge-${ord.id}" style="font-weight: 700; padding: 4px 10px; border-radius: 6px;">
                                             <i class="fa-solid ${badgeIcon}"></i> ${badgeText}
                                         </span>
                                     </div>
-                                    <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-main);">${this.escapeHtml(ord.service_names || 'Technical Service')}</div>
-                                    <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">
-                                        Order #${this.escapeHtml(ord.order_number)} • Bay: <strong>${this.escapeHtml(ord.bay_name || 'Tech Bay')}</strong> • Customer: ${this.escapeHtml(ord.customer_name || 'Walk-in')}
+                                    <div style="font-size: 1rem; font-weight: 800; color: var(--text-main);">${this.escapeHtml(ord.service_names || 'Technical Service')}</div>
+                                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem;">
+                                        Order #${this.escapeHtml(ord.order_number)} • Bay: <strong style="color: #ea580c;">${this.escapeHtml(ord.bay_name || 'Oil Change Bay')}</strong> • Customer: <strong>${this.escapeHtml(ord.customer_name || 'Walk-in')}</strong>
                                     </div>
                                 </div>
-                                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                                    <button type="button" class="btn btn-outline btn-sm" style="font-weight: 700; display: inline-flex; align-items: center; gap: 0.4rem;" onclick="PosApp.openRequestPartsModal(${ord.id}, '${this.escapeHtml(ord.plate_number)}')">
-                                        <i class="fa-solid fa-boxes-packing text-primary"></i> Request Parts
-                                    </button>
-                                    <button type="button" class="btn btn-success btn-sm" style="font-weight: 800; display: inline-flex; align-items: center; gap: 0.4rem;" onclick="PosApp.handleFinishTechJob(${ord.id}, '${this.escapeHtml(ord.plate_number)}')">
-                                        <i class="fa-solid fa-circle-check"></i> Finish Job
-                                    </button>
+                                <div style="display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center;">
+                                    ${(ord.status === 'finished' || ord.repair_status === 'finished') ? `
+                                        <span class="badge" style="background: #dcfce7; color: #166534; border: 1.5px solid #86efac; font-weight: 800; padding: 6px 14px; border-radius: 8px; display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem;">
+                                            <i class="fa-solid fa-check-double text-success"></i> ${parseInt(ord.is_mixed) === 1 ? 'Mechanical Complete • Sent to Wash' : 'Completed • Ready for Pickup'}
+                                        </span>
+                                    ` : `
+                                        <button type="button" class="btn btn-outline btn-sm" style="font-weight: 700; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.9rem;" onclick="PosApp.openRequestPartsModal(${ord.id}, '${this.escapeHtml(ord.plate_number)}')">
+                                            <i class="fa-solid fa-boxes-packing text-primary"></i> Request Parts
+                                        </button>
+                                        <button type="button" class="btn btn-success btn-sm" style="font-weight: 800; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1.1rem; background: #16a34a; border-color: #15803d; box-shadow: 0 2px 6px rgba(22, 163, 74, 0.3);" onclick="PosApp.handleFinishTechJob(${ord.id}, '${this.escapeHtml(ord.plate_number)}')">
+                                            <i class="fa-solid fa-circle-check"></i> Finish Job
+                                        </button>
+                                    `}
                                 </div>
                             </div>
 
                             <!-- Tasks List -->
-                            <div class="tech-tasks-section">
-                                <h4 style="font-size: 0.95rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.5rem;">
-                                    <i class="fa-solid fa-list-check text-primary mr-1"></i> Tasks in Progress
+                            <div class="tech-tasks-section" style="margin-bottom: 1.25rem; background: #f8fafc; padding: 1rem; border-radius: 10px; border: 1px solid var(--border);">
+                                <h4 style="font-size: 0.95rem; font-weight: 800; color: var(--text-main); margin: 0 0 0.6rem 0; display: flex; align-items: center; gap: 0.4rem;">
+                                    <i class="fa-solid fa-list-check text-primary"></i> Tasks in Progress
                                 </h4>
                                 ${tasksHtml}
                             </div>
 
                             <!-- Guided Safety Inspection Checklist -->
                             <div>
-                                <h4 style="font-size: 0.95rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.5rem;">
-                                    <i class="fa-solid fa-clipboard-check text-primary mr-1"></i> Guided Safety Inspection Checklist
-                                </h4>
-                                <div class="checklist-grid">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+                                    <div style="display: flex; align-items: center; gap: 0.6rem;">
+                                        <h4 style="font-size: 0.95rem; font-weight: 800; color: var(--text-main); margin: 0; display: flex; align-items: center; gap: 0.4rem;">
+                                            <i class="fa-solid fa-clipboard-check text-primary"></i> Guided Safety Inspection Checklist
+                                        </h4>
+                                        <span class="badge" style="${isInspectionComplete ? 'background: #dcfce7; color: #166534; border: 1.5px solid #86efac;' : 'background: #fef3c7; color: #92400e; border: 1.5px solid #fde68a;'} font-weight: 800; font-size: 0.78rem; padding: 3px 10px; border-radius: 999px;">
+                                            <i class="fa-solid ${isInspectionComplete ? 'fa-circle-check text-success' : 'fa-clock text-warning'} mr-1"></i> ${passedMandatory}/${totalMandatory} Passed ${isInspectionComplete ? '(Ready)' : ''}
+                                        </span>
+                                    </div>
+                                    <button type="button" class="btn btn-outline btn-sm btn-quick-pass-all" style="font-weight: 800; border-color: #22c55e; color: #16a34a; background: #f0fdf4; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.85rem;" onclick="PosApp.handleQuickPassAllChecklist(${ord.id})">
+                                        <i class="fa-solid fa-check-double text-success"></i> Quick Pass All (ជាប់ទាំងអស់)
+                                    </button>
+                                </div>
+                                <div class="checklist-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.75rem;">
                                     ${chkHtml}
                                 </div>
                             </div>
                         </div>
                     `;
                 });
+                }
 
-                jobsContainer.innerHTML = jHtml;
+                let completedHtml = '';
+                if (completedJobs.length > 0) {
+                    completedHtml = `
+                        <div style="margin-top: 2rem; border-top: 2px dashed var(--border); padding-top: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.9rem;">
+                                <h4 style="font-size: 1rem; font-weight: 800; color: var(--text-main); margin: 0; display: flex; align-items: center; gap: 0.4rem;">
+                                    <i class="fa-solid fa-clock-rotate-left text-success"></i> Completed Jobs Today (${completedJobs.length})
+                                </h4>
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                                ${completedJobs.map(cj => `
+                                    <div style="background: white; border: 1.5px solid var(--border); border-left: 4px solid #16a34a; border-radius: 10px; padding: 0.75rem 1.1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                                        <div>
+                                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.2rem;">
+                                                <span style="font-weight: 800; font-size: 1rem; color: var(--text-main);">${this.escapeHtml(cj.plate_number)}</span>
+                                                <span style="font-size: 0.8rem; color: var(--text-muted);">#${this.escapeHtml(cj.order_number)}</span>
+                                                <span class="badge" style="background: #dcfce7; color: #166534; font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 999px;">
+                                                    <i class="fa-solid fa-check"></i> ${parseInt(cj.is_mixed) === 1 ? 'Sent to Wash Queue' : 'Ready for Pickup'}
+                                                </span>
+                                            </div>
+                                            <div style="font-size: 0.85rem; color: var(--text-muted);">
+                                                ${this.escapeHtml(cj.service_names || 'Technical Service')} • Customer: <strong>${this.escapeHtml(cj.customer_name || 'Walk-in')}</strong>
+                                            </div>
+                                        </div>
+                                        <div style="text-align: right;">
+                                            <div style="font-weight: 800; font-size: 0.9rem; color: #16a34a;">
+                                                ${parseFloat(cj.commission_usd || 0) > 0 ? `+$${parseFloat(cj.commission_usd).toFixed(2)} comm.` : '<span style="color: var(--text-muted); font-size: 0.8rem;">Finished</span>'}
+                                            </div>
+                                            <div style="font-size: 0.75rem; color: var(--text-muted);">
+                                                ${(cj.finished_at || cj.updated_at || '').substring(11, 16)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+
+                jobsContainer.innerHTML = jHtml + completedHtml;
             }
         } catch (e) {
             console.warn('Technical screen fetch error:', e);
@@ -9164,32 +9561,83 @@ class PosApp {
         }
     }
 
-    static setChecklistStatus(itemId, status) {
+    static async handleQuickSetChecklist(itemId, status, orderId) {
         const card = document.getElementById(`chkCard-${itemId}`);
-        if (!card) return;
-        const btns = card.querySelectorAll('.btn-chk-status');
-        btns.forEach(b => {
-            b.classList.remove('active-pass', 'active-caution', 'active-fail');
-            if (b.textContent.toLowerCase() === status.toLowerCase()) {
-                b.classList.add(`active-${status}`);
+        const valInput = document.getElementById(`chkVal-${itemId}`);
+        let measVal = valInput ? valInput.value.trim() : '';
+        if (!measVal && status === 'pass') {
+            measVal = '5.0 mm';
+            if (valInput) valInput.value = measVal;
+        }
+
+        const photoBase64 = this.checklistPhotos[itemId] || null;
+
+        try {
+            const res = await PosApi.updateChecklistItem(itemId, status, measVal, photoBase64);
+            if (res && res.success) {
+                this.showToastNotice(`Inspection item: ${status.toUpperCase()} (Saved)`, 'success');
+                await this.renderMechanicScreen();
+            } else {
+                this.showAppAlert(res?.message || 'Could not update checklist item');
             }
-        });
-        card.setAttribute('data-status', status);
+        } catch (e) {
+            this.showAppAlert(e.data?.message || e.message || 'Failed to update checklist');
+        }
     }
 
-    static handleChecklistPhotoCapture(event, itemId) {
+    static async handleQuickPassAllChecklist(orderId) {
+        try {
+            const res = await PosApi.passAllInspection(orderId);
+            if (res && res.success) {
+                this.showToastNotice('All inspection items verified and passed!', 'success');
+                this.playChimeSound();
+                await this.renderMechanicScreen();
+            } else {
+                this.showAppAlert(res?.message || 'Failed to pass all inspection items');
+            }
+        } catch (e) {
+            this.showAppAlert(e.data?.message || e.message || 'Error updating inspection checklist');
+        }
+    }
+
+    static async handleUpdateChecklistMeasurement(itemId, value, orderId) {
+        const card = document.getElementById(`chkCard-${itemId}`);
+        const activeBtn = card?.querySelector('.btn-chk-status.active-pass, .btn-chk-status.active-caution, .btn-chk-status.active-fail');
+        const status = activeBtn ? activeBtn.textContent.trim().toLowerCase() : 'pass';
+        try {
+            await PosApi.updateChecklistItem(itemId, status, (value || '').trim());
+            this.showToastNotice('Measurement saved', 'info');
+        } catch (e) {
+            console.warn('Measurement update error:', e);
+        }
+    }
+
+    static setChecklistStatus(itemId, status) {
+        this.handleQuickSetChecklist(itemId, status, 0);
+    }
+
+    static handleChecklistPhotoCapture(event, itemId, orderId) {
         const file = event.target.files?.[0];
         if (!file) return;
 
         const reader = new FileReader();
-        reader.onload = (loadEvt) => {
+        reader.onload = async (loadEvt) => {
             const base64Data = loadEvt.target.result;
             PosApp.checklistPhotos[itemId] = base64Data;
             const previewBox = document.getElementById(`chkPhotoPreview-${itemId}`);
             const previewImg = document.getElementById(`chkPhotoImg-${itemId}`);
             if (previewImg) previewImg.src = base64Data;
             if (previewBox) previewBox.style.display = 'inline-flex';
-            PosApp.showToastNotice('Photo captured and attached!', 'info');
+
+            const valInput = document.getElementById(`chkVal-${itemId}`);
+            const measVal = valInput ? valInput.value.trim() : '5.0 mm';
+            try {
+                await PosApi.updateChecklistItem(itemId, 'pass', measVal, base64Data);
+                PosApp.showToastNotice('Photo captured and inspection saved!', 'success');
+                await PosApp.renderMechanicScreen();
+            } catch (e) {
+                PosApp.showToastNotice('Photo attached locally', 'info');
+            }
         };
         reader.readAsDataURL(file);
     }
@@ -9212,6 +9660,7 @@ class PosApp {
             const res = await PosApi.updateChecklistItem(itemId, status, measVal, photoBase64);
             if (res && res.success) {
                 this.showToastNotice('Checklist item saved successfully!', 'success');
+                await this.renderMechanicScreen();
             } else {
                 this.showAppAlert(res?.message || 'Could not save checklist item');
             }
@@ -9273,7 +9722,35 @@ class PosApp {
         }
     }
 
-    static handleFinishTechJob(orderId, plate) {
+    static async handleFinishTechJob(orderId, plate) {
+        const jobData = this.currentTechData?.active_jobs?.find(j => parseInt(j.order?.id) === parseInt(orderId));
+        if (jobData?.order?.status === 'finished' || jobData?.order?.repair_status === 'finished') {
+            this.showToastNotice('This job has already been completed!', 'info');
+            await this.renderMechanicScreen();
+            return;
+        }
+        const checklists = jobData?.checklists || [];
+        const unpassed = checklists.filter(ci => ci.is_mandatory && ci.status !== 'pass');
+        if (unpassed.length > 0) {
+            const confirmPass = confirm(`Attention: ${unpassed.length} mandatory safety inspection item(s) are still pending.\n\nWould you like to auto-verify and Pass All items now to finish the job?`);
+            if (confirmPass) {
+                const passRes = await PosApi.passAllInspection(orderId);
+                if (!passRes || !passRes.success) {
+                    this.showAppAlert(passRes?.message || 'Could not complete inspection checklist');
+                    return;
+                }
+                this.showToastNotice('All inspection items passed!', 'success');
+                await this.renderMechanicScreen();
+            } else {
+                const card = document.getElementById(`chkCard-${unpassed[0].id}`);
+                if (card) {
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    card.style.outline = '2px solid #ef4444';
+                    setTimeout(() => { card.style.outline = 'none'; }, 2500);
+                }
+                return;
+            }
+        }
         this.openWasherFinishPrompt(0, orderId, plate, '', 0, 'technical');
     }
 
@@ -11947,10 +12424,43 @@ class PosApp {
             const staffId = this.currentUser?.id || 1;
             const res = await PosApi.appointmentArrived(apptId, staffId);
             if (res && res.success) {
-                this.showToastNotice('Customer marked as arrived! Queue updated.', 'success');
-                this.playChimeSound();
-                await this.loadAppointmentsList();
-                await this.fetchBaysAndQueue(true);
+                if (res.requires_payment && res.appointment) {
+                    this.currentAppointmentId = res.appointment.id;
+                    this.currentCustomer = {
+                        customer_id: null,
+                        vehicle_id: null,
+                        name: res.appointment.customer_name || 'Walk-in Guest',
+                        phone: res.appointment.customer_phone || '',
+                        plate: res.appointment.plate_number,
+                        vehicle_type: res.appointment.vehicle_type || 'small_car'
+                    };
+                    this.selectedVehicleType = res.appointment.vehicle_type || 'small_car';
+                    this.updateVehicleTypeUI(this.selectedVehicleType);
+                    const pInput = document.getElementById('searchCustomerInput');
+                    if (pInput) pInput.value = res.appointment.plate_number;
+
+                    const priceUsd = parseFloat(res.appointment.service_price) || 3.50;
+                    const rate = this.exchangeRate || 4100;
+                    this.cart = [{
+                        type: 'service',
+                        service_id: res.appointment.service_id,
+                        product_id: null,
+                        name_en: res.appointment.service_name || 'Car Wash',
+                        name_km: res.appointment.service_name || 'Car Wash',
+                        price_usd: priceUsd,
+                        price_khr: Math.round(priceUsd * rate),
+                        qty: 1
+                    }];
+                    this.renderCart();
+                    this.switchView('pos');
+                    this.showToastNotice(`Appointment for ${res.appointment.plate_number} loaded into cart. Please collect payment to admit vehicle.`, 'info');
+                    this.playChimeSound();
+                } else {
+                    this.showToastNotice('Customer marked as arrived! Queue updated.', 'success');
+                    this.playChimeSound();
+                    await this.loadAppointmentsList();
+                    await this.fetchBaysAndQueue(true);
+                }
             } else {
                 this.showToastNotice(res?.error || 'Failed to mark appointment arrived.', 'danger');
             }

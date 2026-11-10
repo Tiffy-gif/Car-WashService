@@ -61,19 +61,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         }
     }
 
-    // 2. Receive from Wash Handshake
-    elseif ($action === 'receive_from_wash') {
-        $bayId = (int)($_POST['bay_id'] ?? 4);
-        $res = BayManager::receiveFromWash($pdo, $orderId, $bayId, (int)$mechanic['id'], $mechanic['full_name'] ?? 'Mechanic', 'mechanic');
-        if (!empty($res['success'])) {
-            TechnicalManager::ensureJobOrder($pdo, $orderId, (int)$mechanic['id'], $mechanic['full_name'] ?? 'Mechanic');
-            $message = $res['message'];
-            $messageType = 'success';
-        } else {
-            $message = $res['message'] ?? 'Could not receive vehicle.';
-            $messageType = 'danger';
-        }
-    }
 
     // 3. Start Specific Task in Lane
     elseif ($action === 'start_task') {
@@ -224,8 +211,16 @@ $jobsStmt = $pdo->prepare("
     SELECT o.*, om.commission_usd,
            COALESCE(o.repair_status, o.status) as current_job_status
     FROM orders o
-    JOIN order_mechanics om ON o.id = om.order_id
-    WHERE om.mechanic_id = ?
+    LEFT JOIN order_mechanics om ON o.id = om.order_id AND om.mechanic_id = ?
+    LEFT JOIN bays b ON o.bay_id = b.id
+    WHERE o.status NOT IN ('cancelled')
+      AND (
+          om.mechanic_id = ?
+          OR o.bay_id IN (SELECT id FROM bays WHERE bay_type = 'oil_change')
+          OR o.repair_status IN ('waiting_tech', 'working')
+          OR o.id IN (SELECT DISTINCT order_id FROM order_tasks WHERE task_type = 'oil_change' AND status IN ('in_progress', 'waiting', 'pending_prereq', 'ready_for_tech'))
+      )
+    GROUP BY o.id
     ORDER BY CASE COALESCE(o.repair_status, o.status)
         WHEN 'working' THEN 1
         WHEN 'waiting' THEN 2
@@ -233,7 +228,7 @@ $jobsStmt = $pdo->prepare("
         WHEN 'paid' THEN 4
         ELSE 5 END, o.id DESC
 ");
-$jobsStmt->execute([$mechanicId]);
+$jobsStmt->execute([$mechanicId, $mechanicId]);
 $jobs = $jobsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Pre-load Job Orders and simultaneous lanes for each active job
@@ -303,18 +298,6 @@ foreach ($allBays as $b) {
 $queues = BayManager::getQueues($pdo);
 $techQueue = $queues['technical_queue'];
 
-// Fetch incoming transferred cars from wash
-$transferredTasks = $pdo->query("
-    SELECT ot.*, o.order_number, o.plate_number, o.vehicle_type, o.customer_name, o.customer_phone,
-           GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ') as service_names
-    FROM order_tasks ot
-    JOIN orders o ON ot.order_id = o.id
-    LEFT JOIN order_items oi ON o.id = oi.order_id
-    WHERE ot.status = 'ready_for_tech' AND ot.task_type = 'oil_change'
-    GROUP BY ot.id
-    ORDER BY ot.updated_at ASC
-")->fetchAll(PDO::FETCH_ASSOC);
-
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
@@ -360,61 +343,6 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 <?php endif; ?>
 
-<!-- INCOMING TRANSFERRED CARS FROM WASH (MIXED ORDERS) -->
-<?php if (!empty($transferredTasks)): ?>
-    <div class="card" style="border-left: 5px solid #ea580c; background: #fff7ed; padding: 18px; margin-bottom: 24px; border-radius: var(--radius-md);">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <div style="width: 36px; height: 36px; border-radius: 8px; background: #ea580c; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px;">
-                    <i class="fa-solid fa-handshake"></i>
-                </div>
-                <div>
-                    <h3 style="font-size: 16px; font-weight: 800; color: #9a3412; margin: 0;">Transferred from Car Wash: Ready for Technical Service</h3>
-                    <div style="font-size: 12px; color: #c2410c;">These mixed-order cars have finished washing and are waiting for oil change / inspection.</div>
-                </div>
-            </div>
-            <span class="badge" style="background: #ea580c; color: #fff; font-weight: 800; font-size: 12px; padding: 4px 10px;">
-                <?= count($transferredTasks) ?> Waiting for Receive
-            </span>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-            <?php foreach ($transferredTasks as $tt): ?>
-                <div style="background: #fff; border: 1px solid #fed7aa; border-radius: var(--radius-sm); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <span style="font-family: var(--font-mono); font-size: 16px; font-weight: 800; background: #ffedd5; color: #9a3412; padding: 3px 10px; border-radius: 4px; border: 1px solid #fed7aa;">
-                            <?= htmlspecialchars($tt['plate_number']) ?>
-                        </span>
-                        <div>
-                            <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">
-                                Car <?= htmlspecialchars($tt['plate_number']) ?> waiting for Oil Change
-                            </div>
-                            <div class="text-xs text-muted" style="margin-top: 2px;">
-                                <?= htmlspecialchars($tt['service_names'] ?: 'Oil Change & Technical') ?> • Customer: <?= htmlspecialchars($tt['customer_name'] ?: 'Guest') ?>
-                            </div>
-                        </div>
-                    </div>
-
-                    <?php if ($oilBay && $oilBay['is_active'] && $oilBay['status'] === 'free'): ?>
-                        <form action="" method="POST" style="margin: 0;">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="action" value="receive_from_wash">
-                            <input type="hidden" name="order_id" value="<?= $tt['order_id'] ?>">
-                            <input type="hidden" name="bay_id" value="<?= $oilBay['id'] ?>">
-                            <button type="submit" class="btn btn-primary btn-sm" style="background: #ea580c; border-color: #ea580c; font-weight: 700;">
-                                <i class="fa-solid fa-handshake mr-1"></i> Receive from Wash (Put in <?= htmlspecialchars($oilBay['bay_name']) ?>)
-                            </button>
-                        </form>
-                    <?php else: ?>
-                        <button type="button" class="btn btn-secondary btn-sm" disabled title="Oil Bay is currently busy">
-                            <i class="fa-solid fa-hourglass-half mr-1"></i> Oil Bay Busy (Wait to Free)
-                        </button>
-                    <?php endif; ?>
-                </div>
-            <?php endforeach; ?>
-        </div>
-    </div>
-<?php endif; ?>
 
 <!-- ======================================================== -->
 <!-- 1. OIL CHANGE BAY & TECHNICAL QUEUE (FIFO) -->
@@ -904,7 +832,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                             </button>
                         <?php elseif ($status === 'finished'): ?>
                             <span class="text-xs" style="color: #16a34a; font-weight: 700;">
-                                <i class="fa-solid fa-check-double mr-1"></i> Ready for Cashier Checkout
+                                <i class="fa-solid fa-check-double mr-1"></i> <?= ((int)($job['is_mixed'] ?? 0) === 1) ? 'Mechanical Complete • Sent to Wash Queue' : 'Completed • Ready for Pickup' ?>
                             </span>
                         <?php elseif ($status === 'paid'): ?>
                             <span class="text-xs text-muted">

@@ -119,8 +119,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                     $proceedPayment = false;
                 } else {
                     $slipPath = $slipUpload['file_path'];
-                    if (empty($payRef)) {
-                        $payRef = 'TRX-' . strtoupper(substr(md5(uniqid()), 0, 8));
+                    if (empty($payRef) || strlen($payRef) < 4 || preg_match('/^TRX-[0-9A-F]{8}$/i', $payRef)) {
+                        $message = "Cannot process bank transfer: A genuine bank transaction reference (minimum 4 characters) is required. Synthetic TRX references are prohibited.";
+                        $messageType = 'danger';
+                        $proceedPayment = false;
                     }
 
                     // Update order with pending_verification (excluded from revenue reports until approved)
@@ -173,7 +175,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                         total_khr = ?,
                         payment_method = ?,
                         payment_status = 'paid',
-                        status = 'paid',
+                        receipt_issued_at = COALESCE(receipt_issued_at, CURRENT_TIMESTAMP),
                         amount_tendered_usd = ?,
                         change_usd = ?,
                         payment_ref = ?,
@@ -309,7 +311,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                 if ($newStatus === 'washing') {
                     $extraSql = ", started_at = COALESCE(started_at, CURRENT_TIMESTAMP)";
                 } elseif ($newStatus === 'paid') {
-                    $extraSql = ", paid_at = CURRENT_TIMESTAMP, payment_status = 'paid'";
+                    $extraSql = ", paid_at = CURRENT_TIMESTAMP, payment_status = 'paid', receipt_issued_at = COALESCE(receipt_issued_at, CURRENT_TIMESTAMP)";
                 }
 
                 $stmt = $pdo->prepare("UPDATE orders SET status = ? {$extraSql} WHERE id = ?");

@@ -41,8 +41,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action']) 
     }
 }
 
-// Handle New Order Submission
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_order' && !isset($csrfError)) {
+// Handle New Order Submission (Legacy route blocked - Rule 2.2)
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_order') {
+    $message = 'Pay Later and unpaid order creation is permanently decommissioned. All service orders must be paid upfront and issued an electronic receipt via the POS Counter Terminal (pos/index.html).';
+    $messageType = 'danger';
+} elseif (false && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action']) && $_POST['action'] === 'legacy_create_order' && !isset($csrfError)) {
     if (!empty($dayLock['locked'])) {
         $message = 'Cannot create order: ' . $dayLock['message'];
         $messageType = 'danger';

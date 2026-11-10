@@ -376,74 +376,85 @@
                 <!-- Left/Center: Catalog & Controls -->
                 <div class="pos-catalog-column">
 
-                    <!-- Search Row (spans product area + category column): Long Search Bar (Left) + Walk-in & New Customer (Right) -->
-                    <div class="pos-search-customer-row">
-                        <div class="search-box-wrap">
-                            <i class="fa-solid fa-magnifying-glass search-icon-left"></i>
-                            <input type="text" id="custSearchInput" class="search-input"
-                                placeholder="ស្វែងរកតាមស្លាកលេខ រថយន្ត លេខទូរស័ព្ទ..."
-                                data-i18n="searchCustomerPlate" autocomplete="off"
-                                oninput="if(window.PosApp) PosApp.handleGlobalSearch(this.value)">
-                            <!-- Saved Customers Button inside right end of search bar -->
-                            <button type="button" class="btn-saved-customers-icon" id="btnOpenSavedCustomers"
-                                title="Saved customers" data-i18n-title="savedCustomersTooltip"
-                                aria-label="Saved customers">
-                                <i class="fa-solid fa-users"></i>
-                            </button>
-                            <!-- Autocomplete Results Dropdown -->
-                            <div class="customer-dropdown" id="custDropdown"></div>
+                    <!-- Customer Intake Section (Task 1: Mandatory Plate & Vehicle Type, Optional Name/Phone, No Popups) -->
+                    <div class="pos-customer-intake-card" id="posCustomerIntakeCard">
+                        <div class="intake-inputs-row">
+                            <!-- License Plate Input (Mandatory) -->
+                            <div class="intake-field intake-plate-field">
+                                <label for="custPlateInput" class="intake-label">
+                                    <i class="fa-solid fa-id-card"></i> <span>ស្លាកលេខ / Plate #</span> <span class="required-star">*</span>
+                                </label>
+                                <div class="intake-input-wrap">
+                                    <input type="text" id="custPlateInput" class="intake-input plate-input"
+                                        placeholder="e.g. 2BC-1234" autocomplete="off" autocapitalize="characters" spellcheck="false">
+                                    <input type="hidden" id="custSearchInput" class="search-input">
+                                    <button type="button" class="btn-intake-icon" id="btnOpenSavedCustomers" title="Saved customers directory" aria-label="Saved customers">
+                                        <i class="fa-solid fa-address-book"></i>
+                                    </button>
+                                </div>
+                                <!-- Autocomplete Results Dropdown -->
+                                <div class="customer-dropdown" id="custDropdown"></div>
+                            </div>
 
-                            <!-- Saved Customers Dropdown Panel -->
-                            <div class="saved-customers-panel" id="panelSavedCustomers" style="display: none;">
-                                <div class="saved-cust-list-wrap" id="savedCustListWrap">
-                                    <!-- Loading State -->
-                                    <div id="savedCustLoading" style="display: none;" class="saved-cust-state-msg">
-                                        <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> <span data-i18n="loadingCustomers">Loading...</span>
-                                    </div>
+                            <!-- Customer Name Input (Optional: Defaults to Walk-in Guest) -->
+                            <div class="intake-field intake-name-field">
+                                <label for="custNameInput" class="intake-label">
+                                    <i class="fa-solid fa-user"></i> <span>ឈ្មោះ / Customer Name</span>
+                                </label>
+                                <input type="text" id="custNameInput" class="intake-input"
+                                    placeholder="Walk-in Guest" autocomplete="off">
+                            </div>
 
-                                    <!-- No Saved Customers / No Match State -->
-                                    <div id="savedCustNoMatch" style="display: none;" class="saved-cust-state-msg" data-i18n="noSavedCustomers">
-                                        No saved customers found
-                                    </div>
+                            <!-- Customer Phone Input (Optional) -->
+                            <div class="intake-field intake-phone-field">
+                                <label for="custPhoneInput" class="intake-label">
+                                    <i class="fa-solid fa-phone"></i> <span>ទូរស័ព្ទ / Phone</span>
+                                </label>
+                                <input type="tel" id="custPhoneInput" class="intake-input"
+                                    placeholder="Optional" autocomplete="off">
+                            </div>
 
-                                    <!-- Dynamic Customer Cards -->
-                                    <div class="saved-cust-items" id="savedCustItems"></div>
+                            <!-- Intake Quick Actions -->
+                            <div class="intake-actions">
+                                <button type="button" class="btn btn-outline btn-intake-action" id="btnResetCustomer" title="Clear customer & plate">
+                                    <i class="fa-solid fa-rotate-left"></i>
+                                    <span data-i18n="reset">Reset</span>
+                                </button>
+                                <button type="button" class="btn btn-primary btn-intake-action" id="btnOpenNewCustomerModal" title="Add / Register new customer profile">
+                                    <i class="fa-solid fa-user-plus"></i>
+                                    <span data-i18n="addCustomer">Register</span>
+                                </button>
+                                <button type="button" id="btnWalkIn" style="display: none;" title="Set to Walk-in Guest"></button>
+                            </div>
+                        </div>
 
-                                    <!-- Load More Indicator -->
-                                    <div class="saved-cust-load-more" id="savedCustLoadMore" style="display: none;">
-                                        <i class="fa-solid fa-spinner fa-spin mr-1"></i> <span data-i18n="loadingMore">Loading more...</span>
-                                    </div>
+                        <!-- Inline Validation Message (Shown when plate is missing on checkout, avoiding popup) -->
+                        <div id="intakeValidationMsg" class="intake-validation-msg" style="display: none;">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <span id="intakeValidationText">សូមបញ្ចូលស្លាកលេខយានយន្តមុនពេលគិតលុយ (Vehicle license plate number is required before checkout)</span>
+                        </div>
+
+                        <!-- Saved Customers Dropdown Panel -->
+                        <div class="saved-customers-panel" id="panelSavedCustomers" style="display: none;">
+                            <div class="saved-cust-list-wrap" id="savedCustListWrap">
+                                <div id="savedCustLoading" style="display: none;" class="saved-cust-state-msg">
+                                    <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> <span data-i18n="loadingCustomers">Loading...</span>
+                                </div>
+                                <div id="savedCustNoMatch" style="display: none;" class="saved-cust-state-msg" data-i18n="noSavedCustomers">
+                                    No saved customers found
+                                </div>
+                                <div class="saved-cust-items" id="savedCustItems"></div>
+                                <div class="saved-cust-load-more" id="savedCustLoadMore" style="display: none;">
+                                    <i class="fa-solid fa-spinner fa-spin mr-1"></i> <span data-i18n="loadingMore">Loading more...</span>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="customer-quick-actions">
-                            <button type="button" class="btn btn-outline btn-quick-walkin" id="btnWalkIn" title="Set to Walk-in Guest">
-                                <i class="fa-solid fa-person-walking"></i>
-                                <span data-i18n="walkInGuest">ភ្ញៀវទូទៅ</span>
-                            </button>
-                            <button type="button" class="btn btn-primary btn-quick-newcust" id="btnOpenNewCustomerModal">
-                                <i class="fa-solid fa-user-plus"></i>
-                                <span data-i18n="addCustomer">បន្ថែមអតិថិជន</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Selected Customer Display Badge (When chosen) -->
-                    <div id="selectedCustBadgeWrap" style="display: none;">
-                        <div class="selected-customer-badge">
-                            <div class="badge-cust-info">
-                                <i class="fa-solid fa-id-card-clip cust-badge-icon"></i>
-                                <span class="plate" id="badgePlate">2BC-9999</span>
-                                <span class="badge-divider">·</span>
-                                <span class="name" id="badgeName">Walk-in Guest</span>
-                                <span class="badge-divider">·</span>
-                                <span class="phone" id="badgePhone">012 345 678</span>
-                            </div>
-                            <button type="button" class="btn btn-outline btn-sm btn-reset-customer" id="btnResetCustomer">
-                                <i class="fa-solid fa-xmark"></i>
-                                <span data-i18n="changeCustomer">ប្តូរអតិថិជន</span>
-                            </button>
+                        <!-- Backward compatibility hidden wrapper for selectedCustBadgeWrap -->
+                        <div id="selectedCustBadgeWrap" style="display: none;">
+                            <span class="plate" id="badgePlate"></span>
+                            <span class="name" id="badgeName"></span>
+                            <span class="phone" id="badgePhone"></span>
                         </div>
                     </div>
 
@@ -528,6 +539,9 @@
                             <span data-i18n="clearBtn">Clear Cart</span>
                         </button>
                     </div>
+
+                    <!-- Workflow Stage Badge (Task 2: Distinguish Wash, Mechanical, and Mixed Orders) -->
+                    <div id="cartOrderWorkflowBadge" class="cart-order-workflow-badge" style="display: none;"></div>
 
                     <!-- Vehicle Recognition Profile (Requirement 4) -->
                     <div class="cart-vehicle-profile" id="cartVehicleProfile" style="display: none;">
@@ -697,15 +711,11 @@
                             </div>
                         </div>
 
-                        <!-- Row of Action Buttons (Clear, Hold/Pay Later, Saved/Queue, Discount) -->
+                        <!-- Row of Action Buttons (Clear, Queue, Discount) -->
                         <div class="cart-action-pills-row">
                             <button type="button" class="btn-cart-pill pill-clear" id="btnCartPillClear" disabled title="Clear Cart">
                                 <i class="fa-regular fa-trash-can"></i>
                                 <span data-i18n="clearBtn">Clear</span>
-                            </button>
-                            <button type="button" class="btn-cart-pill pill-hold" id="btnPayLater" disabled title="Pay Later / Hold Bill">
-                                <i class="fa-solid fa-clock-rotate-left"></i>
-                                <span data-i18n="holdBill">Pay Later</span>
                             </button>
                             <button type="button" class="btn-cart-pill pill-saved" id="btnCartPillQueue" title="Job Queue / Saved Bills">
                                 <i class="fa-solid fa-list-check"></i>
@@ -1587,12 +1597,18 @@
                         <div style="font-size: 0.9rem; font-weight: 700; color: var(--text-main);" id="abaAccName"></div>
                     </div>
                     <div class="form-group">
-                        <label>លេខកូដប្រតិបត្តិការ ABA / Ref #</label>
+                        <label style="font-weight: 700; font-size: 0.85rem; color: var(--text-main);">លេខកូដប្រតិបត្តិការ ABA / Bank Ref # <span style="color: #dc2626;">*</span></label>
                         <input type="text" id="abaRefInput" class="form-control" placeholder="e.g. 789456">
+                    </div>
+                    <div style="text-align: left; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0.6rem;">
+                        <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; font-size: 0.82rem; font-weight: 600; color: #1e293b; margin: 0;">
+                            <input type="checkbox" id="abaStatementVerifiedCheck" style="margin-top: 2px;">
+                            <span>ខ្ញុំបានផ្ទៀងផ្ទាត់ការទូទាត់លើកម្មវិធីធនាគារទូរស័ព្ទហាងរួចរាល់ (Verified on shop merchant phone banking app)</span>
+                        </label>
                     </div>
                 </div>
 
-                <!-- Tab Pane 3: KHQR Scan (Requirement 4) -->
+                <!-- Tab Pane 3: KHQR Scan -->
                 <div id="payPaneKhqr" style="display: none; flex-direction: column; align-items: center; gap: 0.75rem;">
                     <div class="qr-container" style="text-align: center; width: 100%;">
                         <div style="font-size: 1rem; font-weight: 700; color: #dc2626; margin-bottom: 0.5rem;">
@@ -1611,53 +1627,32 @@
                             Scan with Bakong, ABA, ACLEDA or any Bank app
                         </div>
                     </div>
-                </div>
-
-                <!-- Bank Slip Upload Box for ABA & KHQR (Requirement 4) -->
-                <div id="bankSlipUploadContainer" style="display: none; margin-top: 1rem; padding: 0.85rem; border: 1.5px dashed var(--primary); border-radius: var(--radius-md); background: #f0f9ff; text-align: center;">
-                    <label style="font-weight: 700; font-size: 0.85rem; color: var(--primary-dark); display: block; margin-bottom: 0.4rem;">
-                        <i class="fa-solid fa-camera mr-1"></i> <span data-i18n="bankSlipRequired">រូបភាពវិក្កយបត្រផ្ទេរប្រាក់ (តម្រូវជាចាំបាច់ / Slip Photo Required) *</span>
-                    </label>
-                    <input type="file" id="bankSlipFileInput" accept="image/*" capture="environment" style="display: none;">
-                    <div id="bankSlipPreviewContainer" style="display: none; margin-bottom: 0.5rem;">
-                        <img id="bankSlipPreviewImg" src="" alt="Slip Preview" style="max-height: 150px; max-width: 100%; border-radius: 6px; border: 1.5px solid #cbd5e1; box-shadow: 0 2px 8px rgba(0,0,0,0.1); object-fit: contain;">
-                        <div style="margin-top: 0.4rem;">
-                            <button type="button" class="btn btn-outline btn-sm" id="btnRemoveSlipPhoto" style="font-size: 0.78rem; padding: 0.25rem 0.6rem; color: #dc2626;">
-                                <i class="fa-solid fa-trash mr-1"></i> <span data-i18n="removePhoto">Remove / ថតម្តងទៀត</span>
-                            </button>
-                        </div>
+                    <div class="form-group" style="width: 100%; text-align: left;">
+                        <label style="font-weight: 700; font-size: 0.85rem; color: var(--text-main);">លេខកូដប្រតិបត្តិការធនាគារ / Bank Ref # <span style="color: #dc2626;">*</span></label>
+                        <input type="text" id="khqrRefInput" class="form-control" placeholder="Enter genuine bank transaction ref (e.g. 789456)">
                     </div>
-                    <button type="button" class="btn btn-primary" id="btnTriggerSlipCapture" style="font-size: 0.85rem; padding: 0.5rem 1.1rem; display: inline-flex; align-items: center; gap: 0.4rem;">
-                        <i class="fa-solid fa-camera"></i> <span data-i18n="takeSlipPhoto">ថតរូបវិក្កយបត្រ / Take Slip Photo</span>
-                    </button>
-                    <div style="font-size: 0.74rem; color: var(--text-muted); margin-top: 0.4rem;" data-i18n="pendingVerificationNotice">
-                        ការទូទាត់នឹងបង្ហាញស្ថានភាព "រង់ចាំការផ្ទៀងផ្ទាត់ (Pending Verification)" រហូតដល់អ្នកគ្រប់គ្រងអនុម័ត
+                    <div style="text-align: left; width: 100%; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0.6rem;">
+                        <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; font-size: 0.82rem; font-weight: 600; color: #1e293b; margin: 0;">
+                            <input type="checkbox" id="khqrStatementVerifiedCheck" style="margin-top: 2px;">
+                            <span>ខ្ញុំបានផ្ទៀងផ្ទាត់ការទូទាត់លើកម្មវិធីធនាគារទូរស័ព្ទហាងរួចរាល់ (Verified on shop merchant phone banking app)</span>
+                        </label>
                     </div>
                 </div>
 
-                <!-- Duty Washer & Mechanic Assignment -->
-                <div
-                    style="margin-top: 1.25rem; border-top: 1px dashed var(--border); padding-top: 1rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-                    <div>
-                        <label
-                            style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">
-                            <i class="fa-solid fa-hands-bubbles"></i> ជាងលាង:
-                        </label>
-                        <select id="selectDutyWasher" class="form-control" style="font-size: 0.85rem; padding: 0.5rem;">
-                            <option value="">-- All Active Washers --</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label
-                            style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">
-                            <i class="fa-solid fa-wrench"></i> ជាងជួសជុល:
-                        </label>
-                        <select id="selectDutyMechanic" class="form-control"
-                            style="font-size: 0.85rem; padding: 0.5rem;">
-                            <option value="">-- Duty Mechanic --</option>
-                        </select>
-                    </div>
+                <!-- Inline Payment Alert inside Modal (Task 4: Clear confirmation feedback without alert popups) -->
+                <div id="payModalAlert" class="alert alert-danger" style="display: none; margin-top: 0.85rem; padding: 0.6rem 0.85rem; font-size: 0.84rem; border-radius: var(--radius-md); align-items: center; gap: 0.5rem;">
+                    <i class="fa-solid fa-circle-exclamation"></i>
+                    <span id="payModalAlertText"></span>
                 </div>
+
+                <!-- Duty Staff Summary Banner in Payment Modal (Consolidated display from Cart - Task 5) -->
+                <div class="pay-modal-crew-summary" id="payModalCrewSummary" style="margin-top: 1rem; border-top: 1px dashed var(--border); padding-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; justify-content: space-between;">
+                    <span><i class="fa-solid fa-users-gear mr-1"></i> <strong id="payModalCrewLabel">Assigned Staff:</strong></span>
+                    <span id="payModalCrewNames" style="font-weight: 600; color: var(--text-main);">Unassigned (Queue dispatch)</span>
+                </div>
+                <!-- Hidden inputs for backward compatibility -->
+                <input type="hidden" id="selectDutyWasher" value="">
+                <input type="hidden" id="selectDutyMechanic" value="">
 
             </div>
             <div class="modal-footer">
@@ -2564,7 +2559,7 @@
                         data-i18n="referenceNumber">
                         លេខយោងប្រតិបត្តិការ:
                     </label>
-                    <input type="text" id="payOrderModalRef" class="form-control" placeholder="e.g. TRX-998811">
+                    <input type="text" id="payOrderModalRef" class="form-control" placeholder="e.g. 789456">
                 </div>
             </div>
             <div class="modal-footer" style="justify-content: space-between;">

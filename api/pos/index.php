@@ -503,9 +503,14 @@ $ACTION_PERMISSIONS = [
     'mark_arrived' => ['bays.arrive'],
     'assign_bay' => ['bays.assign'],
     'assign_car_to_bay' => ['bays.assign'],
+    'switch_service_sequence' => ['bays.assign', 'pos.access', 'bays.view'],
+    'set_service_sequence' => ['bays.assign', 'pos.access', 'bays.view'],
     'finish_car' => ['bays.finish'],
     'finish_job' => ['bays.finish'],
     'finish_bay' => ['bays.finish'],
+    'pass_qc' => ['bays.finish', 'pos.access', 'orders.change_status'],
+    'qc_pass' => ['bays.finish', 'pos.access', 'orders.change_status'],
+    'qc_fail' => ['bays.finish', 'pos.access', 'orders.change_status'],
     'move_queue_car' => ['bays.move_queue'],
     'queue_move_up' => ['bays.move_queue'],
     'get_wait_times' => ['bays.view', 'pos.access'],
@@ -536,6 +541,7 @@ $ACTION_PERMISSIONS = [
     'start_tech_task' => ['mechanic_jobs.update'],
     'finish_tech_task' => ['mechanic_jobs.update'],
     'update_checklist_item' => ['inspection.manage', 'mechanic_jobs.update'],
+    'pass_all_inspection' => ['inspection.manage', 'mechanic_jobs.update'],
     'request_parts' => ['parts_requests.create'],
     'finish_tech_job' => ['mechanic_jobs.update'],
 
@@ -1386,18 +1392,14 @@ if ($action === 'create_order') {
         $vehicleType = 'small_car';
     }
 
-    // Status Validation: strictly allow waiting, washing, finished, paid, cancelled
-    $allowedStatuses = ['waiting', 'washing', 'finished', 'paid', 'cancelled'];
+    // Status Validation: New orders entering queue are always 'waiting' unless actively washing or finished
+    $allowedStatuses = ['waiting', 'washing', 'finished', 'cancelled'];
     $isPaid = !empty($inputData['is_paid']) || !empty($_POST['is_paid']);
-    $status = trim($inputData['status'] ?? $_POST['status'] ?? ($isPaid ? 'paid' : 'waiting'));
+    $rawStatus = trim($inputData['status'] ?? $_POST['status'] ?? 'waiting');
+    // Operational status for newly created queue order is 'waiting' (not 'paid')
+    $status = ($rawStatus === 'paid' || empty($rawStatus)) ? 'waiting' : $rawStatus;
     if (!in_array($status, $allowedStatuses, true)) {
-        http_response_code(400);
-        echo json_encode([
-            'success' => false,
-            'error' => 'INVALID_STATUS',
-            'message' => "Invalid order status '{$status}'. Allowed: " . implode(', ', $allowedStatuses)
-        ]);
-        exit;
+        $status = 'waiting';
     }
 
     // Auto find or create customer & vehicle (Phone is optional)
@@ -1463,7 +1465,8 @@ if ($action === 'create_order') {
     $paymentRef = trim($inputData['payment_ref'] ?? $_POST['payment_ref'] ?? '');
     $staffUserId = !empty($inputData['staff_id']) ? (int)$inputData['staff_id'] : (!empty($_POST['staff_id']) ? (int)$_POST['staff_id'] : null);
 
-    $repairStatus = !empty($inputData['repair_status']) ? trim($inputData['repair_status']) : ($isPaid ? 'paid' : 'waiting');
+    $rawRepairStatus = trim((string)($inputData['repair_status'] ?? $_POST['repair_status'] ?? ''));
+    $repairStatus = ($rawRepairStatus !== '' && $rawRepairStatus !== 'paid') ? $rawRepairStatus : null;
 
     $assignedWashers = $inputData['washers'] ?? $_POST['washers'] ?? [];
     $assignedMechanics = $inputData['mechanics'] ?? $_POST['mechanics'] ?? [];
@@ -2029,8 +2032,8 @@ if ($action === 'create_order') {
         $seqCount = (int)$seqStmt->fetchColumn() + 1;
         $orderNumber = $todayPrefix . str_pad((string)$seqCount, 3, '0', STR_PAD_LEFT);
 
-        $startedAt = ($status === 'washing' || $isPaid) ? date('Y-m-d H:i:s') : null;
-        $finishedAt = ($isPaid || $status === 'finished') ? date('Y-m-d H:i:s') : null;
+        $startedAt = ($status === 'washing') ? date('Y-m-d H:i:s') : null;
+        $finishedAt = ($status === 'finished') ? date('Y-m-d H:i:s') : null;
         $paidAt = $isPaid ? date('Y-m-d H:i:s') : null;
         $paymentStatus = $isPaid ? 'paid' : 'unpaid';
 
@@ -2078,7 +2081,8 @@ if ($action === 'create_order') {
                 payment_method, payment_status, amount_tendered_usd, change_usd, payment_ref,
                 cashier_id, created_by, synced_by, is_synced, synced_at,
                 notes, started_at, finished_at, paid_at, created_at,
-                current_mileage, next_oil_mileage, next_oil_date
+                current_mileage, next_oil_mileage, next_oil_date,
+                receipt_issued_at
             ) VALUES (
                 ?, ?, 'pos_app', ?, ?,
                 ?, ?, ?, ?, ?, ?,
@@ -2087,9 +2091,12 @@ if ($action === 'create_order') {
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
-                ?, ?, ?
+                ?, ?, ?,
+                ?
             )
         ");
+
+        $receiptIssuedVal = ($paymentStatus === 'paid') ? ($paidAt ?: date('Y-m-d H:i:s')) : null;
 
         $insOrder->execute([
             $orderNumber, $idempotencyKey, $device['id'], $device['device_name'],
@@ -2099,9 +2106,18 @@ if ($action === 'create_order') {
             $paymentMethod, $paymentStatus, $tenderedUsd, $changeUsd, $paymentRef,
             ($orderCreatedBy ?: $verifiedUserId), $orderCreatedBy, $orderSyncedBy, ($isOfflineSync ? 1 : 0), ($isOfflineSync ? date('Y-m-d H:i:s') : null),
             $notes, $startedAt, $finishedAt, $paidAt, $orderCreatedAt,
-            $currentMileage, $nextOilMileage, $nextOilDate
+            $currentMileage, $nextOilMileage, $nextOilDate,
+            $receiptIssuedVal
         ]);
         $orderId = (int)$pdo->lastInsertId();
+
+        $serviceSequence = in_array(($inputData['service_sequence'] ?? $_POST['service_sequence'] ?? 'lift_first'), ['lift_first', 'wash_first'], true)
+            ? ($inputData['service_sequence'] ?? $_POST['service_sequence'] ?? 'lift_first')
+            : 'lift_first';
+        if ($serviceSequence === 'wash_first') {
+            $pdo->prepare("UPDATE orders SET service_sequence = 'wash_first', repair_status = 'waiting_wash_first' WHERE id = ?")->execute([$orderId]);
+        }
+        BayManager::ensureOrderTasks($pdo, $orderId);
 
         // Audit-log order creation with created_by and synced_by
         if (class_exists('AuditLogger')) {
@@ -2730,6 +2746,7 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
                 pos_device_id = COALESCE(?, pos_device_id),
                 pos_device_name = COALESCE(?, pos_device_name),
                 paid_at = ?,
+                receipt_issued_at = CASE WHEN ? = 'paid' THEN COALESCE(receipt_issued_at, CURRENT_TIMESTAMP) ELSE receipt_issued_at END,
                 bank_slip_image = COALESCE(?, bank_slip_image),
                 bank_slip_uploaded_at = CASE WHEN ? IS NOT NULL THEN CURRENT_TIMESTAMP ELSE bank_slip_uploaded_at END
             WHERE id = ?
@@ -2743,6 +2760,7 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
             ($device['id'] ?? null),
             ($device['device_name'] ?? null),
             $paidAtVal,
+            $targetPaymentStatus,
             $bankSlipImg,
             $bankSlipImg,
             $id
@@ -2934,7 +2952,9 @@ if ($action === 'get_queue') {
                (SELECT GROUP_CONCAT(u.full_name SEPARATOR ', ') FROM order_washers ow JOIN users u ON ow.washer_id = u.id WHERE ow.order_id = o.id) as washer_names,
                (SELECT GROUP_CONCAT(ow.washer_id) FROM order_washers ow WHERE ow.order_id = o.id) as washer_ids,
                (SELECT GROUP_CONCAT(u.full_name SEPARATOR ', ') FROM order_mechanics om JOIN users u ON om.mechanic_id = u.id WHERE om.order_id = o.id) as mechanic_names,
-               (SELECT GROUP_CONCAT(om.mechanic_id) FROM order_mechanics om WHERE om.order_id = o.id) as mechanic_ids
+               (SELECT GROUP_CONCAT(om.mechanic_id) FROM order_mechanics om WHERE om.order_id = o.id) as mechanic_ids,
+               (SELECT ot.task_type FROM order_tasks ot WHERE ot.order_id = o.id AND ot.status != 'completed' ORDER BY ot.sequence ASC LIMIT 1) as current_task_type,
+               (SELECT ot.title FROM order_tasks ot WHERE ot.order_id = o.id AND ot.status != 'completed' ORDER BY ot.sequence ASC LIMIT 1) as current_task_title
         FROM orders o
         WHERE (DATE(o.created_at) = CURDATE() OR o.status IN ('waiting', 'washing')) AND o.status != 'cancelled'
         ORDER BY CASE o.status
@@ -2970,6 +2990,9 @@ if ($action === 'get_bays_and_queue' || $action === 'get_bays') {
         'bays' => $bays,
         'wash_queue' => $queues['wash_queue'],
         'technical_queue' => $queues['technical_queue'],
+        'qc_queue' => $queues['qc_queue'],
+        'finishing_pad_queue' => $queues['finishing_pad_queue'],
+        'all_queue' => $queues['all_queue'],
         'total_waiting' => $queues['total_waiting'],
         'history' => $history,
         'synced_at' => date('Y-m-d H:i:s')
@@ -3042,6 +3065,7 @@ if ($action === 'assign_bay' || $action === 'assign_car_to_bay') {
     $reason = trim((string)($inputData['reason'] ?? $_POST['reason'] ?? ''));
     $managerPin = trim((string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? ''));
     $managerUsername = trim((string)($inputData['manager_username'] ?? $_POST['manager_username'] ?? ''));
+    $allowWashFirst = !empty($inputData['allow_wash_first']) || !empty($_POST['allow_wash_first']) || !empty($inputData['wash_first']) || !empty($_POST['wash_first']);
 
     if ($bayId <= 0 || $orderId <= 0) {
         http_response_code(400);
@@ -3058,7 +3082,8 @@ if ($action === 'assign_bay' || $action === 'assign_car_to_bay') {
         $stfUser['effective_role'],
         $reason !== '' ? $reason : null,
         $managerPin !== '' ? $managerPin : null,
-        $managerUsername !== '' ? $managerUsername : null
+        $managerUsername !== '' ? $managerUsername : null,
+        $allowWashFirst
     );
 
     if (!$res['success']) {
@@ -3075,6 +3100,35 @@ if ($action === 'assign_bay' || $action === 'assign_car_to_bay') {
         } else {
             http_response_code(400);
         }
+    }
+    echo json_encode($res);
+    exit;
+}
+
+// ========================================================
+// ACTION: switch_service_sequence / set_service_sequence
+// Switch workflow between Lift First and Wash First
+// ========================================================
+if ($action === 'switch_service_sequence' || $action === 'set_service_sequence') {
+    $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? $verifiedUserId);
+    $stfUser = BayManager::getRealStaffUser($pdo, $staffId);
+
+    $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
+    $seq = trim((string)($inputData['service_sequence'] ?? $_POST['service_sequence'] ?? 'wash_first'));
+
+    if ($orderId <= 0) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'order_id is required']);
+        exit;
+    }
+
+    $userId = $stfUser ? (int)$stfUser['id'] : $verifiedUserId;
+    $userName = $stfUser ? (string)$stfUser['full_name'] : ($sessionUser['username'] ?? 'Staff');
+    $userRole = $stfUser ? (string)$stfUser['effective_role'] : ($sessionUser['role'] ?? 'cashier');
+
+    $res = BayManager::switchServiceSequence($pdo, $orderId, $seq, $userId, $userName, $userRole);
+    if (empty($res['success'])) {
+        http_response_code(400);
     }
     echo json_encode($res);
     exit;
@@ -3134,6 +3188,68 @@ if ($action === 'finish_car' || $action === 'finish_job' || $action === 'finish_
         }
     }
     echo json_encode($res);
+    exit;
+}
+
+// ========================================================
+// ACTION: pass_qc / qc_pass
+// Finishing Pad Quality Control Pass & Handover
+// ========================================================
+if ($action === 'pass_qc' || $action === 'qc_pass') {
+    $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
+    $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $sessionUser['id'] ?? 0);
+    $stfUser = BayManager::getRealStaffUser($pdo, $staffId);
+
+    if (!$stfUser) {
+        $stfUser = $sessionUser;
+    }
+
+    $userId = (int)($stfUser['id'] ?? $sessionUser['id'] ?? 1);
+    $userName = (string)($stfUser['full_name'] ?? ($sessionUser['full_name'] ?? 'Staff'));
+    $userRole = (string)($stfUser['effective_role'] ?? ($sessionUser['role'] ?? 'cashier'));
+
+    $checklist = $inputData['checklist'] ?? $_POST['checklist'] ?? [];
+    $notes = trim((string)($inputData['qc_notes'] ?? $_POST['qc_notes'] ?? ''));
+
+    $res = BayManager::passQc($pdo, $orderId, $userId, $userName, $userRole, (array)$checklist, ($notes !== '' ? $notes : null));
+
+    if (!empty($res['success'])) {
+        echo json_encode($res);
+    } else {
+        http_response_code(400);
+        echo json_encode($res);
+    }
+    exit;
+}
+
+if ($action === 'qc_fail') {
+    $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
+    $reason = trim((string)($inputData['qc_reason'] ?? $_POST['qc_reason'] ?? $inputData['reason'] ?? $_POST['reason'] ?? ''));
+    $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $sessionUser['id'] ?? 0);
+    $stfUser = BayManager::getRealStaffUser($pdo, $staffId);
+
+    if (!$stfUser) {
+        $stfUser = $sessionUser;
+    }
+
+    $userId = (int)($stfUser['id'] ?? $sessionUser['id'] ?? 1);
+    $userName = (string)($stfUser['full_name'] ?? ($sessionUser['full_name'] ?? 'Staff'));
+    $userRole = (string)($stfUser['effective_role'] ?? ($sessionUser['role'] ?? 'cashier'));
+
+    if ($reason === '') {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'REASON_REQUIRED', 'message' => 'A specific failure reason is required to reject QC.']);
+        exit;
+    }
+
+    $res = BayManager::failQc($pdo, $orderId, $reason, $userId, $userName, $userRole);
+
+    if (!empty($res['success'])) {
+        echo json_encode($res);
+    } else {
+        http_response_code(400);
+        echo json_encode($res);
+    }
     exit;
 }
 
@@ -4611,24 +4727,26 @@ if ($action === 'get_washer_jobs') {
     $jobs = [];
     if ($stfUser) {
         $jobsStmt = $pdo->prepare("
-            SELECT o.*, ow.commission_usd,
+            SELECT o.*, COALESCE(ow.commission_usd, 0.00) as commission_usd,
                    (SELECT {$svcConcat} FROM order_items oi WHERE oi.order_id = o.id) as service_names,
                    b.bay_name,
                    (SELECT ot.status FROM order_tasks ot WHERE ot.order_id = o.id AND ot.task_type = 'wash' LIMIT 1) as wash_task_status
             FROM orders o
-            JOIN order_washers ow ON o.id = ow.order_id
+            LEFT JOIN order_washers ow ON o.id = ow.order_id AND ow.washer_id = ?
             LEFT JOIN bays b ON o.bay_id = b.id
-            WHERE ow.washer_id = ? AND o.status != 'cancelled'
+            WHERE (
+                ow.washer_id = ? 
+                OR (b.bay_type = 'wash' AND o.status = 'washing')
+            )
+            AND o.status NOT IN ('cancelled', 'finished')
             GROUP BY o.id
             ORDER BY CASE o.status 
                 WHEN 'washing' THEN 1
                 WHEN 'waiting' THEN 2
-                WHEN 'finished' THEN 3
-                WHEN 'paid' THEN 4
-                ELSE 5 END, o.id DESC
+                ELSE 3 END, o.id DESC
             LIMIT 50
         ");
-        $jobsStmt->execute([$stfUser['id']]);
+        $jobsStmt->execute([$stfUser['id'], $stfUser['id']]);
         $jobs = $jobsStmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -4689,38 +4807,45 @@ if ($action === 'get_technical_jobs') {
     ");
     $waitingHandover = $waitingHandoverStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Fetch active jobs for mechanic
+    // Fetch active jobs for mechanic (assigned to technician OR actively in Bay 4 / oil change bay)
     $jobs = [];
     if ($stfUser) {
         $jobsStmt = $pdo->prepare("
-            SELECT o.*, om.commission_usd,
+            SELECT o.*, COALESCE(om.commission_usd, 0.00) as commission_usd,
                    COALESCE(o.repair_status, o.status) as current_job_status,
                    b.bay_name,
                    (SELECT {$svcConcat} FROM order_items oi WHERE oi.order_id = o.id) as service_names
             FROM orders o
-            JOIN order_mechanics om ON o.id = om.order_id
+            LEFT JOIN order_mechanics om ON o.id = om.order_id AND om.mechanic_id = ?
             LEFT JOIN bays b ON o.bay_id = b.id
-            WHERE om.mechanic_id = ? AND o.status != 'cancelled'
+            WHERE (
+                om.mechanic_id = ?
+                OR o.bay_id = 4
+                OR b.bay_type = 'oil_change'
+                OR o.repair_status IN ('waiting_tech', 'working')
+            )
+            AND o.status NOT IN ('cancelled', 'finished')
+            AND COALESCE(o.repair_status, '') != 'finished'
             GROUP BY o.id
             ORDER BY CASE COALESCE(o.repair_status, o.status)
                 WHEN 'working' THEN 1
                 WHEN 'waiting' THEN 2
-                WHEN 'finished' THEN 3
-                WHEN 'paid' THEN 4
-                ELSE 5 END, o.id DESC
+                ELSE 3 END, o.id DESC
             LIMIT 50
         ");
-        $jobsStmt->execute([$stfUser['id']]);
+        $jobsStmt->execute([$stfUser['id'], $stfUser['id']]);
         $jobs = $jobsStmt->fetchAll(PDO::FETCH_ASSOC);
     } else {
         $jobsStmt = $pdo->query("
-            SELECT o.*,
+            SELECT o.*, 0.00 as commission_usd,
                    COALESCE(o.repair_status, o.status) as current_job_status,
                    b.bay_name,
                    (SELECT {$svcConcat} FROM order_items oi WHERE oi.order_id = o.id) as service_names
             FROM orders o
             LEFT JOIN bays b ON o.bay_id = b.id
-            WHERE (o.repair_status IN ('waiting_tech', 'working') OR b.bay_type = 'oil') AND o.status != 'cancelled'
+            WHERE (o.bay_id = 4 OR b.bay_type = 'oil_change' OR o.repair_status IN ('waiting_tech', 'working'))
+              AND o.status NOT IN ('cancelled', 'finished')
+              AND COALESCE(o.repair_status, '') != 'finished'
             GROUP BY o.id
             ORDER BY o.id DESC
             LIMIT 50
@@ -4736,8 +4861,12 @@ if ($action === 'get_technical_jobs') {
             TechnicalManager::ensureJobOrder($pdo, $jId, $stfUser['id'], $stfUser['full_name']);
         }
 
-        // Tasks
-        $tStmt = $pdo->prepare("SELECT * FROM order_tasks WHERE order_id = ? ORDER BY sequence ASC, id ASC");
+        // Tasks for technician screen (only mechanical/inspection tasks; wash and QC belong to washer/supervisor)
+        $tStmt = $pdo->prepare("
+            SELECT * FROM order_tasks 
+            WHERE order_id = ? AND task_type IN ('oil_change', 'repair', 'inspection') 
+            ORDER BY sequence ASC, id ASC
+        ");
         $tStmt->execute([$jId]);
         $tasks = $tStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -4787,12 +4916,32 @@ if ($action === 'get_technical_jobs') {
         $todayEarn = (float)$earnStmt->fetchColumn();
     }
 
+    // Completed jobs today for this mechanic
+    $completedJobs = [];
+    if ($stfUser) {
+        $cStmt = $pdo->prepare("
+            SELECT o.*, COALESCE(om.commission_usd, 0.00) as commission_usd,
+                   (SELECT {$svcConcat} FROM order_items oi WHERE oi.order_id = o.id) as service_names
+            FROM orders o
+            JOIN order_mechanics om ON o.id = om.order_id
+            WHERE om.mechanic_id = ? 
+              AND DATE(o.created_at) = CURDATE()
+              AND (o.status IN ('finished', 'paid') OR o.repair_status = 'finished')
+            GROUP BY o.id
+            ORDER BY o.id DESC
+            LIMIT 20
+        ");
+        $cStmt->execute([$stfUser['id']]);
+        $completedJobs = $cStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     echo json_encode([
         'success' => true,
         'bays' => $allBays,
         'queue' => $techQueue,
         'waiting_handover' => $waitingHandover,
         'active_jobs' => $activeJobDetails,
+        'completed_jobs' => $completedJobs,
         'available_parts' => $availParts,
         'today_commission' => $todayEarn,
         'synced_at' => date('Y-m-d H:i:s')
@@ -4989,7 +5138,36 @@ if ($action === 'update_checklist_item') {
 }
 
 // ========================================================
-// 37. ACTION: request_parts
+// 36b. ACTION: pass_all_inspection
+// ========================================================
+if ($action === 'pass_all_inspection') {
+    $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
+    if ($staffId <= 0) {
+        $staffId = (int)($sessionUser['id'] ?? 0);
+    }
+    $stfUser = BayManager::getRealStaffUser($pdo, $staffId);
+    if (!$stfUser) {
+        $stfUser = $sessionUser;
+    }
+    $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
+
+    if ($orderId <= 0) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'Valid order_id required']);
+        exit;
+    }
+
+    try {
+        $res = TechnicalManager::passAllChecklistItems(
+            $pdo, $orderId, $stfUser['id'] ?? null, $stfUser['full_name'] ?? 'Staff'
+        );
+        echo json_encode($res);
+    } catch (Throwable $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
 // ========================================================
 if ($action === 'request_parts') {
     $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? 0);
@@ -5428,8 +5606,9 @@ if ($action === 'appointment_arrived') {
             INSERT INTO orders (
                 order_number, order_uid, plate_number, customer_name, customer_phone,
                 vehicle_type, subtotal_usd, total_usd, total_khr, status, payment_status,
-                payment_method, appointment_time, arrived_at, source, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting', 'paid', 'cash', ?, CURRENT_TIMESTAMP, 'pos_app', CURRENT_TIMESTAMP)
+                payment_method, appointment_time, arrived_at, source, created_at,
+                paid_at, receipt_issued_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting', 'paid', 'cash', ?, CURRENT_TIMESTAMP, 'pos_app', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ");
         $khr = (int)round($price * get_exchange_rate());
         $insOrder->execute([
@@ -5437,6 +5616,14 @@ if ($action === 'appointment_arrived') {
             $appt['vehicle_type'] ?: 'small_car', $price, $price, $khr, $apptFullTime
         ]);
         $orderId = (int)$pdo->lastInsertId();
+
+        $serviceSequence = in_array(($inputData['service_sequence'] ?? $_POST['service_sequence'] ?? 'lift_first'), ['lift_first', 'wash_first'], true)
+            ? ($inputData['service_sequence'] ?? $_POST['service_sequence'] ?? 'lift_first')
+            : 'lift_first';
+        if ($serviceSequence === 'wash_first') {
+            $pdo->prepare("UPDATE orders SET service_sequence = 'wash_first', repair_status = 'waiting_wash_first' WHERE id = ?")->execute([$orderId]);
+        }
+        BayManager::ensureOrderTasks($pdo, $orderId);
 
         $pdo->prepare("INSERT INTO order_items (order_id, service_id, service_name, price_usd, price_khr, item_type, qty, created_at) VALUES (?, ?, ?, ?, ?, 'service', 1, CURRENT_TIMESTAMP)")
             ->execute([$orderId, $svcId, $svcRow['name_en'] ?? 'Car Wash', $price, $khr]);

@@ -62,11 +62,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action']) 
         }
     }
 
-    // 2. Finish Wash (Bay becomes Free and order shows Ready to pay, or Handshake to Tech)
+    // 2. Finish Wash (Bay becomes Free and order moves to Finishing Pad QC)
     elseif ($action === 'finish_car' || ($action === 'update_status' && ($_POST['new_status'] ?? '') === 'finished')) {
+        $bayId = !empty($_POST['bay_id']) ? (int)$_POST['bay_id'] : null;
+        $orderId = !empty($_POST['order_id']) ? (int)$_POST['order_id'] : 0;
         $targetId = (int)($_POST['bay_id'] ?? $_POST['order_id'] ?? 0);
         $tookLonger = isset($_POST['took_longer']) ? (int)$_POST['took_longer'] : null;
-        $res = BayManager::finishCar($pdo, $targetId, (int)$washer['id'], $washer['full_name'] ?? 'Washer', 'washer', $tookLonger);
+        $res = BayManager::finishCar($pdo, $bayId, $orderId ?: $targetId, (int)$washer['id'], $washer['full_name'] ?? 'Washer', 'washer', $tookLonger);
         if (!empty($res['success'])) {
             $msg = $res['message'];
             $msgType = 'success';
@@ -219,10 +221,10 @@ include dirname(__DIR__) . '/layouts/header.php';
                 ?>
                     <button type="button" 
                             class="btn btn-primary btn-sm" 
-                            style="width: 100%; background: <?= $isMixed ? '#9333ea' : 'var(--success)' ?>; border-color: <?= $isMixed ? '#9333ea' : 'var(--success)' ?>;"
+                            style="width: 100%; background: var(--success); border-color: var(--success);"
                             onclick="openWasherFinishModal(<?= $b['id'] ?>, <?= $car['order_id'] ?>, '<?= htmlspecialchars($car['plate_number'], ENT_QUOTES) ?>', <?= $isMixed ? 1 : 0 ?>)">
-                        <i class="fa-solid <?= $isMixed ? 'fa-paper-plane' : 'fa-check' ?> mr-1"></i> 
-                        <?= $isMixed ? 'Send to Tech (Finish Wash)' : 'Finish Wash (Free Bay)' ?>
+                        <i class="fa-solid fa-clipboard-check mr-1"></i> 
+                        Finish Wash (Send to QC)
                     </button>
                 <?php endif; ?>
             </div>
@@ -255,9 +257,13 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <?= htmlspecialchars($q['plate_number']) ?>
                         </span>
                         <?= vehicleTypeBadge($q['vehicle_type']) ?>
-                        <?php if (empty($q['receipt_printed_at'])): ?>
-                            <span class="badge" style="background: #f59e0b; color: #fff; font-weight: 700; font-size: 11px;">
-                                <i class="fa-solid fa-receipt mr-1"></i> Receipt Pending
+                        <?php if (empty($q['receipt_issued_at'])): ?>
+                            <span class="badge" style="background: #ef4444; color: #fff; font-weight: 700; font-size: 11px;">
+                                <i class="fa-solid fa-receipt mr-1"></i> E-Receipt Missing
+                            </span>
+                        <?php else: ?>
+                            <span class="badge" style="background: #10b981; color: #fff; font-weight: 700; font-size: 11px;">
+                                <i class="fa-solid fa-circle-check mr-1"></i> Paid &amp; Receipted
                             </span>
                         <?php endif; ?>
                         <span class="text-xs text-muted">
@@ -370,10 +376,10 @@ include dirname(__DIR__) . '/layouts/header.php';
                         ?>
                             <button type="button" 
                                     class="btn btn-primary btn-sm" 
-                                    style="background-color: <?= $isMixed ? '#9333ea' : 'var(--success)' ?>; border-color: <?= $isMixed ? '#9333ea' : 'var(--success)' ?>;"
+                                    style="background-color: var(--success); border-color: var(--success);"
                                     onclick="openWasherFinishModal(<?= (int)($job['bay_id'] ?? 0) ?>, <?= $job['id'] ?>, '<?= htmlspecialchars($job['plate_number'], ENT_QUOTES) ?>', <?= $isMixed ? 1 : 0 ?>)">
-                                <i class="fa-solid <?= $isMixed ? 'fa-paper-plane' : 'fa-check' ?> mr-1"></i> 
-                                <?= $isMixed ? 'Send to Tech' : 'Finish Wash' ?>
+                                <i class="fa-solid fa-clipboard-check mr-1"></i> 
+                                Finish Wash (Send to QC)
                             </button>
                         <?php else: ?>
                             <span class="text-xs text-muted" style="font-weight: 600;">
@@ -410,8 +416,8 @@ include dirname(__DIR__) . '/layouts/header.php';
                 <div style="font-size: 18px; font-weight: 800; font-family: var(--font-mono); color: var(--text-main);" id="wModalPlate">
                     -
                 </div>
-                <div class="text-xs" id="wModalMixedNotice" style="display: none; color: #9333ea; font-weight: 700; margin-top: 4px;">
-                    <i class="fa-solid fa-paper-plane mr-1"></i> Mixed Order: Finishing wash will send vehicle to the Technical screen.
+                <div class="text-xs" id="wModalMixedNotice" style="display: none; color: var(--success); font-weight: 700; margin-top: 4px;">
+                    <i class="fa-solid fa-clipboard-check mr-1"></i> Finishing wash will release the bay and send the vehicle to Finishing Pad for QC inspection.
                 </div>
             </div>
 
@@ -444,7 +450,7 @@ include dirname(__DIR__) . '/layouts/header.php';
             <div style="display: flex; justify-content: flex-end; gap: 10px;">
                 <button type="button" class="btn btn-secondary" onclick="closeWasherFinishModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary" id="wBtnSubmit" style="background: var(--success); border-color: var(--success);">
-                    <i class="fa-solid fa-check mr-1"></i> Confirm &amp; Finish
+                    <i class="fa-solid fa-clipboard-check mr-1"></i> Send to Finishing Pad (QC)
                 </button>
             </div>
         </form>
@@ -456,12 +462,10 @@ function openWasherFinishModal(bayId, orderId, plateNumber, isMixed) {
     document.getElementById('wModalBayId').value = bayId;
     document.getElementById('wModalOrderId').value = orderId;
     document.getElementById('wModalPlate').textContent = plateNumber;
-    document.getElementById('wModalMixedNotice').style.display = isMixed ? 'block' : 'none';
-    document.getElementById('wBtnSubmit').innerHTML = isMixed 
-        ? '<i class="fa-solid fa-paper-plane mr-1"></i> Send to Tech' 
-        : '<i class="fa-solid fa-check mr-1"></i> Confirm Finish';
-    document.getElementById('wBtnSubmit').style.backgroundColor = isMixed ? '#9333ea' : 'var(--success)';
-    document.getElementById('wBtnSubmit').style.borderColor = isMixed ? '#9333ea' : 'var(--success)';
+    document.getElementById('wModalMixedNotice').style.display = 'block';
+    document.getElementById('wBtnSubmit').innerHTML = '<i class="fa-solid fa-clipboard-check mr-1"></i> Send to Finishing Pad (QC)';
+    document.getElementById('wBtnSubmit').style.backgroundColor = 'var(--success)';
+    document.getElementById('wBtnSubmit').style.borderColor = 'var(--success)';
     selectWTookLonger(0);
     document.getElementById('washerFinishModal').style.display = 'flex';
 }

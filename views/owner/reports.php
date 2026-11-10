@@ -63,7 +63,16 @@ if ($period === 'today') {
 
 $orderWhere = $orderDateWhere . $deviceWhere;
 
-// 1. Gross Wash Revenue, Subtotal, Discount & Order Count
+// Check if refund columns exist (backward compatibility across SQLite and MySQL)
+$hasRefundCols = false;
+try {
+    $pdo->query("SELECT refund_amount_usd, refund_status FROM orders LIMIT 0");
+    $hasRefundCols = true;
+} catch (Throwable $e) {
+    $hasRefundCols = false;
+}
+
+// 1. Confirmed Gross Revenue, Subtotal, Discount & Order Count
 $revSql = "
     SELECT 
         COUNT(*) as total_vehicles, 
@@ -72,7 +81,7 @@ $revSql = "
         COALESCE(SUM(o.total_usd), 0) as gross_revenue, 
         COALESCE(SUM(o.total_khr), 0) as gross_revenue_khr 
     FROM orders o 
-    WHERE o.status = 'paid' {$orderWhere}
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$orderWhere}
 ";
 $revStmt = $pdo->prepare($revSql);
 $revStmt->execute($dateParams);
@@ -90,12 +99,63 @@ $totalDiscount = (float)$revData['total_discount'];
 $totalVehicles = (int)$revData['total_vehicles'];
 $avgTicket = ($totalVehicles > 0) ? ($grossRev / $totalVehicles) : 0.00;
 
+// 1b. Settled Refunds Calculation
+if ($hasRefundCols) {
+    $refSql = "
+        SELECT 
+            COALESCE(SUM(
+                CASE 
+                    WHEN o.refund_amount_usd > 0 THEN o.refund_amount_usd
+                    WHEN o.refund_status = 'refunded' OR o.payment_status = 'refunded' THEN o.total_usd
+                    ELSE 0 
+                END
+            ), 0) as total_refunds_usd,
+            COALESCE(SUM(
+                CASE 
+                    WHEN o.refund_amount_usd > 0 THEN ROUND(o.refund_amount_usd * 4100)
+                    WHEN o.refund_status = 'refunded' OR o.payment_status = 'refunded' THEN o.total_khr
+                    ELSE 0 
+                END
+            ), 0) as total_refunds_khr,
+            COUNT(CASE WHEN o.refund_amount_usd > 0 OR o.refund_status = 'refunded' OR o.payment_status = 'refunded' THEN 1 END) as refund_count
+        FROM orders o 
+        WHERE (o.refund_amount_usd > 0 OR o.refund_status = 'refunded' OR o.payment_status = 'refunded')
+          AND o.status != 'cancelled'
+          {$orderWhere}
+    ";
+} else {
+    $refSql = "
+        SELECT 
+            COALESCE(SUM(CASE WHEN o.payment_status = 'refunded' THEN o.total_usd ELSE 0 END), 0) as total_refunds_usd,
+            COALESCE(SUM(CASE WHEN o.payment_status = 'refunded' THEN o.total_khr ELSE 0 END), 0) as total_refunds_khr,
+            COUNT(CASE WHEN o.payment_status = 'refunded' THEN 1 END) as refund_count
+        FROM orders o 
+        WHERE o.payment_status = 'refunded'
+          AND o.status != 'cancelled'
+          {$orderWhere}
+    ";
+}
+$refStmt = $pdo->prepare($refSql);
+$refStmt->execute($dateParams);
+$refData = $refStmt->fetch() ?: [
+    'total_refunds_usd' => 0.00,
+    'total_refunds_khr' => 0,
+    'refund_count' => 0
+];
+$settledRefunds = (float)$refData['total_refunds_usd'];
+$settledRefundsKhr = (int)$refData['total_refunds_khr'];
+$refundCount = (int)$refData['refund_count'];
+
+// Net Settled Revenue = Confirmed Gross Payments - Settled Refunds
+$netSettledRevenue = max(0.0, $grossRev - $settledRefunds);
+$netSettledRevenueKhr = (int)round($netSettledRevenue * get_exchange_rate());
+
 // 2. Total Staff Commissions Paid (Washers + Mechanics)
 $wCommSql = "
     SELECT COALESCE(SUM(ow.commission_usd), 0)
     FROM orders o
     JOIN order_washers ow ON o.id = ow.order_id
-    WHERE o.status = 'paid' {$orderWhere}
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$orderWhere}
 ";
 $wCommStmt = $pdo->prepare($wCommSql);
 $wCommStmt->execute($dateParams);
@@ -105,7 +165,7 @@ $mCommSql = "
     SELECT COALESCE(SUM(om.commission_usd), 0)
     FROM orders o
     JOIN order_mechanics om ON o.id = om.order_id
-    WHERE o.status = 'paid' {$orderWhere}
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$orderWhere}
 ";
 $mCommStmt = $pdo->prepare($mCommSql);
 $mCommStmt->execute($dateParams);
@@ -124,34 +184,49 @@ if ($selectedDevice === 'all') {
     $totalExp = 0.00;
 }
 
-// 4. Net Profit Calculation: Gross Revenue - Expenses - All Commissions
-$netProfit = $grossRev - $totalExp - $totalComm;
-$netProfitKhr = (int)round($netProfit * get_exchange_rate());
-
-// 4b. Revenue Split: Wash Services vs. Repair Labor vs. Products & Spare Parts
+// 4. Revenue Split & Cost of Goods Sold (COGS)
 $splitSql = "
     SELECT 
         COALESCE(SUM(CASE WHEN oi.item_type = 'service' AND (s.category = 'wash' OR s.category IS NULL) THEN oi.price_usd ELSE 0 END), 0) as wash_revenue,
         COALESCE(SUM(CASE WHEN oi.item_type = 'repair' OR (oi.item_type = 'service' AND s.category = 'repair') THEN oi.price_usd ELSE 0 END), 0) as repair_revenue,
         COALESCE(SUM(CASE WHEN oi.item_type IN ('product', 'spare_part') THEN oi.price_usd ELSE 0 END), 0) as product_revenue,
         COALESCE(SUM(CASE WHEN oi.item_type IN ('product', 'spare_part') THEN (COALESCE(oi.qty, 1) * COALESCE(p.cost_price_usd, 0)) ELSE 0 END), 0) as product_cogs,
-        COALESCE(SUM(CASE WHEN oi.item_type IN ('product', 'spare_part') THEN COALESCE(oi.qty, 1) ELSE 0 END), 0) as product_units
+        COALESCE(SUM(CASE WHEN oi.item_type IN ('product', 'spare_part') THEN COALESCE(oi.qty, 1) ELSE 0 END), 0) as product_units,
+        COUNT(CASE WHEN oi.item_type IN ('product', 'spare_part') AND (p.cost_price_usd IS NULL OR p.cost_price_usd <= 0) THEN 1 END) as missing_cogs_count,
+        COALESCE(SUM(CASE WHEN oi.item_type IN ('product', 'spare_part') AND (p.cost_price_usd IS NULL OR p.cost_price_usd <= 0) THEN oi.price_usd ELSE 0 END), 0) as missing_cogs_sales
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.id
     LEFT JOIN services s ON oi.service_id = s.id
     LEFT JOIN products p ON oi.product_id = p.id
-    WHERE o.status = 'paid' {$orderWhere}
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$orderWhere}
 ";
 $splitStmt = $pdo->prepare($splitSql);
 $splitStmt->execute($dateParams);
-$splitData = $splitStmt->fetch() ?: ['wash_revenue' => 0, 'repair_revenue' => 0, 'product_revenue' => 0, 'product_cogs' => 0, 'product_units' => 0];
+$splitData = $splitStmt->fetch() ?: [
+    'wash_revenue' => 0, 
+    'repair_revenue' => 0, 
+    'product_revenue' => 0, 
+    'product_cogs' => 0, 
+    'product_units' => 0,
+    'missing_cogs_count' => 0,
+    'missing_cogs_sales' => 0
+];
 
 $washRevenue = (float)$splitData['wash_revenue'];
 $repairRevenue = (float)$splitData['repair_revenue'];
 $productRevenue = (float)$splitData['product_revenue'];
 $productCogs = (float)$splitData['product_cogs'];
 $productUnits = (int)$splitData['product_units'];
+$missingCogsCount = (int)$splitData['missing_cogs_count'];
+$missingCogsSales = (float)$splitData['missing_cogs_sales'];
+$hasMissingCogs = $missingCogsCount > 0;
 $productProfit = $productRevenue - $productCogs;
+
+// 5. Net Operating Profit Formula: Net Settled Revenue - COGS - Worker Commissions - Operating Expenses
+$netProfit = $netSettledRevenue - $productCogs - $totalComm - $totalExp;
+$netProfitKhr = (int)round($netProfit * get_exchange_rate());
+$netOperatingProfit = $netProfit;
+$netOperatingProfitKhr = $netProfitKhr;
 
 // 4c. Top Selling Products & Spare Parts (Joined with categories table for proper names & icons)
 $topProdSql = "
@@ -171,7 +246,7 @@ $topProdSql = "
     JOIN orders o ON oi.order_id = o.id
     LEFT JOIN products p ON oi.product_id = p.id
     LEFT JOIN categories c ON (p.category_id = c.id OR (c.type = 'product' AND p.category = c.code))
-    WHERE o.status = 'paid' AND oi.item_type IN ('product', 'spare_part') {$orderWhere}
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND oi.item_type IN ('product', 'spare_part') {$orderWhere}
     GROUP BY oi.service_name, c.code, c.name_en, c.name_km, c.icon, c.color, p.category, p.brand
     ORDER BY total_sales DESC
 ";
@@ -185,7 +260,7 @@ $repairServSql = "
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.id
     LEFT JOIN services s ON oi.service_id = s.id
-    WHERE o.status = 'paid' AND (oi.item_type = 'repair' OR (oi.item_type = 'service' AND s.category = 'repair')) {$orderWhere}
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND (oi.item_type = 'repair' OR (oi.item_type = 'service' AND s.category = 'repair')) {$orderWhere}
     GROUP BY oi.service_name
     ORDER BY service_revenue DESC
 ";
@@ -199,7 +274,7 @@ $servSql = "
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.id
     LEFT JOIN services s ON oi.service_id = s.id
-    WHERE o.status = 'paid' AND (oi.item_type = 'service' AND (s.category = 'wash' OR s.category IS NULL)) {$orderWhere}
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND (oi.item_type = 'service' AND (s.category = 'wash' OR s.category IS NULL)) {$orderWhere}
     GROUP BY oi.service_name
     ORDER BY service_revenue DESC
 ";
@@ -227,7 +302,7 @@ $dynamicCatSql = "
         (oi.item_type IN ('service', 'repair') AND (s.category_id = c.id OR s.category = c.code))
         OR (oi.item_type IN ('product', 'spare_part') AND (p.category_id = c.id OR p.category = c.code))
     )
-    WHERE o.status = 'paid' {$orderWhere}
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$orderWhere}
     GROUP BY c.id, c.type, c.code, c.name_en, c.name_km, c.color, c.icon
     ORDER BY total_revenue DESC
 ";
@@ -239,7 +314,7 @@ $categoryRevenueBreakdown = $dynamicCatStmt->fetchAll();
 $vehSql = "
     SELECT o.vehicle_type, COUNT(*) as count, COALESCE(SUM(o.total_usd), 0) as v_revenue
     FROM orders o
-    WHERE o.status = 'paid' {$orderWhere}
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$orderWhere}
     GROUP BY o.vehicle_type
     ORDER BY v_revenue DESC
 ";
@@ -255,7 +330,7 @@ $wSql = "
     FROM order_washers ow
     JOIN orders o ON ow.order_id = o.id
     JOIN users u ON ow.washer_id = u.id
-    WHERE o.status = 'paid' AND u.role = 'washer' {$orderWhere}
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND u.role = 'washer' {$orderWhere}
     GROUP BY u.id, u.full_name
     ORDER BY revenue_handled DESC
 ";
@@ -320,7 +395,7 @@ $avgTotalMins = $avgWaitMins + $avgWashMins;
 $paySql = "
     SELECT o.payment_method, COUNT(*) as count, COALESCE(SUM(o.total_usd), 0) as method_total
     FROM orders o
-    WHERE o.status = 'paid' {$orderWhere}
+    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$orderWhere}
     GROUP BY o.payment_method
     ORDER BY method_total DESC
 ";
@@ -346,13 +421,13 @@ $devQuerySql = "
         pd.location,
         pd.device_uid,
         pd.status,
-        COUNT(CASE WHEN o.status = 'paid' THEN 1 END) as paid_orders_count,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.subtotal_usd ELSE 0 END), 0) as gross_sales,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.discount_usd ELSE 0 END), 0) as total_discount,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.total_usd ELSE 0 END), 0) as net_sales,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' AND o.payment_method = 'cash' THEN o.total_usd ELSE 0 END), 0) as cash_total,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' AND o.payment_method = 'aba' THEN o.total_usd ELSE 0 END), 0) as aba_total,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' AND o.payment_method = 'khqr' THEN o.total_usd ELSE 0 END), 0) as khqr_total,
+        COUNT(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN 1 END) as paid_orders_count,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.subtotal_usd ELSE 0 END), 0) as gross_sales,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.discount_usd ELSE 0 END), 0) as total_discount,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.total_usd ELSE 0 END), 0) as net_sales,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'cash' THEN o.total_usd ELSE 0 END), 0) as cash_total,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'aba' THEN o.total_usd ELSE 0 END), 0) as aba_total,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'khqr' THEN o.total_usd ELSE 0 END), 0) as khqr_total,
         COALESCE(SUM(CASE WHEN o.status != 'cancelled' AND o.payment_status = 'unpaid' THEN o.total_usd ELSE 0 END), 0) as unpaid_total,
         COUNT(CASE WHEN o.status = 'cancelled' THEN 1 END) as cancelled_count
     FROM pos_devices pd
@@ -371,13 +446,13 @@ $webQuerySql = "
         'Admin Desk' as location,
         'WEB' as device_uid,
         'active' as status,
-        COUNT(CASE WHEN o.status = 'paid' THEN 1 END) as paid_orders_count,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.subtotal_usd ELSE 0 END), 0) as gross_sales,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.discount_usd ELSE 0 END), 0) as total_discount,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.total_usd ELSE 0 END), 0) as net_sales,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' AND o.payment_method = 'cash' THEN o.total_usd ELSE 0 END), 0) as cash_total,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' AND o.payment_method = 'aba' THEN o.total_usd ELSE 0 END), 0) as aba_total,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' AND o.payment_method = 'khqr' THEN o.total_usd ELSE 0 END), 0) as khqr_total,
+        COUNT(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN 1 END) as paid_orders_count,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.subtotal_usd ELSE 0 END), 0) as gross_sales,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.discount_usd ELSE 0 END), 0) as total_discount,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.total_usd ELSE 0 END), 0) as net_sales,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'cash' THEN o.total_usd ELSE 0 END), 0) as cash_total,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'aba' THEN o.total_usd ELSE 0 END), 0) as aba_total,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'khqr' THEN o.total_usd ELSE 0 END), 0) as khqr_total,
         COALESCE(SUM(CASE WHEN o.status != 'cancelled' AND o.payment_status = 'unpaid' THEN o.total_usd ELSE 0 END), 0) as unpaid_total,
         COUNT(CASE WHEN o.status = 'cancelled' THEN 1 END) as cancelled_count
     FROM orders o
@@ -433,13 +508,13 @@ $cashierQuerySql = "
         COALESCE(u.id, 0) as cashier_id,
         COALESCE(u.full_name, 'Unassigned / System') as cashier_name,
         COALESCE(u.role, 'staff') as cashier_role,
-        COUNT(CASE WHEN o.status = 'paid' THEN 1 END) as paid_orders_count,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.subtotal_usd ELSE 0 END), 0) as gross_sales,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.discount_usd ELSE 0 END), 0) as total_discount,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.total_usd ELSE 0 END), 0) as net_sales,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' AND o.payment_method = 'cash' THEN o.total_usd ELSE 0 END), 0) as cash_total,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' AND o.payment_method = 'aba' THEN o.total_usd ELSE 0 END), 0) as aba_total,
-        COALESCE(SUM(CASE WHEN o.status = 'paid' AND o.payment_method = 'khqr' THEN o.total_usd ELSE 0 END), 0) as khqr_total,
+        COUNT(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN 1 END) as paid_orders_count,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.subtotal_usd ELSE 0 END), 0) as gross_sales,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.discount_usd ELSE 0 END), 0) as total_discount,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.total_usd ELSE 0 END), 0) as net_sales,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'cash' THEN o.total_usd ELSE 0 END), 0) as cash_total,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'aba' THEN o.total_usd ELSE 0 END), 0) as aba_total,
+        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'khqr' THEN o.total_usd ELSE 0 END), 0) as khqr_total,
         COALESCE(SUM(CASE WHEN o.status != 'cancelled' AND o.payment_status = 'unpaid' THEN o.total_usd ELSE 0 END), 0) as unpaid_total,
         COUNT(CASE WHEN o.status = 'cancelled' THEN 1 END) as cancelled_count
     FROM orders o
@@ -676,15 +751,21 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $curRate = get_exchange_rate();
     fputcsv($out, ['Total Subtotal (Catalog)', number_format($totalSubtotal, 2), number_format((int)round($totalSubtotal * $curRate))]);
     fputcsv($out, ['Total Discounts Applied', '-' . number_format($totalDiscount, 2), '-' . number_format((int)round($totalDiscount * $curRate))]);
-    fputcsv($out, ['Total Gross Revenue (Actual Paid)', number_format($grossRev, 2), number_format((int)round($grossRev * $curRate))]);
+    fputcsv($out, ['Confirmed Gross Payments', number_format($grossRev, 2), number_format((int)round($grossRev * $curRate))]);
+    fputcsv($out, ['  - Settled Refunds', '-' . number_format($settledRefunds, 2), '-' . number_format($settledRefundsKhr)]);
+    fputcsv($out, ['Net Settled Revenue', number_format($netSettledRevenue, 2), number_format($netSettledRevenueKhr)]);
     fputcsv($out, ['  - Car Wash Services', number_format($washRevenue, 2), number_format((int)round($washRevenue * $curRate))]);
     fputcsv($out, ['  - Repair & Maintenance Labor', number_format($repairRevenue, 2), number_format((int)round($repairRevenue * $curRate))]);
     fputcsv($out, ['  - Products & Spare Parts Sales', number_format($productRevenue, 2), number_format((int)round($productRevenue * $curRate))]);
-    fputcsv($out, ['Operating Expenses', number_format($totalExp, 2), number_format((int)round($totalExp * $curRate))]);
-    fputcsv($out, ['Staff Commissions Paid', number_format($totalComm, 2), number_format((int)round($totalComm * $curRate))]);
-    fputcsv($out, ['  - Washer Commissions', number_format($washerComm, 2), number_format((int)round($washerComm * $curRate))]);
-    fputcsv($out, ['  - Mechanic Commissions', number_format($mechanicComm, 2), number_format((int)round($mechanicComm * $curRate))]);
-    fputcsv($out, ['NET PROFIT', number_format($netProfit, 2), number_format($netProfitKhr)]);
+    fputcsv($out, ['Cost of Goods Sold (COGS)', '-' . number_format($productCogs, 2), '-' . number_format((int)round($productCogs * $curRate))]);
+    fputcsv($out, ['Operating Expenses', '-' . number_format($totalExp, 2), '-' . number_format((int)round($totalExp * $curRate))]);
+    fputcsv($out, ['Staff Commissions Paid', '-' . number_format($totalComm, 2), '-' . number_format((int)round($totalComm * $curRate))]);
+    fputcsv($out, ['  - Washer Commissions', '-' . number_format($washerComm, 2), '-' . number_format((int)round($washerComm * $curRate))]);
+    fputcsv($out, ['  - Mechanic Commissions', '-' . number_format($mechanicComm, 2), '-' . number_format((int)round($mechanicComm * $curRate))]);
+    fputcsv($out, ['NET OPERATING PROFIT', number_format($netOperatingProfit, 2), number_format($netOperatingProfitKhr)]);
+    if ($hasMissingCogs) {
+        fputcsv($out, ['WARNING: Missing COGS Data', "{$missingCogsCount} sold items lack cost price (affecting $" . number_format($missingCogsSales, 2) . " in sales)", 'Profit may be overstated']);
+    }
     fputcsv($out, []);
 
     // Revenue by Category
@@ -1586,15 +1667,30 @@ include dirname(__DIR__) . '/layouts/header.php';
         </div>
     </div>
 
-    <!-- 3. Primary KPI Summary Cards: 2 Cards per Row (Balanced, Equal Height) -->
+    <?php if ($hasMissingCogs): ?>
+    <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid #f59e0b; border-radius: var(--radius-lg); padding: 14px 18px; margin-bottom: 20px; display: flex; align-items: center; gap: 14px; color: #b45309;">
+        <i class="fa-solid fa-triangle-exclamation" style="font-size: 22px; flex-shrink: 0; color: #d97706;"></i>
+        <div style="flex: 1;">
+            <strong style="font-size: 14px; display: block; margin-bottom: 2px;">Cost of Goods Sold (COGS) Incomplete:</strong>
+            <span style="font-size: 13px;">
+                <strong><?= $missingCogsCount ?></strong> sold product item(s) (totaling <strong><?= formatUSD($missingCogsSales) ?></strong> in sales) have missing or zero cost data. Recorded COGS is <?= formatUSD($productCogs) ?> and Net Operating Profit may be overstated. Please update product cost prices in Inventory.
+            </span>
+        </div>
+        <a href="<?= APP_URL ?>/index.php?view=products" class="btn btn-sm btn-secondary" style="border-color: #d97706; color: #b45309; white-space: nowrap;">
+            <i class="fa-solid fa-pen-to-square mr-1"></i> Update Costs
+        </a>
+    </div>
+    <?php endif; ?>
+
+    <!-- 3. Primary KPI Summary Cards -->
     <div class="kpi-grid">
-        <!-- Card 1: Gross Revenue -->
+        <!-- Card 1: Net Settled Revenue & Confirmed Payments -->
         <div class="kpi-card">
             <div class="kpi-card-top">
                 <div>
-                    <div class="kpi-card-title">Total Gross Revenue</div>
-                    <div class="kpi-card-value" style="color: #16a34a;"><?= formatUSD($grossRev) ?></div>
-                    <div class="kpi-card-khr">(<?= formatKHR((int)round($grossRev * $curRate)) ?>)</div>
+                    <div class="kpi-card-title">Net Settled Revenue</div>
+                    <div class="kpi-card-value" style="color: #16a34a;"><?= formatUSD($netSettledRevenue) ?></div>
+                    <div class="kpi-card-khr">(<?= formatKHR($netSettledRevenueKhr) ?>)</div>
                 </div>
                 <div class="kpi-icon-box" style="background: rgba(22, 163, 74, 0.12); color: #16a34a;">
                     <i class="fa-solid fa-sack-dollar"></i>
@@ -1602,21 +1698,42 @@ include dirname(__DIR__) . '/layouts/header.php';
             </div>
             <div class="kpi-card-footer">
                 <div>
-                    <span>Orders: <strong><?= $totalVehicles ?> <?= ($totalVehicles === 1) ? 'order' : 'orders' ?></strong></span>
+                    <span>Gross: <strong><?= formatUSD($grossRev) ?></strong> (<?= $totalVehicles ?> <?= ($totalVehicles === 1) ? 'order' : 'orders' ?>)</span>
+                    <?php if ($settledRefunds > 0): ?>
                     <span style="margin: 0 6px;">&bull;</span>
-                    <span>Avg Ticket: <strong><?= formatUSD($avgTicket) ?></strong></span>
+                    <span style="color: #dc2626; font-weight: 600;">Refunds: -<?= formatUSD($settledRefunds) ?> (<?= $refundCount ?>)</span>
+                    <?php endif; ?>
                 </div>
-                <?php if ($totalDiscount > 0): ?>
-                    <span class="badge badge-warning" title="Catalog Subtotal: <?= formatUSD($totalSubtotal) ?>, Discounts: -<?= formatUSD($totalDiscount) ?>">
-                        <i class="fa-solid fa-tag mr-1"></i> -<?= formatUSD($totalDiscount) ?> discounts
-                    </span>
-                <?php else: ?>
-                    <span class="text-xs text-muted">0 discounts</span>
-                <?php endif; ?>
+                <span>Avg Ticket: <strong><?= formatUSD($avgTicket) ?></strong></span>
             </div>
         </div>
 
-        <!-- Card 2: Operating Expenses -->
+        <!-- Card 2: Cost of Goods Sold (COGS) -->
+        <div class="kpi-card">
+            <div class="kpi-card-top">
+                <div>
+                    <div class="kpi-card-title">Cost of Goods Sold (COGS)</div>
+                    <div class="kpi-card-value" style="color: #0284c7;"><?= formatUSD($productCogs) ?></div>
+                    <div class="kpi-card-khr">(<?= formatKHR((int)round($productCogs * $curRate)) ?>)</div>
+                </div>
+                <div class="kpi-icon-box" style="background: rgba(2, 132, 199, 0.12); color: #0284c7;">
+                    <i class="fa-solid fa-boxes-stacked"></i>
+                </div>
+            </div>
+            <div class="kpi-card-footer">
+                <div>
+                    <span>Parts &amp; Products: <strong><?= $productUnits ?> units sold</strong></span>
+                    <?php if ($hasMissingCogs): ?>
+                    <span style="margin: 0 6px;">&bull;</span>
+                    <span style="color: #d97706; font-weight: 600;"><i class="fa-solid fa-triangle-exclamation mr-1"></i><?= $missingCogsCount ?> unpriced</span>
+                    <?php endif; ?>
+                </div>
+                <?php $cogsShare = ($netSettledRevenue > 0) ? round(($productCogs / $netSettledRevenue) * 100) : 0; ?>
+                <span class="text-muted"><strong><?= $cogsShare ?>%</strong> of revenue</span>
+            </div>
+        </div>
+
+        <!-- Card 3: Operating Expenses -->
         <div class="kpi-card">
             <div class="kpi-card-top">
                 <div>
@@ -1630,12 +1747,12 @@ include dirname(__DIR__) . '/layouts/header.php';
             </div>
             <div class="kpi-card-footer">
                 <span>Utilities, rent, soap, water &amp; maintenance costs</span>
-                <?php $expShare = ($grossRev > 0) ? round(($totalExp / $grossRev) * 100) : 0; ?>
+                <?php $expShare = ($netSettledRevenue > 0) ? round(($totalExp / $netSettledRevenue) * 100) : 0; ?>
                 <span class="text-muted"><strong><?= $expShare ?>%</strong> of revenue</span>
             </div>
         </div>
 
-        <!-- Card 3: Staff Commissions Paid -->
+        <!-- Card 4: Staff Commissions Paid -->
         <div class="kpi-card">
             <div class="kpi-card-top">
                 <div>
@@ -1653,33 +1770,33 @@ include dirname(__DIR__) . '/layouts/header.php';
                     <span style="margin: 0 6px;">&bull;</span>
                     <span>Mechanics: <strong><?= formatUSD($mechanicComm) ?></strong></span>
                 </div>
-                <?php $commShare = ($grossRev > 0) ? round(($totalComm / $grossRev) * 100) : 0; ?>
+                <?php $commShare = ($netSettledRevenue > 0) ? round(($totalComm / $netSettledRevenue) * 100) : 0; ?>
                 <span class="text-muted"><strong><?= $commShare ?>%</strong> of revenue</span>
             </div>
         </div>
 
-        <!-- Card 4: Net Profit (True Formula: Gross Revenue - Expenses - Commissions) -->
-        <div class="kpi-card <?= ($netProfit >= 0) ? 'profit-positive' : 'profit-negative' ?>">
+        <!-- Card 5: Net Operating Profit (Full Width) -->
+        <div class="kpi-card <?= ($netOperatingProfit >= 0) ? 'profit-positive' : 'profit-negative' ?>" style="grid-column: 1 / -1;">
             <div class="kpi-card-top">
                 <div>
-                    <div class="kpi-card-title" style="color: <?= ($netProfit >= 0) ? '#16a34a' : '#dc2626' ?>;">
-                        True Net Profit
+                    <div class="kpi-card-title" style="color: <?= ($netOperatingProfit >= 0) ? '#16a34a' : '#dc2626' ?>; font-size: 15px;">
+                        Net Operating Profit
                     </div>
-                    <div class="kpi-card-value" style="color: <?= ($netProfit >= 0) ? '#16a34a' : '#dc2626' ?>;">
-                        <?= formatUSD($netProfit) ?>
+                    <div class="kpi-card-value" style="color: <?= ($netOperatingProfit >= 0) ? '#16a34a' : '#dc2626' ?>; font-size: 32px;">
+                        <?= formatUSD($netOperatingProfit) ?>
                     </div>
-                    <div class="kpi-card-khr" style="color: <?= ($netProfit >= 0) ? '#16a34a' : '#dc2626' ?>;">
-                        (<?= formatKHR($netProfitKhr) ?>)
+                    <div class="kpi-card-khr" style="color: <?= ($netOperatingProfit >= 0) ? '#16a34a' : '#dc2626' ?>;">
+                        (<?= formatKHR($netOperatingProfitKhr) ?>)
                     </div>
                 </div>
-                <div class="kpi-icon-box" style="background: <?= ($netProfit >= 0) ? 'rgba(22, 163, 74, 0.15)' : 'rgba(220, 38, 38, 0.15)' ?>; color: <?= ($netProfit >= 0) ? '#16a34a' : '#dc2626' ?>;">
-                    <i class="fa-solid <?= ($netProfit >= 0) ? 'fa-trophy' : 'fa-circle-exclamation' ?>"></i>
+                <div class="kpi-icon-box" style="background: <?= ($netOperatingProfit >= 0) ? 'rgba(22, 163, 74, 0.15)' : 'rgba(220, 38, 38, 0.15)' ?>; color: <?= ($netOperatingProfit >= 0) ? '#16a34a' : '#dc2626' ?>; width: 52px; height: 52px; font-size: 22px;">
+                    <i class="fa-solid <?= ($netOperatingProfit >= 0) ? 'fa-trophy' : 'fa-circle-exclamation' ?>"></i>
                 </div>
             </div>
-            <div class="kpi-card-footer">
-                <span>Formula: Revenue (<?= formatUSD($grossRev) ?>) - Exp - Comm</span>
-                <?php $netMargin = ($grossRev > 0) ? round(($netProfit / $grossRev) * 100) : 0; ?>
-                <span style="font-weight: 700; color: <?= ($netProfit >= 0) ? '#16a34a' : '#dc2626' ?>;">
+            <div class="kpi-card-footer" style="padding-top: 14px; margin-top: 14px; border-top: 1px dashed var(--border);">
+                <span>Formula: Net Settled Rev (<?= formatUSD($netSettledRevenue) ?>) - COGS (<?= formatUSD($productCogs) ?>) - Comm (<?= formatUSD($totalComm) ?>) - Exp (<?= formatUSD($totalExp) ?>)</span>
+                <?php $netMargin = ($netSettledRevenue > 0) ? round(($netOperatingProfit / $netSettledRevenue) * 100) : 0; ?>
+                <span style="font-weight: 700; font-size: 14px; color: <?= ($netOperatingProfit >= 0) ? '#16a34a' : '#dc2626' ?>;">
                     <?= $netMargin ?>% Net Margin
                 </span>
             </div>
@@ -1688,31 +1805,42 @@ include dirname(__DIR__) . '/layouts/header.php';
 
     <!-- 4. Visual Comparison Charts: 3 Clean Cards (Responsive, Light & Dark Theme Resilient) -->
     <div class="charts-grid">
-        <!-- Chart 1: Financial Balance (Revenue vs Expenses vs Commissions) -->
+        <!-- Chart 1: Financial Balance (Revenue vs Expenses vs Commissions vs COGS) -->
         <div class="chart-card">
             <div class="chart-header">
                 <div>
                     <h3 class="chart-title">
                         <i class="fa-solid fa-scale-balanced" style="color: var(--primary);"></i> Revenue vs. Costs
                     </h3>
-                    <div class="chart-subtitle">Outflow vs collected revenue</div>
+                    <div class="chart-subtitle">Outflow vs net settled revenue</div>
                 </div>
                 <span class="badge badge-slate" style="font-size: 11px;">USD Total</span>
             </div>
             <?php 
-                $maxBarRef = max(0.01, $grossRev, ($totalExp + $totalComm));
-                $revPct = min(100, round(($grossRev / $maxBarRef) * 100));
+                $maxBarRef = max(0.01, $netSettledRevenue, ($totalExp + $totalComm + $productCogs));
+                $revPct = min(100, round(($netSettledRevenue / $maxBarRef) * 100));
+                $cogsPct = min(100, round(($productCogs / $maxBarRef) * 100));
                 $expPct = min(100, round(($totalExp / $maxBarRef) * 100));
                 $commPct = min(100, round(($totalComm / $maxBarRef) * 100));
             ?>
             <div class="chart-bars-wrap">
                 <div class="chart-bar-item">
                     <div class="chart-bar-meta">
-                        <span class="chart-bar-label"><i class="fa-solid fa-circle" style="color: #16a34a; font-size: 9px;"></i> Gross Revenue</span>
-                        <strong><?= formatUSD($grossRev) ?></strong>
+                        <span class="chart-bar-label"><i class="fa-solid fa-circle" style="color: #16a34a; font-size: 9px;"></i> Net Settled Revenue</span>
+                        <strong><?= formatUSD($netSettledRevenue) ?></strong>
                     </div>
                     <div class="chart-bar-track">
                         <div class="chart-bar-fill" style="width: <?= $revPct ?>%; background: #16a34a;"></div>
+                    </div>
+                </div>
+
+                <div class="chart-bar-item">
+                    <div class="chart-bar-meta">
+                        <span class="chart-bar-label"><i class="fa-solid fa-circle" style="color: #0284c7; font-size: 9px;"></i> Cost of Goods Sold (COGS)</span>
+                        <strong><?= formatUSD($productCogs) ?></strong>
+                    </div>
+                    <div class="chart-bar-track">
+                        <div class="chart-bar-fill" style="width: <?= $cogsPct ?>%; background: #0284c7;"></div>
                     </div>
                 </div>
 
@@ -1907,7 +2035,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <th class="table-num" style="min-width: 90px;">Cash</th>
                         <th class="table-num" style="min-width: 90px;">ABA</th>
                         <th class="table-num" style="min-width: 90px;">KHQR</th>
-                        <th class="table-num" style="min-width: 100px;">Pay Later</th>
+                        <th class="table-num" style="min-width: 100px;">Unpaid</th>
                         <th class="table-num" style="min-width: 90px;">Cancelled</th>
                         <th style="min-width: 120px;">Share (%)</th>
                     </tr>
@@ -2035,7 +2163,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <th class="table-num" style="min-width: 90px;">Cash</th>
                         <th class="table-num" style="min-width: 90px;">ABA</th>
                         <th class="table-num" style="min-width: 90px;">KHQR</th>
-                        <th class="table-num" style="min-width: 100px;">Pay Later</th>
+                        <th class="table-num" style="min-width: 100px;">Unpaid</th>
                         <th class="table-num" style="min-width: 90px;">Cancelled</th>
                     </tr>
                 </thead>
