@@ -1794,18 +1794,6 @@ class PosApp {
         }
 
 
-        // Change Crew Modal Close Buttons
-        const modalChangeCrew = document.getElementById('modalChangeCrew');
-        const closeCrewModal = () => modalChangeCrew?.classList.remove('open');
-        document.getElementById('btnCloseChangeCrewModal')?.addEventListener('click', closeCrewModal);
-        document.getElementById('btnCancelChangeCrewModal')?.addEventListener('click', closeCrewModal);
-
-        // Save Change Crew Button
-        const btnSaveCrew = document.getElementById('btnSaveChangeCrewModal');
-        if (btnSaveCrew) {
-            btnSaveCrew.addEventListener('click', () => this.handleSaveChangeCrew());
-        }
-
         // Cancel Order Modal Buttons
         const modalCancelOrder = document.getElementById('modalCancelOrder');
         const closeCancelModal = () => modalCancelOrder?.classList.remove('open');
@@ -6008,8 +5996,8 @@ class PosApp {
             slip_base64: (this.currentBankSlipBase64 && (this.paymentMethod === 'aba' || this.paymentMethod === 'khqr')) ? this.currentBankSlipBase64 : null,
             manager_username: (this.cart.find(it => it.manager_override)?.manager_username) || null,
             manager_pin: (this.cart.find(it => it.manager_override)?.manager_pin) || null,
-            washers: selectedWasher ? [parseInt(selectedWasher)] : [],
-            mechanics: selectedMechanic ? [parseInt(selectedMechanic)] : []
+            washers: [],
+            mechanics: []
         };
 
         let completedOrderRecord = null;
@@ -7596,21 +7584,6 @@ class PosApp {
                         </div>
                     </div>
 
-                    <!-- Section 5: Assigned Washer & Mechanic -->
-                    <div class="queue-card-section queue-section-crew">
-                        <div class="queue-crew-grid">
-                            <div class="queue-crew-row">
-                                <span class="queue-crew-label"><i class="fa-solid fa-hands-bubbles"></i> Washers:</span>
-                                <span class="queue-crew-val">${this.escapeHtml(ord.washer_names || 'None assigned')}</span>
-                            </div>
-                            ${ord.mechanic_names ? `
-                            <div class="queue-crew-row">
-                                <span class="queue-crew-label"><i class="fa-solid fa-wrench"></i> Mechanics:</span>
-                                <span class="queue-crew-val">${this.escapeHtml(ord.mechanic_names)}</span>
-                            </div>` : ''}
-                        </div>
-                    </div>
-
                     <!-- Section 6: Payment Status & Total Amount -->
                     <div class="queue-card-section queue-section-financial">
                         <div class="queue-payment-pill ${isPaidStatus ? 'is-paid' : 'is-unpaid'}">
@@ -7634,9 +7607,6 @@ class PosApp {
                         ` : ''}
 
                         ${(!isCancelled && !isCashier) ? `
-                            <button type="button" class="btn btn-outline btn-sm btn-queue-action" data-action="change-crew" data-order-number="${this.escapeHtml(ord.order_number)}" title="Change Crew">
-                                <i class="fa-solid fa-users-gear"></i> <span>${I18nManager.t('crewBtn') || 'Crew'}</span>
-                            </button>
                             <button type="button" class="btn btn-outline btn-sm btn-queue-action text-danger" style="color: #dc2626; border-color: #fecaca;" data-action="cancel-order" data-order-number="${this.escapeHtml(ord.order_number)}" title="Cancel Order">
                                 <i class="fa-solid fa-ban"></i> <span>${I18nManager.t('cancelBtn') || 'Cancel'}</span>
                             </button>
@@ -8018,78 +7988,13 @@ class PosApp {
     // ========================================================
     // CHANGE CREW MODAL (Requirement: re-assign crew)
     // ========================================================
-    static openChangeCrewModal(orderId, orderNumber, plate, washerIdsStr, mechanicIdsStr) {
-        document.getElementById('crewOrderId').value = orderId || 0;
-        document.getElementById('crewOrderNumber').value = orderNumber || '';
-        document.getElementById('crewOrderNum').textContent = `#${orderNumber}`;
-        document.getElementById('crewPlate').textContent = plate;
-
-        const currentWashers = washerIdsStr ? String(washerIdsStr).split(',').map(s => parseInt(s.trim())) : [];
-        const currentMechanics = mechanicIdsStr ? String(mechanicIdsStr).split(',').map(s => parseInt(s.trim())) : [];
-
-        const catalog = PosStorage.getCatalog();
-        const washers = catalog?.washers || [];
-        const mechanics = catalog?.mechanics || [];
-
-        const wListEl = document.getElementById('crewWashersList');
-        if (wListEl) {
-            let wHtml = '';
-            washers.forEach(w => {
-                const isChecked = currentWashers.includes(w.id) ? 'checked' : '';
-                wHtml += `
-                    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.88rem; cursor: pointer;">
-                        <input type="checkbox" name="crewWasherCheck" value="${w.id}" ${isChecked}>
-                        <span>${this.escapeHtml(w.full_name)} (${w.commission_type === 'percentage' ? w.commission_rate + '%' : '$' + w.commission_rate})</span>
-                    </label>
-                `;
-            });
-            wListEl.innerHTML = wHtml || '<div style="color: var(--text-muted); font-size: 0.82rem;">No washers registered</div>';
-        }
-
-        const mListEl = document.getElementById('crewMechanicsList');
-        if (mListEl) {
-            let mHtml = '';
-            mechanics.forEach(m => {
-                const isChecked = currentMechanics.includes(m.id) ? 'checked' : '';
-                mHtml += `
-                    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.88rem; cursor: pointer;">
-                        <input type="checkbox" name="crewMechanicCheck" value="${m.id}" ${isChecked}>
-                        <span>${this.escapeHtml(m.full_name)} (${m.commission_type === 'percentage' ? m.commission_rate + '%' : '$' + m.commission_rate})</span>
-                    </label>
-                `;
-            });
-            mListEl.innerHTML = mHtml || '<div style="color: var(--text-muted); font-size: 0.82rem;">No mechanics registered</div>';
-        }
-
-        document.getElementById('modalChangeCrew')?.classList.add('open');
+    // Staff assignment disabled: orders belong to bays
+    static openChangeCrewModal() {
+        return;
     }
 
     static async handleSaveChangeCrew() {
-        const btn = document.getElementById('btnSaveChangeCrewModal');
-        btn.disabled = true;
-        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saving...`;
-
-        const orderId = parseInt(document.getElementById('crewOrderId').value) || 0;
-        const orderNumber = document.getElementById('crewOrderNumber').value;
-
-        const selectedWashers = Array.from(document.querySelectorAll('input[name="crewWasherCheck"]:checked')).map(cb => parseInt(cb.value));
-        const selectedMechanics = Array.from(document.querySelectorAll('input[name="crewMechanicCheck"]:checked')).map(cb => parseInt(cb.value));
-
-        try {
-            const res = await PosApi.assignCrew(orderId, orderNumber, selectedWashers, selectedMechanics);
-            if (res.success) {
-                document.getElementById('modalChangeCrew')?.classList.remove('open');
-                alert(`Crew updated for Order #${orderNumber}!`);
-                await this.renderJobQueue();
-            } else {
-                alert(res.message || 'Failed to update crew');
-            }
-        } catch (err) {
-            alert(err.data?.message || err.message);
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = `<i class="fa-solid fa-check"></i> <span>រក្សាទុក (Save Changes)</span>`;
-        }
+        return;
     }
 
     // ========================================================

@@ -206,17 +206,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
     }
 }
 
-// Fetch orders assigned to this mechanic or in technical bays
-$jobsStmt = $pdo->prepare("
-    SELECT o.*, om.commission_usd,
+// Fetch orders in technical bays or with repair/oil change tasks
+$jobsStmt = $pdo->query("
+    SELECT o.*, 0.00 as commission_usd,
            COALESCE(o.repair_status, o.status) as current_job_status
     FROM orders o
-    LEFT JOIN order_mechanics om ON o.id = om.order_id AND om.mechanic_id = ?
     LEFT JOIN bays b ON o.bay_id = b.id
     WHERE o.status NOT IN ('cancelled')
       AND (
-          om.mechanic_id = ?
-          OR o.bay_id IN (SELECT id FROM bays WHERE bay_type = 'oil_change')
+          o.bay_id IN (SELECT id FROM bays WHERE bay_type = 'oil_change')
           OR o.repair_status IN ('waiting_tech', 'working')
           OR o.id IN (SELECT DISTINCT order_id FROM order_tasks WHERE task_type = 'oil_change' AND status IN ('in_progress', 'waiting', 'pending_prereq', 'ready_for_tech'))
       )
@@ -228,7 +226,6 @@ $jobsStmt = $pdo->prepare("
         WHEN 'paid' THEN 4
         ELSE 5 END, o.id DESC
 ");
-$jobsStmt->execute([$mechanicId, $mechanicId]);
 $jobs = $jobsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Pre-load Job Orders and simultaneous lanes for each active job
@@ -271,20 +268,15 @@ if (!empty($orderIds)) {
 // All active products for Parts Request modal
 $allProducts = $pdo->query("SELECT id, name_en, stock_qty, price_usd, unit FROM products WHERE is_active = 1 ORDER BY name_en ASC")->fetchAll(PDO::FETCH_ASSOC);
 
-// Mechanic's earnings today
-$earnStmt = $pdo->prepare("
-    SELECT COALESCE(SUM(om.commission_usd), 0) as total_earned, COUNT(DISTINCT o.id) as jobs_count
+// Technical jobs completed today
+$earnStmt = $pdo->query("
+    SELECT 0.00 as total_earned, COUNT(DISTINCT o.id) as jobs_count
     FROM orders o
-    JOIN order_mechanics om ON o.id = om.order_id
-    WHERE om.mechanic_id = ? AND DATE(o.created_at) = CURDATE()
+    WHERE o.status IN ('working', 'finished') 
+      AND (o.bay_id IN (SELECT id FROM bays WHERE bay_type = 'oil_change') OR o.repair_status IS NOT NULL)
+      AND DATE(o.created_at) = CURDATE()
 ");
-$earnStmt->execute([$mechanicId]);
 $todayEarn = $earnStmt->fetch() ?: ['total_earned' => 0.00, 'jobs_count' => 0];
-
-// All mechanics list for switcher
-$allMechanics = in_array($currentRole, ['owner', 'manager'], true) 
-    ? $pdo->query("SELECT id, full_name FROM users WHERE role IN ('mechanic', 'technical') AND status = 'active'")->fetchAll() 
-    : [];
 
 // Fetch bays and technical queue
 $allBays = BayManager::getAllBays($pdo);
@@ -307,30 +299,15 @@ include dirname(__DIR__) . '/layouts/header.php';
             <i class="fa-solid fa-wrench mr-1" style="color: #ea580c;"></i> <?= htmlspecialchars(__('nav_mechanic_screen')) ?>
         </h1>
         <p style="font-size: 14px; color: var(--text-muted);">
-            Technician: <strong><?= htmlspecialchars($mechanic['full_name'] ?? 'Technician') ?></strong> • Role: <strong><?= strtoupper(htmlspecialchars($mechanic['role'] ?? 'Technical')) ?></strong>
+            Bay 4 • Technical Service &amp; Maintenance Station
         </p>
     </div>
 
     <div style="display: flex; gap: 12px; align-items: center;">
-        <?php if (count($allMechanics) > 1): ?>
-            <form action="" method="GET" style="display: inline-flex; align-items: center; gap: 6px;">
-                <input type="hidden" name="view" value="mechanic_jobs">
-                <label class="text-xs text-muted">Switch Technician:</label>
-                <select name="mechanic_id" class="form-select" style="min-height: 38px; width: 190px;" onchange="this.form.submit()">
-                    <?php foreach ($allMechanics as $m): ?>
-                        <option value="<?= $m['id'] ?>" <?= ($m['id'] == $mechanicId) ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($m['full_name']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </form>
-        <?php endif; ?>
-
         <div style="background: var(--bg-card); border: 1px solid var(--border); padding: 10px 18px; border-radius: var(--radius-md); text-align: right;">
             <div class="text-xs text-muted">Today's Jobs</div>
             <div style="font-size: 18px; font-weight: 700; color: #ea580c;">
-                <?= (int)$todayEarn['jobs_count'] ?> completed
-                <span class="text-xs text-muted">(<?= formatUSD((float)$todayEarn['total_earned']) ?>)</span>
+                <?= (int)$todayEarn['jobs_count'] ?> jobs
             </div>
         </div>
     </div>

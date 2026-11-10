@@ -46,8 +46,8 @@ if ($isTest) {
         ['service_name' => 'Engine Oil 5W-30 Synthetic', 'item_type' => 'product', 'qty' => 1, 'price_usd' => 22.00],
         ['service_name' => 'High-Flow Oil Filter', 'item_type' => 'spare_part', 'qty' => 1, 'price_usd' => 3.00],
     ];
-    $washers = ['Rathana (Washer 1)'];
-    $mechanics = ['Kosal (Mechanic 1)'];
+    $washers = [];
+    $mechanics = [];
 } else {
     $orderId = (int)($_GET['id'] ?? 0);
     if ($orderId <= 0) {

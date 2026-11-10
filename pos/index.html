@@ -612,30 +612,20 @@
 
                     <!-- Cart Footer / Summary -->
                     <div class="cart-footer">
-                        <!-- Collapsible Section for Crew, Mileage & Notes (Requirement 5) -->
+                        <!-- Collapsible Section for Mileage & Notes -->
                         <details class="cart-details-accordion" id="cartServiceDetailsAccordion">
                             <summary class="cart-accordion-summary">
                                 <span class="summary-left">
                                     <i class="fa-solid fa-sliders"></i>
-                                    <span data-i18n="cartServiceCrew">Service Crew & Details</span>
+                                    <span data-i18n="cartServiceDetails">Service Mileage & Details</span>
                                 </span>
                                 <i class="fa-solid fa-chevron-down accordion-caret"></i>
                             </summary>
                             <div class="cart-accordion-content">
-                                <!-- Crew Assignment: Washer & Mechanic -->
-                                <div class="cart-crew-assignment">
-                                    <div>
-                                        <label><i class="fa-solid fa-hands-bubbles"></i> <span data-i18n="chooseWasher">ជាងលាង</span>:</label>
-                                        <select id="cartWasherSelect" class="form-control">
-                                            <option value="">-- All Active Washers --</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label><i class="fa-solid fa-wrench"></i> <span data-i18n="chooseMechanic">ជាងជួសជុល</span>:</label>
-                                        <select id="cartMechanicSelect" class="form-control">
-                                            <option value="">-- Duty Mechanic --</option>
-                                        </select>
-                                    </div>
+                                <!-- Hidden legacy crew selectors for backward compatibility -->
+                                <div style="display: none;">
+                                    <select id="cartWasherSelect"><option value="">-- None --</option></select>
+                                    <select id="cartMechanicSelect"><option value="">-- None --</option></select>
                                 </div>
 
                                 <!-- Current Vehicle Mileage & Next Oil Change Reminder -->
@@ -2366,57 +2356,6 @@
                 <button type="button" class="btn btn-outline" id="btnCancelEditNotesModal">Cancel</button>
                 <button type="button" class="btn btn-primary" id="btnSaveRepairNotesModal">
                     <i class="fa-solid fa-check"></i> <span data-i18n="saveNotes">រក្សាទុកចំណាំ</span>
-                </button>
-            </div>
-        </div>
-    </div>
-
-
-
-    <!-- Modal 9: Change Crew Modal (Requirement) -->
-    <div class="modal-backdrop" id="modalChangeCrew">
-        <div class="modal-content" style="max-width: 500px;">
-            <div class="modal-header">
-                <h3><i class="fa-solid fa-users-gear" style="color: var(--primary); margin-right: 6px;"></i>
-                    <span>ផ្លាស់ប្តូរជាង</span></h3>
-                <button type="button" class="btn btn-outline btn-sm btn-icon" id="btnCloseChangeCrewModal">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
-            </div>
-            <div class="modal-body">
-                <div
-                    style="margin-bottom: 0.85rem; font-size: 0.92rem; background: var(--bg-subtle); padding: 0.6rem 0.85rem; border-radius: var(--radius-md);">
-                    Order: <strong id="crewOrderNum">--</strong> • Plate: <strong id="crewPlate">--</strong>
-                </div>
-                <input type="hidden" id="crewOrderId" value="">
-                <input type="hidden" id="crewOrderNumber" value="">
-
-                <div class="form-group" style="margin-bottom: 1rem;">
-                    <label
-                        style="font-weight: 700; font-size: 0.85rem; color: var(--text-main); display: block; margin-bottom: 0.4rem;">
-                        <i class="fa-solid fa-hands-bubbles mr-1" style="color: var(--primary);"></i> ជាងលាង:
-                    </label>
-                    <div id="crewWashersList"
-                        style="display: flex; flex-direction: column; gap: 0.4rem; max-height: 140px; overflow-y: auto; border: 1px solid var(--border); padding: 0.6rem; border-radius: var(--radius-md);">
-                        <!-- Washers checkboxes -->
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label
-                        style="font-weight: 700; font-size: 0.85rem; color: var(--text-main); display: block; margin-bottom: 0.4rem;">
-                        <i class="fa-solid fa-wrench mr-1" style="color: #d97706;"></i> ជាងជួសជុល:
-                    </label>
-                    <div id="crewMechanicsList"
-                        style="display: flex; flex-direction: column; gap: 0.4rem; max-height: 140px; overflow-y: auto; border: 1px solid var(--border); padding: 0.6rem; border-radius: var(--radius-md);">
-                        <!-- Mechanics checkboxes -->
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer" style="justify-content: space-between;">
-                <button type="button" class="btn btn-outline" id="btnCancelChangeCrewModal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="btnSaveChangeCrewModal">
-                    <i class="fa-solid fa-check"></i> <span>រក្សាទុក</span>
                 </button>
             </div>
         </div>

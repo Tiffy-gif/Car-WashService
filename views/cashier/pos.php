@@ -317,51 +317,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action']) 
             }
         }
 
-        // Insert Assigned Washers & Calculate Commission
-        if (!empty($assignedWashers)) {
-            $wInfoStmt = $pdo->prepare("SELECT id, commission_type, commission_rate FROM users WHERE id = ?");
-            $wInsStmt = $pdo->prepare("INSERT INTO order_washers (order_id, washer_id, commission_usd) VALUES (?, ?, ?)");
-
-            $numWashers = count($assignedWashers);
-            foreach ($assignedWashers as $wId) {
-                $wId = (int)$wId;
-                $wInfoStmt->execute([$wId]);
-                $washer = $wInfoStmt->fetch();
-
-                $commUsd = 0.00;
-                if ($washer) {
-                    if ($washer['commission_type'] === 'percentage') {
-                        $commUsd = round(($totalUsd * ((float)$washer['commission_rate'] / 100)) / $numWashers, 2);
-                    } else {
-                        $commUsd = round((float)$washer['commission_rate'] / $numWashers, 2);
-                    }
-                }
-                $wInsStmt->execute([$orderId, $wId, $commUsd]);
-            }
-        }
-
-        // Insert Assigned Mechanics & Calculate Commission
-        if (!empty($assignedMechanics)) {
-            $mInfoStmt = $pdo->prepare("SELECT id, commission_type, commission_rate FROM users WHERE id = ?");
-            $mInsStmt = $pdo->prepare("INSERT INTO order_mechanics (order_id, mechanic_id, commission_usd) VALUES (?, ?, ?)");
-            $numM = count($assignedMechanics);
-            $mechBasis = ($repairLaborTotal + $sparePartsTotal > 0) ? ($repairLaborTotal + $sparePartsTotal) : $totalUsd;
-
-            foreach ($assignedMechanics as $mId) {
-                $mId = (int)$mId;
-                $mInfoStmt->execute([$mId]);
-                $mech = $mInfoStmt->fetch();
-                $mCommUsd = 0.00;
-                if ($mech) {
-                    if ($mech['commission_type'] === 'percentage') {
-                        $mCommUsd = round(($mechBasis * ((float)$mech['commission_rate'] / 100)) / $numM, 2);
-                    } else {
-                        $mCommUsd = round((float)$mech['commission_rate'] / $numM, 2);
-                    }
-                }
-                $mInsStmt->execute([$orderId, $mId, $mCommUsd]);
-            }
-        }
+        // Staff assignment disabled: orders belong to bays directly
 
         // Save into Vehicle Repair History if there's any repair work
         if ($hasRepair) {
@@ -926,53 +882,13 @@ include dirname(__DIR__) . '/layouts/header.php';
                 </div>
             </div>
 
-            <!-- 5. Washer & Mechanic Staff Crew Assignment -->
+            <!-- 5. Initial Status & Special Notes -->
             <div class="card">
                 <div class="card-header" style="margin-bottom: 14px;">
                     <h2 class="card-title">
-                        <i class="fa-solid fa-user-group mr-1" style="color: var(--primary);"></i> Assign Staff Crew (Washers &amp; Mechanics)
+                        <i class="fa-solid fa-clipboard-list mr-1" style="color: var(--primary);"></i> Initial Status &amp; Notes
                     </h2>
-                    <span class="text-xs text-muted">Select technicians on duty for this job</span>
-                </div>
-
-                <!-- Washers List -->
-                <div style="margin-bottom: 16px;">
-                    <div style="font-size: 13px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px;">
-                        <i class="fa-solid fa-soap mr-1" style="color: var(--primary);"></i> Wash Crew:
-                    </div>
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <?php if (empty($washersList)): ?>
-                            <span class="text-xs text-muted">No active washers found.</span>
-                        <?php else: ?>
-                            <?php foreach ($washersList as $w): ?>
-                                <label class="washer-pill" id="washer_pill_<?= $w['id'] ?>">
-                                    <input type="checkbox" name="washers[]" value="<?= $w['id'] ?>" onchange="toggleWasherPill(<?= $w['id'] ?>)">
-                                    <i class="fa-solid fa-soap mr-1"></i>
-                                    <span><?= htmlspecialchars($w['full_name']) ?></span>
-                                </label>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                </div>
-
-                <!-- Mechanics List -->
-                <div style="margin-bottom: 20px; padding-top: 14px; border-top: 1px dashed var(--border);">
-                    <div style="font-size: 13px; font-weight: 700; color: #ea580c; text-transform: uppercase; margin-bottom: 8px;">
-                        <i class="fa-solid fa-wrench mr-1"></i> Mechanic Crew (Minor Repair &amp; Maintenance):
-                    </div>
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <?php if (empty($mechanicsList)): ?>
-                            <span class="text-xs text-muted">No active mechanics found.</span>
-                        <?php else: ?>
-                            <?php foreach ($mechanicsList as $m): ?>
-                                <label class="washer-pill mechanic-pill" id="mechanic_pill_<?= $m['id'] ?>">
-                                    <input type="checkbox" name="mechanics[]" value="<?= $m['id'] ?>" onchange="toggleMechanicPill(<?= $m['id'] ?>)">
-                                    <i class="fa-solid fa-wrench mr-1"></i>
-                                    <span><?= htmlspecialchars($m['full_name']) ?></span>
-                                </label>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
+                    <span class="text-xs text-muted">Set queue status and special customer requests</span>
                 </div>
 
                 <!-- Status and Notes -->

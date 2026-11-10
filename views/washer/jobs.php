@@ -44,15 +44,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action']) 
             $msg = 'Please select a valid bay and car.';
             $msgType = 'danger';
         } else {
-            $res = BayManager::assignCarToBay($pdo, $bayId, $orderId, (int)$washer['id'], $washer['full_name'] ?? 'Washer', 'washer');
+            $res = BayManager::assignCarToBay($pdo, $bayId, $orderId, (int)($washer['id'] ?? 0), $washer['full_name'] ?? 'Washer', 'washer');
             if (!empty($res['success'])) {
-                // Ensure washer is assigned in order_washers if not already
-                $chkOw = $pdo->prepare("SELECT COUNT(*) FROM order_washers WHERE order_id = ? AND washer_id = ?");
-                $chkOw->execute([$orderId, $washerId]);
-                if (((int)$chkOw->fetchColumn()) === 0) {
-                    $pdo->prepare("INSERT INTO order_washers (order_id, washer_id, commission_usd) VALUES (?, ?, 0.00)")
-                        ->execute([$orderId, $washerId]);
-                }
                 $msg = $res['message'];
                 $msgType = 'success';
             } else {
@@ -114,14 +107,15 @@ $queues = BayManager::getQueues($pdo);
 $washQueue = $queues['wash_queue'];
 
 // Fetch orders assigned to this washer
-$jobsStmt = $pdo->prepare("
-    SELECT o.*, ow.commission_usd, GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ') as service_names,
+// Fetch all active wash jobs in bays or in progress
+$jobsStmt = $pdo->query("
+    SELECT o.*, 0.00 as commission_usd, GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ') as service_names,
            b.bay_name
     FROM orders o
-    JOIN order_washers ow ON o.id = ow.order_id
     LEFT JOIN order_items oi ON o.id = oi.order_id
     LEFT JOIN bays b ON o.bay_id = b.id
-    WHERE ow.washer_id = ?
+    WHERE o.status IN ('washing', 'waiting', 'paid')
+       OR (o.status = 'finished' AND DATE(o.created_at) = CURDATE())
     GROUP BY o.id
     ORDER BY CASE o.status 
         WHEN 'washing' THEN 1
@@ -130,17 +124,14 @@ $jobsStmt = $pdo->prepare("
         WHEN 'paid' THEN 4
         ELSE 5 END, o.id DESC
 ");
-$jobsStmt->execute([$washerId]);
 $jobs = $jobsStmt->fetchAll();
 
-// Washer's earnings today
-$earnStmt = $pdo->prepare("
-    SELECT COALESCE(SUM(ow.commission_usd), 0) as total_earned, COUNT(DISTINCT o.id) as jobs_count
+// Today's wash jobs count
+$earnStmt = $pdo->query("
+    SELECT 0.00 as total_earned, COUNT(DISTINCT o.id) as jobs_count
     FROM orders o
-    JOIN order_washers ow ON o.id = ow.order_id
-    WHERE ow.washer_id = ? AND DATE(o.created_at) = CURDATE()
+    WHERE o.status IN ('washing', 'finished') AND DATE(o.created_at) = CURDATE()
 ");
-$earnStmt->execute([$washerId]);
 $todayEarn = $earnStmt->fetch() ?: ['total_earned' => 0.00, 'jobs_count' => 0];
 
 include dirname(__DIR__) . '/layouts/header.php';
@@ -152,14 +143,13 @@ include dirname(__DIR__) . '/layouts/header.php';
             <i class="fa-solid fa-soap mr-1" style="color: var(--primary);"></i> <?= htmlspecialchars(__('nav_washer_screen')) ?>
         </h1>
         <p style="font-size: 14px; color: var(--text-muted);">
-            Washer: <strong><?= htmlspecialchars($washer['full_name'] ?? 'Washer') ?></strong> • Commission: 
-            <?= ($washer['commission_type'] === 'percentage') ? ((float)$washer['commission_rate'] . '% per job') : ('$' . number_format((float)$washer['commission_rate'], 2) . ' fixed/job') ?>
+            Wash Station • Active Duty
         </p>
     </div>
     <div style="display: flex; gap: 12px; align-items: center;">
         <div style="background: var(--bg-card); border: 1px solid var(--border); padding: 10px 18px; border-radius: var(--radius-md); text-align: right;">
-            <div class="text-xs text-muted">Today's Commission</div>
-            <div style="font-size: 18px; font-weight: 700; color: var(--success);"><?= formatUSD((float)$todayEarn['total_earned']) ?> <span class="text-xs text-muted">(<?= (int)$todayEarn['jobs_count'] ?> jobs)</span></div>
+            <div class="text-xs text-muted">Cars Processed Today</div>
+            <div style="font-size: 18px; font-weight: 700; color: var(--success);"><span class="text-xs text-muted"><?= (int)$todayEarn['jobs_count'] ?> jobs</span></div>
         </div>
     </div>
 </div>
@@ -297,17 +287,17 @@ include dirname(__DIR__) . '/layouts/header.php';
 <?php endif; ?>
 
 <!-- ======================================================== -->
-<!-- 3. MY ASSIGNED JOBS -->
+<!-- 3. ACTIVE WASH JOBS -->
 <!-- ======================================================== -->
 <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); margin-bottom: 12px;">
-    <i class="fa-solid fa-clipboard-user mr-1" style="color: var(--primary);"></i> My Assigned Jobs
+    <i class="fa-solid fa-clipboard-list mr-1" style="color: var(--primary);"></i> Active Wash Jobs
 </h3>
 
 <div class="grid grid-cols-2" style="gap: 20px;">
     <?php if (empty($jobs)): ?>
         <div class="card" style="grid-column: span 2; text-align: center; padding: 40px; color: var(--text-muted);">
             <i class="fa-solid fa-clipboard-check" style="font-size: 40px; margin-bottom: 10px; opacity: 0.4;"></i>
-            <h3>No jobs assigned currently</h3>
+            <h3>No active wash jobs currently</h3>
             <p class="text-sm">Select a waiting vehicle above to put it into a free wash bay.</p>
         </div>
     <?php else: ?>

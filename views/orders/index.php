@@ -510,19 +510,15 @@ $selectedTab = $_GET['tab'] ?? 'all';
 // Fetch orders with items, washers, mechanics, and customer loyalty info
 $sql = "
     SELECT o.*,
+           b.bay_name,
            c.loyalty_points as cust_loyalty_points,
            c.lifetime_points as cust_lifetime_points,
            c.membership_level as cust_membership_level,
-           GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ') as service_names,
-           GROUP_CONCAT(DISTINCT uw.full_name SEPARATOR ', ') as washer_names,
-           GROUP_CONCAT(DISTINCT um.full_name SEPARATOR ', ') as mechanic_names
+           GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ') as service_names
     FROM orders o
+    LEFT JOIN bays b ON o.bay_id = b.id
     LEFT JOIN customers c ON o.customer_id = c.id
     LEFT JOIN order_items oi ON o.id = oi.order_id
-    LEFT JOIN order_washers ow ON o.id = ow.order_id
-    LEFT JOIN users uw ON ow.washer_id = uw.id
-    LEFT JOIN order_mechanics om ON o.id = om.order_id
-    LEFT JOIN users um ON om.mechanic_id = um.id
 ";
 
 if ($selectedTab === 'pending_transfers') {
@@ -643,7 +639,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                     <th style="width: 160px;">Plate / Vehicle</th>
                     <th>Customer</th>
                     <th>Services</th>
-                    <th>Washers</th>
+                    <th>Bay</th>
                     <th>Total</th>
                     <th>Status</th>
                     <th style="text-align: right; width: 220px;">Actions</th>
@@ -701,26 +697,13 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <?php endif; ?>
                         </td>
                         <td>
-                            <div style="display: flex; flex-direction: column; gap: 4px;">
-                                <?php if (!empty($ord['washer_names'])): ?>
-                                    <span class="badge badge-purple" style="font-size: 11px;">
-                                        <i class="fa-solid fa-soap mr-1"></i> <?= htmlspecialchars((string)$ord['washer_names']) ?>
-                                    </span>
-                                <?php endif; ?>
-                                <?php if (!empty($ord['mechanic_names'])): ?>
-                                    <span class="badge" style="background: #ffedd5; color: #ea580c; font-size: 11px;">
-                                        <i class="fa-solid fa-wrench mr-1"></i> <?= htmlspecialchars((string)$ord['mechanic_names']) ?>
-                                    </span>
-                                <?php endif; ?>
-                                <?php if (empty($ord['washer_names']) && empty($ord['mechanic_names'])): ?>
-                                    <button type="button" class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 4px 8px;"
-                                            data-order-id="<?= (int)$ord['id'] ?>"
-                                            data-plate="<?= htmlspecialchars((string)$ord['plate_number'], ENT_QUOTES, 'UTF-8') ?>"
-                                            onclick="openAssignWasherModal(this)">
-                                        + Assign Washer
-                                    </button>
-                                <?php endif; ?>
-                            </div>
+                            <?php if (!empty($ord['bay_name'])): ?>
+                                <span class="badge badge-primary" style="font-size: 11px;">
+                                    <i class="fa-solid fa-warehouse mr-1"></i> <?= htmlspecialchars((string)$ord['bay_name']) ?>
+                                </span>
+                            <?php else: ?>
+                                <span class="badge badge-slate" style="font-size: 11px;">Waiting Line</span>
+                            <?php endif; ?>
                         </td>
                         <td>
                             <div><strong style="font-size: 15px;"><?= formatUSD((float)$ord['total_usd']) ?></strong></div>
@@ -834,14 +817,6 @@ include dirname(__DIR__) . '/layouts/header.php';
                                         <?php endif; ?>
                                     <?php endif; ?>
 
-                                    <!-- Reassign Washers Button -->
-                                    <button type="button" class="btn btn-secondary btn-sm" title="Reassign Washers"
-                                            data-order-id="<?= (int)$ord['id'] ?>"
-                                            data-plate="<?= htmlspecialchars($ord['plate_number'], ENT_QUOTES, 'UTF-8') ?>"
-                                            onclick="openAssignWasherModal(this)">
-                                        <i class="fa-solid fa-user-pen"></i>
-                                    </button>
-
                                     <!-- Cancel Order Button: Unpaid orders or Manager/Owner for paid orders -->
                                     <?php if ((Auth::can('orders.cancel') || Auth::can('pos.cancel_order')) && in_array(Auth::getRole(), ['owner', 'manager', 'system_admin'], true)): ?>
                                         <button type="button" class="btn btn-secondary btn-sm" style="color: var(--danger);" title="Cancel Order (Restores Stock & Commission)"
@@ -861,41 +836,6 @@ include dirname(__DIR__) . '/layouts/header.php';
                 <?php endif; ?>
             </tbody>
         </table>
-    </div>
-</div>
-
-<!-- Modal: Assign Washers -->
-<div class="modal-backdrop" id="assignWasherModal">
-    <div class="modal" style="max-width: 440px;">
-        <div class="modal-header">
-            <h3 class="modal-title"><i class="fa-solid fa-user-group mr-1" style="color: var(--primary);"></i> Assign Washers</h3>
-            <button type="button" class="modal-close" onclick="closeModal('assignWasherModal')">&times;</button>
-        </div>
-        <form action="" method="POST">
-            <?= csrf_field() ?>
-            <input type="hidden" name="action" value="assign_washers">
-            <input type="hidden" name="order_id" id="assign_order_id" value="">
-
-            <div class="modal-body">
-                <p id="assign_order_plate" style="font-weight: 700; font-size: 16px; margin-bottom: 16px; color: var(--text-main);"></p>
-                <div class="form-group">
-                    <label class="form-label">Select Washer(s) on Bay Duty:</label>
-                    <div style="display: flex; flex-direction: column; gap: 10px;">
-                        <?php foreach ($allWashers as $w): ?>
-                            <label style="display: flex; align-items: center; gap: 10px; background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border); cursor: pointer;">
-                                <input type="checkbox" name="washers[]" value="<?= $w['id'] ?>" style="width: 18px; height: 18px;">
-                                <span style="font-weight: 600; font-size: 14px;"><?= htmlspecialchars($w['full_name']) ?></span>
-                            </label>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-            </div>
-
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="closeModal('assignWasherModal')"><?= htmlspecialchars(__('cancel')) ?></button>
-                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-check mr-1"></i> Save Assignment</button>
-            </div>
-        </form>
     </div>
 </div>
 
