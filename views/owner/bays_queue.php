@@ -605,10 +605,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                                     style="flex: 1; background: var(--success); border-color: var(--success);"
                                     onclick="openFinishModal(<?= $b['id'] ?>, <?= $car['order_id'] ?>, '<?= htmlspecialchars($car['plate_number'], ENT_QUOTES) ?>', <?= (int)$car['is_mixed'] ?>, <?= $isOil ? 1 : 0 ?>)">
                                 <i class="fa-solid fa-check-double mr-1"></i> 
-                                <?= $isOil 
-                                    ? (!empty($car['is_mixed']) ? 'Finish Lift &amp; Send to Wash' : 'Finish Mechanical Job') 
-                                    : (!empty($car['is_mixed']) && in_array(($car['repair_status'] ?? ''), ['waiting_wash_first', 'waiting'], true) ? 'Finish Wash &amp; Send to Bay 4' : 'Finish Wash (Send to QC)') 
-                                ?>
+                                <?= $isOil ? (!empty($car['is_mixed']) ? 'Finish Lift &amp; Send to Wash' : 'Finish Mechanical Job') : 'Finish Wash (Send to QC)' ?>
                             </button>
                             <?php if ($canSupervisorOverride): ?>
                                 <button type="button" 

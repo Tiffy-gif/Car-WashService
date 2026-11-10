@@ -371,18 +371,6 @@ class PosApi {
     }
 
     /**
-     * Switch Workflow Sequence between 'lift_first' and 'wash_first'
-     */
-    static async switchServiceSequence(orderId, serviceSequence = 'wash_first') {
-        const user = PosStorage.getUser();
-        return await this.request('switch_service_sequence', {
-            order_id: orderId,
-            service_sequence: serviceSequence,
-            staff_id: user?.id || 1
-        });
-    }
-
-    /**
      * Finish Car in Bay: Frees the bay and marks order "Ready to pay"
      */
     static async finishCar(bayId, orderId = null, staffId = null) {

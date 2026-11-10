@@ -503,8 +503,6 @@ $ACTION_PERMISSIONS = [
     'mark_arrived' => ['bays.arrive'],
     'assign_bay' => ['bays.assign'],
     'assign_car_to_bay' => ['bays.assign'],
-    'switch_service_sequence' => ['bays.assign', 'pos.access', 'bays.view'],
-    'set_service_sequence' => ['bays.assign', 'pos.access', 'bays.view'],
     'finish_car' => ['bays.finish'],
     'finish_job' => ['bays.finish'],
     'finish_bay' => ['bays.finish'],
@@ -2111,14 +2109,6 @@ if ($action === 'create_order') {
         ]);
         $orderId = (int)$pdo->lastInsertId();
 
-        $serviceSequence = in_array(($inputData['service_sequence'] ?? $_POST['service_sequence'] ?? 'lift_first'), ['lift_first', 'wash_first'], true)
-            ? ($inputData['service_sequence'] ?? $_POST['service_sequence'] ?? 'lift_first')
-            : 'lift_first';
-        if ($serviceSequence === 'wash_first') {
-            $pdo->prepare("UPDATE orders SET service_sequence = 'wash_first', repair_status = 'waiting_wash_first' WHERE id = ?")->execute([$orderId]);
-        }
-        BayManager::ensureOrderTasks($pdo, $orderId);
-
         // Audit-log order creation with created_by and synced_by
         if (class_exists('AuditLogger')) {
             AuditLogger::log(
@@ -3065,7 +3055,6 @@ if ($action === 'assign_bay' || $action === 'assign_car_to_bay') {
     $reason = trim((string)($inputData['reason'] ?? $_POST['reason'] ?? ''));
     $managerPin = trim((string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? ''));
     $managerUsername = trim((string)($inputData['manager_username'] ?? $_POST['manager_username'] ?? ''));
-    $allowWashFirst = !empty($inputData['allow_wash_first']) || !empty($_POST['allow_wash_first']) || !empty($inputData['wash_first']) || !empty($_POST['wash_first']);
 
     if ($bayId <= 0 || $orderId <= 0) {
         http_response_code(400);
@@ -3082,8 +3071,7 @@ if ($action === 'assign_bay' || $action === 'assign_car_to_bay') {
         $stfUser['effective_role'],
         $reason !== '' ? $reason : null,
         $managerPin !== '' ? $managerPin : null,
-        $managerUsername !== '' ? $managerUsername : null,
-        $allowWashFirst
+        $managerUsername !== '' ? $managerUsername : null
     );
 
     if (!$res['success']) {
@@ -3100,35 +3088,6 @@ if ($action === 'assign_bay' || $action === 'assign_car_to_bay') {
         } else {
             http_response_code(400);
         }
-    }
-    echo json_encode($res);
-    exit;
-}
-
-// ========================================================
-// ACTION: switch_service_sequence / set_service_sequence
-// Switch workflow between Lift First and Wash First
-// ========================================================
-if ($action === 'switch_service_sequence' || $action === 'set_service_sequence') {
-    $staffId = (int)($inputData['staff_id'] ?? $_POST['staff_id'] ?? $inputData['user_id'] ?? $_POST['user_id'] ?? $verifiedUserId);
-    $stfUser = BayManager::getRealStaffUser($pdo, $staffId);
-
-    $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
-    $seq = trim((string)($inputData['service_sequence'] ?? $_POST['service_sequence'] ?? 'wash_first'));
-
-    if ($orderId <= 0) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'PARAMS_REQUIRED', 'message' => 'order_id is required']);
-        exit;
-    }
-
-    $userId = $stfUser ? (int)$stfUser['id'] : $verifiedUserId;
-    $userName = $stfUser ? (string)$stfUser['full_name'] : ($sessionUser['username'] ?? 'Staff');
-    $userRole = $stfUser ? (string)$stfUser['effective_role'] : ($sessionUser['role'] ?? 'cashier');
-
-    $res = BayManager::switchServiceSequence($pdo, $orderId, $seq, $userId, $userName, $userRole);
-    if (empty($res['success'])) {
-        http_response_code(400);
     }
     echo json_encode($res);
     exit;
@@ -5616,14 +5575,6 @@ if ($action === 'appointment_arrived') {
             $appt['vehicle_type'] ?: 'small_car', $price, $price, $khr, $apptFullTime
         ]);
         $orderId = (int)$pdo->lastInsertId();
-
-        $serviceSequence = in_array(($inputData['service_sequence'] ?? $_POST['service_sequence'] ?? 'lift_first'), ['lift_first', 'wash_first'], true)
-            ? ($inputData['service_sequence'] ?? $_POST['service_sequence'] ?? 'lift_first')
-            : 'lift_first';
-        if ($serviceSequence === 'wash_first') {
-            $pdo->prepare("UPDATE orders SET service_sequence = 'wash_first', repair_status = 'waiting_wash_first' WHERE id = ?")->execute([$orderId]);
-        }
-        BayManager::ensureOrderTasks($pdo, $orderId);
 
         $pdo->prepare("INSERT INTO order_items (order_id, service_id, service_name, price_usd, price_khr, item_type, qty, created_at) VALUES (?, ?, ?, ?, ?, 'service', 1, CURRENT_TIMESTAMP)")
             ->execute([$orderId, $svcId, $svcRow['name_en'] ?? 'Car Wash', $price, $khr]);

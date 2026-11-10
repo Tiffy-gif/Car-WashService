@@ -169,9 +169,6 @@ class BayManager {
             if (!in_array('is_mixed', $cols, true)) {
                 $pdo->exec("ALTER TABLE orders ADD COLUMN is_mixed TINYINT(1) NOT NULL DEFAULT 0 AFTER is_express");
             }
-            if (!in_array('service_sequence', $cols, true)) {
-                $pdo->exec("ALTER TABLE orders ADD COLUMN service_sequence VARCHAR(20) NOT NULL DEFAULT 'lift_first' AFTER is_mixed");
-            }
             if (!in_array('took_longer_than_expected', $cols, true)) {
                 $pdo->exec("ALTER TABLE orders ADD COLUMN took_longer_than_expected TINYINT(1) DEFAULT NULL AFTER is_mixed");
             }
@@ -204,9 +201,6 @@ class BayManager {
             }
             if (!in_array('is_mixed', $existingCols, true)) {
                 $pdo->exec("ALTER TABLE orders ADD COLUMN is_mixed TINYINT(1) NOT NULL DEFAULT 0");
-            }
-            if (!in_array('service_sequence', $existingCols, true)) {
-                $pdo->exec("ALTER TABLE orders ADD COLUMN service_sequence VARCHAR(20) NOT NULL DEFAULT 'lift_first'");
             }
             if (!in_array('took_longer_than_expected', $existingCols, true)) {
                 $pdo->exec("ALTER TABLE orders ADD COLUMN took_longer_than_expected TINYINT(1) DEFAULT NULL");
@@ -630,18 +624,11 @@ class BayManager {
                 ");
 
                 if ($isMixed) {
-                    $seqType = $order['service_sequence'] ?? 'lift_first';
                     if ($repairFinished) {
                         // Historical mixed order with finished mechanical service:
                         // Step 1: completed, Step 2: waiting in Wash Queue, Step 3: pending_prereq on Finishing Pad
                         $insTask->execute([$orderId, 'oil_change', 'Engine Oil Change & Inspection (Step 1)', 1, 'completed']);
                         $insTask->execute([$orderId, 'wash', 'Exterior & Interior Wash (Step 2)', 2, 'waiting']);
-                        $insTask->execute([$orderId, 'qc', 'Finishing Pad Quality Control (QC)', 3, 'pending_prereq']);
-                    } elseif ($seqType === 'wash_first') {
-                        // Wash First workflow (Bay 4 busy bypass):
-                        // Step 1: waiting in Wash Queue, Step 2: pending_prereq in Bay 4 Lift, Step 3: pending_prereq on Finishing Pad
-                        $insTask->execute([$orderId, 'wash', 'Exterior & Interior Wash (Step 1)', 1, 'waiting']);
-                        $insTask->execute([$orderId, 'oil_change', 'Engine Oil Change & Inspection (Step 2)', 2, 'pending_prereq']);
                         $insTask->execute([$orderId, 'qc', 'Finishing Pad Quality Control (QC)', 3, 'pending_prereq']);
                     } else {
                         // Standard mixed order: Lift First (Step 1: waiting, Step 2: pending_prereq, Step 3: pending_prereq)
@@ -1229,8 +1216,7 @@ class BayManager {
         string $userRole,
         ?string $reason = null,
         ?string $managerPin = null,
-        ?string $managerUsername = null,
-        bool $allowWashFirst = false
+        ?string $managerUsername = null
     ): array {
         self::ensureTables($pdo);
 
@@ -1319,53 +1305,21 @@ class BayManager {
             return [
                 'success' => false,
                 'error' => 'PREREQUISITE_STEP_INCOMPLETE',
-                'message' => 'Sequence Rule: Previous step must be finished before this step can begin. Nobody skips a step.'
+                'message' => 'Sequence Rule: Step 1 (Mechanical Service in Bay 4) must be finished before Step 2 (Car Wash) can begin. Nobody skips a step.'
             ];
         }
 
-        // Workflow Sequence Gating:
+        // Lift First — Wash Second: Gate wash bays against incomplete mechanical prerequisite
         $isWashBay = ($bay['bay_type'] !== 'oil_change');
         if ($isWashBay) {
-            $washTask = null;
-            $oilTask = null;
             foreach ($tasks as $t) {
-                if ($t['task_type'] === 'wash') $washTask = $t;
-                if ($t['task_type'] === 'oil_change') $oilTask = $t;
-            }
-            if ($oilTask && $oilTask['status'] !== 'completed' && $washTask && $oilTask['sequence'] < $washTask['sequence']) {
-                if ($allowWashFirst) {
-                    self::switchServiceSequence($pdo, $orderId, 'wash_first', $userId, $userName, $userRole);
-                    $tasks = self::ensureOrderTasks($pdo, $orderId);
-                    foreach ($tasks as $t) {
-                        if ($t['status'] !== 'completed') {
-                            $activeTask = $t;
-                            break;
-                        }
-                    }
-                    $taskType = $activeTask ? $activeTask['task_type'] : 'wash';
-                } else {
+                if ($t['task_type'] === 'oil_change' && $t['status'] !== 'completed') {
                     return [
                         'success' => false,
                         'error' => 'PREREQUISITE_STEP_INCOMPLETE',
-                        'can_wash_first' => true,
                         'message' => 'Sequence Rule: Step 1 (Mechanical Service in Bay 4) must be finished before entering a Wash Bay. Nobody skips a step.'
                     ];
                 }
-            }
-        } else {
-            // Bay 4 (Oil Change): Gated if vehicle is scheduled for Wash First and Wash is incomplete
-            $washTask = null;
-            $oilTask = null;
-            foreach ($tasks as $t) {
-                if ($t['task_type'] === 'wash') $washTask = $t;
-                if ($t['task_type'] === 'oil_change') $oilTask = $t;
-            }
-            if ($washTask && $washTask['status'] !== 'completed' && $oilTask && $washTask['sequence'] < $oilTask['sequence']) {
-                return [
-                    'success' => false,
-                    'error' => 'PREREQUISITE_STEP_INCOMPLETE',
-                    'message' => 'Sequence Rule: Vehicle is scheduled for Wash First. Step 1 (Car Wash) must be finished before entering Bay 4.'
-                ];
             }
         }
 
@@ -1841,31 +1795,21 @@ class BayManager {
 
             foreach ($tasks as $t) {
                 if ($t['status'] === 'in_progress') {
-                    if ($isMechanicalBay && ($t['task_type'] === 'wash' || $t['task_type'] === 'qc')) {
+                    if ($isMechanicalBay && $t['task_type'] === 'wash') {
                         continue;
                     }
                     $currentTask = $t;
                 } elseif ($t['status'] !== 'completed') {
-                    if ($isMechanicalBay && ($t['task_type'] === 'wash' || $t['task_type'] === 'qc')) {
+                    if ($isMechanicalBay && $t['task_type'] === 'wash') {
                         continue;
                     }
                     $remainingTasks[] = $t;
                 }
             }
 
-            // If no in_progress task found, find first uncompleted matching this bay
+            // If no in_progress task found, find first uncompleted
             if (!$currentTask && !empty($remainingTasks)) {
                 $currentTask = array_shift($remainingTasks);
-            }
-
-            // If still no currentTask (e.g. TechnicalManager::finishJobOrder already marked oil_change as completed):
-            if (!$currentTask && $isMechanicalBay) {
-                foreach ($tasks as $t) {
-                    if ($t['task_type'] === 'oil_change' || $t['task_type'] === 'repair') {
-                        $currentTask = $t;
-                        break;
-                    }
-                }
             }
 
             // 4. Check next task in sequence to determine if this is a handshake or final completion
@@ -2038,72 +1982,6 @@ class BayManager {
                         'is_handshake' => true,
                         'to_qc' => true,
                         'message' => "Car Wash finished and vehicle sent to Finishing Pad for QC inspection. {$bayName} is now Free.",
-                        'order_id' => $orderId,
-                        'bay_id' => $effectiveBayId,
-                        'bay_name' => $bayName,
-                        'next_task' => $nextTask['title'],
-                        'plate_number' => $order['plate_number']
-                    ];
-                }
-
-                if ($nextTask['task_type'] === 'oil_change') {
-                    // Wash First Handshake (Step 1 Wash finished -> unblock Step 2 Oil Change in Bay 4):
-                    $pdo->prepare("
-                        UPDATE order_tasks 
-                        SET status = 'waiting', updated_at = ? 
-                        WHERE id = ?
-                    ")->execute([$now, $nextTask['id']]);
-
-                    // Also unblock Lane 2 multi-point inspection task if present
-                    $pdo->prepare("
-                        UPDATE order_tasks 
-                        SET status = 'waiting', updated_at = ? 
-                        WHERE order_id = ? AND task_type = 'inspection'
-                    ")->execute([$now, $orderId]);
-
-                    // Order moves to Technical Queue for Bay 4:
-                    $pdo->prepare("
-                        UPDATE orders 
-                        SET bay_id = NULL, status = 'waiting', repair_status = 'waiting_tech' 
-                        WHERE id = ?
-                    ")->execute([$orderId]);
-
-                    $currentTaskTitle = $currentTask['title'] ?? 'Car Wash Service (Step 1)';
-                    $details = "Staff {$userName} finished {$currentTaskTitle}. Handshake: Car {$order['plate_number']} sent to Technical Queue for Step {$nextTask['sequence']} (Oil Change in Bay 4). Bay {$bayName} is Free.";
-                    $pdo->prepare("
-                        INSERT INTO bay_history (order_id, bay_id, bay_name, plate_number, action, performed_by, performed_by_name, performed_by_role, reason, details, created_at)
-                        VALUES (?, ?, ?, ?, 'sent_to_tech_queue', ?, ?, ?, ?, ?, ?)
-                    ")->execute([
-                        $orderId, $effectiveBayId, $bayName, $order['plate_number'],
-                        $userId, $userName, $userRole, $reason, $details, $now
-                    ]);
-
-                    if ($pdo->inTransaction()) {
-                        $pdo->commit();
-                    }
-
-                    // Post-commit non-fatal notification dispatch to technicians
-                    try {
-                        NotificationManager::notify($pdo, [
-                            'target_role' => 'technical',
-                            'category' => 'handshake',
-                            'reference_id' => 'HANDSHAKE-TECH-' . $orderId,
-                            'title_en' => 'Car Ready for Oil Change (Wash Finished)',
-                            'title_km' => 'រថយន្តរួចរាល់សម្រាប់ការប្តូរប្រេង (លាងរួច)',
-                            'message_en' => "Wash finished for {$order['plate_number']}. Car has joined the Technical Queue for Bay 4.",
-                            'message_km' => "ការលាងសម្អាតបានបញ្ចប់សម្រាប់ {$order['plate_number']}។ រថយន្តបានចូលក្នុងជួររង់ចាំប្តូរប្រេងនៅបន្ទប់ទី 4។",
-                            'action_url' => 'index.php?view=mechanic_jobs',
-                            'sound_type' => 'chime'
-                        ]);
-                    } catch (Throwable $ne) {
-                        error_log("Tech notification failed on handover for order {$orderId}: " . $ne->getMessage());
-                    }
-
-                    return [
-                        'success' => true,
-                        'is_handshake' => true,
-                        'to_tech' => true,
-                        'message' => "Step 1 (Wash) finished and car sent to Technical Queue for Bay 4. {$bayName} is now Free.",
                         'order_id' => $orderId,
                         'bay_id' => $effectiveBayId,
                         'bay_name' => $bayName,
@@ -2620,82 +2498,6 @@ class BayManager {
             'order_id' => $orderId,
             'plate_number' => $order['plate_number'],
             'message' => "Vehicle {$order['plate_number']} handed over to customer successfully."
-        ];
-    }
-
-    /**
-     * Switch workflow sequence between 'lift_first' and 'wash_first'.
-     * Only permitted if vehicle has not entered a bay yet and no tasks are completed or in progress.
-     */
-    public static function switchServiceSequence(
-        PDO $pdo,
-        int $orderId,
-        string $targetSequence,
-        int $userId,
-        string $userName,
-        string $userRole
-    ): array {
-        self::ensureTables($pdo);
-
-        if (!in_array($targetSequence, ['lift_first', 'wash_first'], true)) {
-            return ['success' => false, 'error' => 'INVALID_SEQUENCE', 'message' => "Sequence must be 'lift_first' or 'wash_first'."];
-        }
-
-        $oStmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?");
-        $oStmt->execute([$orderId]);
-        $order = $oStmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$order) {
-            return ['success' => false, 'error' => 'ORDER_NOT_FOUND', 'message' => "Order #{$orderId} not found."];
-        }
-
-        if (!empty($order['bay_id'])) {
-            return ['success' => false, 'error' => 'ALREADY_IN_BAY', 'message' => "Cannot switch workflow: Vehicle is currently inside a bay."];
-        }
-
-        if (in_array($order['status'], ['finished', 'cancelled'], true)) {
-            return ['success' => false, 'error' => 'ORDER_COMPLETED', 'message' => "Cannot switch workflow: Order is {$order['status']}."];
-        }
-
-        $tasks = self::ensureOrderTasks($pdo, $orderId);
-        foreach ($tasks as $t) {
-            if ($t['status'] === 'completed' || $t['status'] === 'in_progress') {
-                return ['success' => false, 'error' => 'SERVICE_ALREADY_STARTED', 'message' => "Cannot switch workflow: '{$t['title']}' is already {$t['status']}."];
-            }
-        }
-
-        $now = date('Y-m-d H:i:s');
-        if ($targetSequence === 'wash_first') {
-            // Wash first: wash is step 1, oil_change is step 2
-            $pdo->prepare("UPDATE order_tasks SET sequence = 1, status = 'waiting', updated_at = ? WHERE order_id = ? AND task_type = 'wash'")->execute([$now, $orderId]);
-            $pdo->prepare("UPDATE order_tasks SET sequence = 2, status = 'pending_prereq', updated_at = ? WHERE order_id = ? AND task_type = 'oil_change'")->execute([$now, $orderId]);
-            $pdo->prepare("UPDATE order_tasks SET sequence = 2, status = 'pending_prereq', updated_at = ? WHERE order_id = ? AND task_type = 'inspection'")->execute([$now, $orderId]);
-            $pdo->prepare("UPDATE order_tasks SET sequence = 3, status = 'pending_prereq', updated_at = ? WHERE order_id = ? AND task_type = 'qc'")->execute([$now, $orderId]);
-            $pdo->prepare("UPDATE orders SET service_sequence = 'wash_first', repair_status = 'waiting_wash_first', updated_at = ? WHERE id = ?")->execute([$now, $orderId]);
-
-            $details = "Supervisor {$userName} switched vehicle {$order['plate_number']} to 'Wash First' workflow (Bay 4 Busy bypass).";
-            $pdo->prepare("INSERT INTO bay_history (order_id, plate_number, action, performed_by, performed_by_name, performed_by_role, details, created_at) VALUES (?, ?, 'switched_to_wash_first', ?, ?, ?, ?, ?)")->execute([$orderId, $order['plate_number'], $userId, $userName, $userRole, $details, $now]);
-        } else {
-            // Lift first: oil_change is step 1, wash is step 2
-            $pdo->prepare("UPDATE order_tasks SET sequence = 1, status = 'waiting', updated_at = ? WHERE order_id = ? AND task_type = 'oil_change'")->execute([$now, $orderId]);
-            $pdo->prepare("UPDATE order_tasks SET sequence = 2, status = 'pending_prereq', updated_at = ? WHERE order_id = ? AND task_type = 'wash'")->execute([$now, $orderId]);
-            $pdo->prepare("UPDATE order_tasks SET sequence = 2, status = 'waiting', updated_at = ? WHERE order_id = ? AND task_type = 'inspection'")->execute([$now, $orderId]);
-            $pdo->prepare("UPDATE order_tasks SET sequence = 3, status = 'pending_prereq', updated_at = ? WHERE order_id = ? AND task_type = 'qc'")->execute([$now, $orderId]);
-            $pdo->prepare("UPDATE orders SET service_sequence = 'lift_first', repair_status = 'waiting_tech', updated_at = ? WHERE id = ?")->execute([$now, $orderId]);
-
-            $details = "Supervisor {$userName} switched vehicle {$order['plate_number']} to standard 'Lift First' workflow.";
-            $pdo->prepare("INSERT INTO bay_history (order_id, plate_number, action, performed_by, performed_by_name, performed_by_role, details, created_at) VALUES (?, ?, 'switched_to_lift_first', ?, ?, ?, ?, ?)")->execute([$orderId, $order['plate_number'], $userId, $userName, $userRole, $details, $now]);
-        }
-
-        if (class_exists('AuditLogger')) {
-            AuditLogger::log('WORKFLOW_SEQUENCE_SWITCHED', "Switched Order #{$orderId} ({$order['plate_number']}) to {$targetSequence}", 'order', (string)$orderId, $userId, $userName, $userRole);
-        }
-
-        return [
-            'success' => true,
-            'order_id' => $orderId,
-            'service_sequence' => $targetSequence,
-            'message' => "Order #{$order['order_number']} switched to " . ($targetSequence === 'wash_first' ? 'Wash First' : 'Lift First') . " successfully."
         ];
     }
 

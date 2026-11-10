@@ -520,7 +520,7 @@ class TechnicalManager {
         AuditLogger::log('JOB_ORDER_FINISHED', "Technician {$userName} finished Job Order on vehicle Order #{$orderId}. All mandatory checklist items verified.", 'order', (string)$orderId, $userId, $userName, $userRole);
 
         $msg = !empty($finishRes['is_handshake'])
-            ? (!empty($finishRes['to_qc']) ? "Mechanical service finished! Vehicle sent to Finishing Pad for QC." : "Mechanical service finished! Vehicle has joined the Wash Queue.")
+            ? "Mechanical service finished! Vehicle has joined the Wash Queue."
             : "Technical Job Order completed! Vehicle is ready for cashier checkout.";
 
         return [

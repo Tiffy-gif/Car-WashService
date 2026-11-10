@@ -3962,11 +3962,6 @@ class PosApp {
         }
     }
 
-    static setPreferredWorkflowSequence(seq) {
-        this.preferredWorkflowSequence = seq;
-        this.renderCart();
-    }
-
     // ========================================================
     // CART OPERATIONS
     // ========================================================
@@ -4433,24 +4428,8 @@ class PosApp {
 
             if (wfBadge) {
                 if (hasWash && hasMechanical) {
-                    const curSeq = this.preferredWorkflowSequence || 'lift_first';
                     wfBadge.className = 'cart-order-workflow-badge mixed';
-                    wfBadge.innerHTML = `
-                        <div style="display: flex; flex-direction: column; width: 100%; gap: 6px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <span><i class="fa-solid fa-layer-group"></i> <strong>MIXED ORDER WORKFLOW</strong></span>
-                                <span style="font-size: 11px; opacity: 0.85;">Bay 4 busy? Tap to switch</span>
-                            </div>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 2px;">
-                                <button type="button" class="btn btn-sm ${curSeq === 'lift_first' ? 'btn-primary' : 'btn-outline'}" style="font-size: 11px; padding: 4px 6px; font-weight: 700;" onclick="PosApp.setPreferredWorkflowSequence('lift_first')">
-                                    <i class="fa-solid fa-wrench"></i> 1. Lift &rarr; 2. Wash
-                                </button>
-                                <button type="button" class="btn btn-sm ${curSeq === 'wash_first' ? 'btn-primary' : 'btn-outline'}" style="font-size: 11px; padding: 4px 6px; font-weight: 700; ${curSeq === 'wash_first' ? 'background: #0284c7; border-color: #0284c7; color: #fff;' : 'border-color: #0284c7; color: #0284c7;'}" onclick="PosApp.setPreferredWorkflowSequence('wash_first')">
-                                    <i class="fa-solid fa-shower"></i> 1. Wash &rarr; 2. Lift
-                                </button>
-                            </div>
-                        </div>
-                    `;
+                    wfBadge.innerHTML = `<i class="fa-solid fa-shuffle"></i> <span><strong>MIXED SERVICE</strong>: Step 1 (Bay 4 Lift) &rarr; Step 2 (Wash Bays)</span>`;
                     wfBadge.style.display = 'flex';
                 } else if (hasWash) {
                     wfBadge.className = 'cart-order-workflow-badge wash';
@@ -6030,8 +6009,7 @@ class PosApp {
             manager_username: (this.cart.find(it => it.manager_override)?.manager_username) || null,
             manager_pin: (this.cart.find(it => it.manager_override)?.manager_pin) || null,
             washers: selectedWasher ? [parseInt(selectedWasher)] : [],
-            mechanics: selectedMechanic ? [parseInt(selectedMechanic)] : [],
-            service_sequence: (this.cart.some(it => it.type === 'service' && !this.isMechanicalService(it)) && this.cart.some(it => it.type === 'service' && this.isMechanicalService(it))) ? (this.preferredWorkflowSequence || 'lift_first') : 'lift_first'
+            mechanics: selectedMechanic ? [parseInt(selectedMechanic)] : []
         };
 
         let completedOrderRecord = null;
@@ -7116,28 +7094,6 @@ class PosApp {
                     } catch (retryErr) {
                         this.showAppAlert(retryErr?.data?.message || retryErr.message || 'Failed to assign bay');
                     }
-                } else if (res?.error === 'PREREQUISITE_STEP_INCOMPLETE' && res?.can_wash_first) {
-                    const confirmWashFirst = confirm(`Bay 4 (Oil Change) is busy.\n\nWould you like to assign ${plate} to Wash First?\n\nSequence: Wash in ${bayName} ➔ Oil Change in Bay 4 ➔ QC Finishing Pad`);
-                    if (confirmWashFirst) {
-                        try {
-                            const retryRes = await PosApi.assignBay(bayId, orderId, {
-                                staff_id: this.currentUser?.id,
-                                allow_wash_first: 1
-                            });
-                            if (retryRes && retryRes.success) {
-                                this.showToastNotice(`${plate} assigned to ${bayName} (Switched to Wash First)`, 'success');
-                                await this.fetchBaysAndQueue();
-                                await this.renderJobQueue();
-                                return;
-                            } else {
-                                this.showAppAlert(retryRes?.message || 'Failed to assign bay');
-                            }
-                        } catch (swErr) {
-                            console.error('Wash first error:', swErr);
-                            this.showAppAlert(swErr?.data?.message || swErr.message || 'Failed to switch to Wash First');
-                        }
-                    }
-                    return;
                 } else if (res?.error === 'BAY_ALREADY_TAKEN' || res?.error === 'BAY_BUSY') {
                     this.showAppAlert(I18nManager.t('bayAlreadyTaken') || 'Bay already taken! Another terminal or washer just occupied this bay.');
                     await this.fetchBaysAndQueue();
@@ -7189,32 +7145,6 @@ class PosApp {
                 } catch (retryErr) {
                     this.showAppAlert(retryErr?.data?.message || retryErr.message || 'Failed to assign bay');
                 }
-            } else if (errCode === 'PREREQUISITE_STEP_INCOMPLETE' || errMsg.includes('PREREQUISITE_STEP_INCOMPLETE') || errMsg.includes('Wash First')) {
-                const canWashFirst = e.data?.can_wash_first || errMsg.includes('Wash First');
-                if (canWashFirst) {
-                    const confirmWashFirst = confirm(`Bay 4 (Oil Change) is busy.\n\nWould you like to assign ${plate} to Wash First?\n\nSequence: Wash in ${bayName} ➔ Oil Change in Bay 4 ➔ QC Finishing Pad`);
-                    if (confirmWashFirst) {
-                        try {
-                            const retryRes = await PosApi.assignBay(bayId, orderId, {
-                                staff_id: this.currentUser?.id,
-                                allow_wash_first: 1
-                            });
-                            if (retryRes && retryRes.success) {
-                                this.showToastNotice(`${plate} assigned to ${bayName} (Switched to Wash First)`, 'success');
-                                await this.fetchBaysAndQueue();
-                                await this.renderJobQueue();
-                                return;
-                            } else {
-                                this.showAppAlert(retryRes?.message || 'Failed to assign bay');
-                            }
-                        } catch (swErr) {
-                            console.error('Wash first error:', swErr);
-                            this.showAppAlert(swErr?.data?.message || swErr.message || 'Failed to switch to Wash First');
-                        }
-                    }
-                    return;
-                }
-                this.showAppAlert(errMsg || 'Prerequisite step incomplete');
             } else if (errCode === 'BAY_ALREADY_TAKEN' || errMsg.includes('taken') || errMsg.includes('busy')) {
                 this.showAppAlert(I18nManager.t('bayAlreadyTaken') || 'Bay already taken! Another terminal or washer just occupied this bay.');
                 await this.fetchBaysAndQueue();
@@ -7613,14 +7543,6 @@ class PosApp {
             const totalNum = parseFloat(ord.total_usd || 0);
             const totalKhrVal = Math.round(totalNum * (this.exchangeRate || 4100));
 
-            const isMixedOrder = !!(ord.is_mixed || (ord.item_names && (ord.item_names.includes('Wash') || ord.item_names.includes('wash')) && (ord.item_names.includes('Oil') || ord.item_names.includes('oil'))));
-            const isWashFirstSeq = (ord.service_sequence === 'wash_first');
-            const seqBadgeHtml = isMixedOrder
-                ? (isWashFirstSeq
-                    ? `<span class="queue-badge" style="background:#0284c7;color:#fff;font-weight:700;"><i class="fa-solid fa-droplet"></i> Wash First</span>`
-                    : `<span class="queue-badge" style="background:#7c3aed;color:#fff;font-weight:700;"><i class="fa-solid fa-wrench"></i> Lift First</span>`)
-                : '';
-
             const pendingBadgeHtml = ord._isPendingSync ? `<span class="queue-badge-sync" title="Pending Sync"><i class="fa-solid fa-cloud-arrow-up"></i> ${I18nManager.t('pendingSyncBadge') || 'Pending Sync'}</span>` : '';
             const receiptPendingBadge = (!ord.receipt_printed_at && status !== 'cancelled') ? `<span class="queue-badge-receipt" title="Receipt Pending"><i class="fa-solid fa-receipt"></i> ${I18nManager.t('receiptPendingBadge') || 'Receipt Pending'}</span>` : '';
 
@@ -7647,7 +7569,6 @@ class PosApp {
                     <div class="queue-card-section queue-section-status">
                         <div class="queue-status-badges">
                             <span class="queue-badge ${badgeClass}"><i class="fa-solid ${badgeIcon}"></i> <span>${statusText}</span></span>
-                            ${seqBadgeHtml}
                             ${pendingBadgeHtml}
                             ${receiptPendingBadge}
                         </div>
@@ -7706,12 +7627,6 @@ class PosApp {
                     <div class="queue-card-section queue-section-actions">
                         ${nextActionBtn}
 
-                        ${(isMixedOrder && status === 'waiting' && !isInBay) ? `
-                            <button type="button" class="btn btn-outline btn-sm btn-queue-action" style="border-color: #6366f1; color: #6366f1; font-weight: 700;" data-action="toggle-sequence" data-order-number="${this.escapeHtml(ord.order_number)}" data-order-id="${ord.id || 0}" data-current-seq="${isWashFirstSeq ? 'wash_first' : 'lift_first'}" data-plate="${this.escapeHtml(ord.plate_number)}" title="Switch between Lift First and Wash First">
-                                <i class="fa-solid fa-arrows-rotate"></i> <span>${isWashFirstSeq ? 'To Lift First' : 'To Wash First'}</span>
-                            </button>
-                        ` : ''}
-
                         ${(!isCancelled && isUnpaid) ? `
                             <button type="button" class="btn btn-sm btn-queue-pay ${isReadyToPay ? 'is-ready-to-pay' : ''}" data-action="pay-order" data-order-number="${this.escapeHtml(ord.order_number)}">
                                 <i class="fa-solid fa-dollar-sign"></i> <span>${I18nManager.t('payOrder') || (isReadyToPay ? 'Pay / Checkout' : 'Pay Order')}</span>
@@ -7752,29 +7667,6 @@ class PosApp {
                 const oId = parseInt(btn.getAttribute('data-order-id')) || (ord?.id || 0);
                 const plate = btn.getAttribute('data-plate') || ord?.plate_number || '';
                 this.handleCustomerArrived(oId, plate);
-            } else if (action === 'toggle-sequence') {
-                const oId = parseInt(btn.getAttribute('data-order-id')) || (ord?.id || 0);
-                const curSeq = btn.getAttribute('data-current-seq') || 'lift_first';
-                const nextSeq = (curSeq === 'wash_first') ? 'lift_first' : 'wash_first';
-                const plate = btn.getAttribute('data-plate') || ord?.plate_number || '';
-                const confirmMsg = `Switch vehicle ${plate} workflow to ${nextSeq === 'wash_first' ? 'Wash First (Bay 4 Busy)' : 'Lift First (Standard)'}?`;
-                if (confirm(confirmMsg)) {
-                    btn.disabled = true;
-                    try {
-                        const res = await PosApi.switchServiceSequence(oId, nextSeq);
-                        if (res && res.success) {
-                            this.showToastNotice(`${plate}: Switched to ${nextSeq === 'wash_first' ? 'Wash First' : 'Lift First'}`, 'success');
-                            await this.fetchBaysAndQueue();
-                            await this.renderJobQueue();
-                        } else {
-                            this.showAppAlert(res?.message || 'Failed to switch workflow sequence');
-                            btn.disabled = false;
-                        }
-                    } catch (err) {
-                        this.showAppAlert(err?.data?.message || err.message || 'Failed to switch workflow sequence');
-                        btn.disabled = false;
-                    }
-                }
             } else if (action === 'pass-qc') {
                 const oId = parseInt(btn.getAttribute('data-order-id')) || (ord?.id || 0);
                 const plate = btn.getAttribute('data-plate') || ord?.plate_number || '';
