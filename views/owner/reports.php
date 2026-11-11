@@ -1543,23 +1543,12 @@ include dirname(__DIR__) . '/layouts/header.php';
 
 <div class="reports-container">
 
-    <!-- 1. Header Bar -->
-    <div class="reports-header-bar">
-        <div>
-            <h1 class="reports-header-title">
-                <i class="fa-solid fa-chart-line" style="color: var(--primary);"></i>
-                <?= htmlspecialchars(__('nav_reports')) ?> &amp; Profit Control
-            </h1>
-            <p class="reports-header-sub">
-                Complete financial analysis: Revenue, Catalog Subtotal, Discounts, Expenses, Commissions, and True Net Profit.
-            </p>
-        </div>
-        <div class="no-print" style="display: flex; align-items: center; gap: 8px;">
-            <span class="badge badge-slate" style="font-size: 12px; padding: 6px 12px;">
-                <i class="fa-solid fa-calendar-day mr-1"></i>
-                <?= date('d M Y') ?> &bull; 1 USD = <?= number_format($curRate) ?> KHR
-            </span>
-        </div>
+    <!-- Exchange Rate Badge -->
+    <div class="no-print" style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 14px;">
+        <span class="badge badge-slate" style="font-size: 12px; padding: 6px 12px;">
+            <i class="fa-solid fa-calendar-day mr-1"></i>
+            <?= date('d M Y') ?> &bull; 1 USD = <?= number_format($curRate) ?> KHR
+        </span>
     </div>
 
     <!-- Print Header Only (Shows when printing) -->
@@ -1752,6 +1741,7 @@ include dirname(__DIR__) . '/layouts/header.php';
             </div>
         </div>
 
+        <?php if ($totalComm > 0): ?>
         <!-- Card 4: Staff Commissions Paid -->
         <div class="kpi-card">
             <div class="kpi-card-top">
@@ -1774,6 +1764,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                 <span class="text-muted"><strong><?= $commShare ?>%</strong> of revenue</span>
             </div>
         </div>
+        <?php endif; ?>
 
         <!-- Card 5: Net Operating Profit (Full Width) -->
         <div class="kpi-card <?= ($netOperatingProfit >= 0) ? 'profit-positive' : 'profit-negative' ?>" style="grid-column: 1 / -1;">
@@ -1794,7 +1785,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                 </div>
             </div>
             <div class="kpi-card-footer" style="padding-top: 14px; margin-top: 14px; border-top: 1px dashed var(--border);">
-                <span>Formula: Net Settled Rev (<?= formatUSD($netSettledRevenue) ?>) - COGS (<?= formatUSD($productCogs) ?>) - Comm (<?= formatUSD($totalComm) ?>) - Exp (<?= formatUSD($totalExp) ?>)</span>
+                <span>Formula: Net Settled Rev (<?= formatUSD($netSettledRevenue) ?>) - COGS (<?= formatUSD($productCogs) ?>) <?= ($totalComm > 0) ? '- Comm (' . formatUSD($totalComm) . ') ' : '' ?>- Exp (<?= formatUSD($totalExp) ?>)</span>
                 <?php $netMargin = ($netSettledRevenue > 0) ? round(($netOperatingProfit / $netSettledRevenue) * 100) : 0; ?>
                 <span style="font-weight: 700; font-size: 14px; color: <?= ($netOperatingProfit >= 0) ? '#16a34a' : '#dc2626' ?>;">
                     <?= $netMargin ?>% Net Margin
@@ -1854,6 +1845,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                     </div>
                 </div>
 
+                <?php if ($totalComm > 0): ?>
                 <div class="chart-bar-item">
                     <div class="chart-bar-meta">
                         <span class="chart-bar-label"><i class="fa-solid fa-circle" style="color: #9333ea; font-size: 9px;"></i> Staff Commissions</span>
@@ -1863,6 +1855,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <div class="chart-bar-fill" style="width: <?= $commPct ?>%; background: #9333ea;"></div>
                     </div>
                 </div>
+                <?php endif; ?>
             </div>
         </div>
 

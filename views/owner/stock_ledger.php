@@ -139,24 +139,16 @@ $totalLines = (int)$pdo->query("SELECT COUNT(*) FROM stock_movements")->fetchCol
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">
-            <i class="fa-solid fa-clipboard-list mr-1" style="color: var(--primary);"></i> <?= htmlspecialchars(__('nav_stock_ledger', 'Stock Ledger & History')) ?>
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted);">Immutable audit history of all inventory movements: received, used, reserved, released, adjusted, and returned.</p>
-    </div>
-    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-        <a href="<?= APP_URL ?>/index.php?view=oil_care" class="btn btn-secondary">
-            <i class="fa-solid fa-oil-can mr-1" style="color: #ea580c;"></i> Products &amp; Catalog
-        </a>
-        <button type="button" class="btn btn-secondary" onclick="openModal('receiveStockModal')">
-            <i class="fa-solid fa-truck-ramp-box mr-1" style="color: #16a34a;"></i> Receive Supplier Stock
-        </button>
-        <button type="button" class="btn btn-primary" onclick="openModal('correctionModal')">
-            <i class="fa-solid fa-pen-to-square mr-1"></i> Add Correcting Line
-        </button>
-    </div>
+<div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 24px; gap: 10px; flex-wrap: wrap;">
+    <a href="<?= APP_URL ?>/index.php?view=oil_care" class="btn btn-secondary">
+        <i class="fa-solid fa-oil-can mr-1" style="color: #ea580c;"></i> Products &amp; Catalog
+    </a>
+    <button type="button" class="btn btn-secondary" onclick="openModal('receiveStockModal')">
+        <i class="fa-solid fa-truck-ramp-box mr-1" style="color: #16a34a;"></i> Receive Supplier Stock
+    </button>
+    <button type="button" class="btn btn-primary" onclick="openModal('correctionModal')">
+        <i class="fa-solid fa-pen-to-square mr-1"></i> Add Correcting Line
+    </button>
 </div>
 
 <?php if ($message): ?>

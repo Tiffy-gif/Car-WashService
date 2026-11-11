@@ -8,7 +8,7 @@ require_once dirname(__DIR__, 2) . '/core/Language.php';
 require_once dirname(__DIR__, 2) . '/core/Helpers.php';
 
 Auth::requirePermission('commissions.list');
-$pageTitle = 'Washer Commission Reports';
+$pageTitle = __('nav_commissions', 'Staff Commissions & Wages');
 $pdo = Database::getInstance();
 
 // Period Filter: today, this_week, this_month, all
@@ -126,16 +126,16 @@ foreach ($logs as $log) {
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">
-            <i class="fa-solid fa-hand-holding-dollar mr-1" style="color: var(--primary);"></i> Washer Commission & Earnings
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted);">Track daily and monthly wages, percentage splits, and fixed bonuses per washed vehicle.</p>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-hand-holding-dollar mr-1"></i> Labor &amp; Wage Payouts
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Washer &amp; Mechanic Commission Summary
+        </span>
     </div>
-    
-    <!-- Period Filter Buttons -->
-    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
         <a href="?view=commissions&period=today" class="btn btn-sm <?= ($period === 'today') ? 'btn-primary' : 'btn-secondary' ?>">Today</a>
         <a href="?view=commissions&period=this_week" class="btn btn-sm <?= ($period === 'this_week') ? 'btn-primary' : 'btn-secondary' ?>">This Week</a>
         <a href="?view=commissions&period=this_month" class="btn btn-sm <?= ($period === 'this_month') ? 'btn-primary' : 'btn-secondary' ?>">This Month</a>

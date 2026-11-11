@@ -107,6 +107,21 @@ $demoMode = get_setting('demo_mode', '0');
                 <i class="fa-solid fa-circle-check"></i>
                 Your PIN has been changed successfully. Please log in with your new PIN.
             </div>
+        <?php elseif ($msg === 'logged_out'): ?>
+            <div style="background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; padding: 12px 16px; border-radius: var(--radius-md); font-size: 13px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
+                <i class="fa-solid fa-circle-check"></i>
+                You have been logged out successfully. / បានចាកចេញពីប្រព័ន្ធដោយជោគជ័យ។
+            </div>
+        <?php elseif ($msg === 'idle_timeout'): ?>
+            <div style="background: #fffbeb; color: #92400e; border: 1px solid #fde68a; padding: 12px 16px; border-radius: var(--radius-md); font-size: 13px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
+                <i class="fa-solid fa-clock"></i>
+                Session logged out due to inactivity. Please sign in again. / បានចាកចេញដោយស្វ័យប្រវត្តដោយសារគ្មានសកម្មភាព។
+            </div>
+        <?php elseif ($msg === 'session_invalid'): ?>
+            <div style="background: #fffbeb; color: #92400e; border: 1px solid #fde68a; padding: 12px 16px; border-radius: var(--radius-md); font-size: 13px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                Your session has expired. Please sign in to continue. / វគ្គការងាររបស់អ្នកបានផុតកំណត់។ សូមចូលប្រើប្រាស់ឡើងវិញ។
+            </div>
         <?php endif; ?>
 
         <?php if ($error === 'account_locked'): ?>

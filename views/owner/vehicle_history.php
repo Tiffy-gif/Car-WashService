@@ -41,18 +41,17 @@ $stats = $pdo->query($statsSql)->fetch();
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">
-            <i class="fa-solid fa-clock-rotate-left mr-1" style="color: var(--primary);"></i> <?= htmlspecialchars(__('nav_vehicle_history')) ?>
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted);">
-            Logbook of vehicle repairs, spare parts installed, odometer readings, and mechanic inspection notes.
-        </p>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 16px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-car mr-1"></i> <?= (int)$stats['total_events'] ?> Service Records
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Fleet &amp; Vehicle Lifetime Maintenance History
+        </span>
     </div>
-
     <!-- Search Form -->
-    <form action="" method="GET" style="display: flex; gap: 8px; align-items: center;">
+    <form action="" method="GET" style="display: flex; gap: 8px; align-items: center; margin: 0;">
         <input type="hidden" name="view" value="vehicle_history">
         <input type="text" name="plate" class="form-input" style="width: 260px; min-height: 40px;" placeholder="Search plate (e.g. 2BQ-8899)..." value="<?= htmlspecialchars($searchPlate) ?>">
         <button type="submit" class="btn btn-primary" style="min-height: 40px;">

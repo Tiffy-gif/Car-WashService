@@ -217,18 +217,6 @@ while ($row = $pricesStmt->fetch()) {
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);"><?= htmlspecialchars(__('nav_services')) ?></h1>
-        <p style="font-size: 14px; color: var(--text-muted);">Manage washing services and custom tiered pricing for each vehicle category.</p>
-    </div>
-    <?php if (Auth::can('services.add')): ?>
-    <button type="button" class="btn btn-primary" onclick="openNewServiceModal()">
-        <i class="fa-solid fa-plus mr-1"></i> <?= htmlspecialchars(__('add_service')) ?>
-    </button>
-    <?php endif; ?>
-</div>
-
 <?php if ($message): ?>
     <div style="background: <?= ($messageType === 'danger') ? 'var(--danger-bg)' : 'var(--success-bg)' ?>; color: <?= ($messageType === 'danger') ? 'var(--danger)' : 'var(--success)' ?>; padding: 14px 20px; border-radius: var(--radius-md); margin-bottom: 24px; display: flex; align-items: center; gap: 10px;">
         <i class="fa-solid <?= ($messageType === 'danger') ? 'fa-circle-exclamation' : 'fa-circle-check' ?>"></i>
@@ -236,23 +224,30 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 <?php endif; ?>
 
-<!-- Category Filter Tabs -->
-<div style="display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;">
-    <a href="?view=services&cat=all" class="btn btn-sm <?= ($catFilter === 'all') ? 'btn-primary' : 'btn-secondary' ?>">
-        All Services (<?= $totalServicesCount ?>)
-    </a>
-    <?php foreach ($serviceCategories as $sc): 
-        $isActiveTab = ($catFilter === $sc['code'] || $catFilter === (string)$sc['id']);
-        $cnt = max($catCounts['id_' . $sc['id']] ?? 0, $catCounts['code_' . $sc['code']] ?? 0);
-        $scIcon = !empty($sc['icon']) ? $sc['icon'] : 'fa-tag';
-        $scColor = !empty($sc['color']) ? $sc['color'] : 'inherit';
-        $scName = (Language::current() === 'km') ? $sc['name_km'] : $sc['name_en'];
-    ?>
-    <a href="?view=services&cat=<?= htmlspecialchars($sc['code']) ?>" class="btn btn-sm <?= $isActiveTab ? 'btn-primary' : 'btn-secondary' ?>">
-        <i class="fa-solid <?= htmlspecialchars($scIcon) ?> mr-1" style="<?= !$isActiveTab && !empty($sc['color']) ? 'color: ' . htmlspecialchars($sc['color']) . ';' : '' ?>"></i>
-        <?= htmlspecialchars($scName) ?> (<?= $cnt ?>)
-    </a>
-    <?php endforeach; ?>
+<!-- Category Filter Tabs & Actions -->
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <a href="?view=services&cat=all" class="btn btn-sm <?= ($catFilter === 'all') ? 'btn-primary' : 'btn-secondary' ?>">
+            All Services (<?= $totalServicesCount ?>)
+        </a>
+        <?php foreach ($serviceCategories as $sc): 
+            $isActiveTab = ($catFilter === $sc['code'] || $catFilter === (string)$sc['id']);
+            $cnt = max($catCounts['id_' . $sc['id']] ?? 0, $catCounts['code_' . $sc['code']] ?? 0);
+            $scIcon = !empty($sc['icon']) ? $sc['icon'] : 'fa-tag';
+            $scColor = !empty($sc['color']) ? $sc['color'] : 'inherit';
+            $scName = (Language::current() === 'km') ? $sc['name_km'] : $sc['name_en'];
+        ?>
+        <a href="?view=services&cat=<?= htmlspecialchars($sc['code']) ?>" class="btn btn-sm <?= $isActiveTab ? 'btn-primary' : 'btn-secondary' ?>">
+            <i class="fa-solid <?= htmlspecialchars($scIcon) ?> mr-1" style="<?= !$isActiveTab && !empty($sc['color']) ? 'color: ' . htmlspecialchars($sc['color']) . ';' : '' ?>"></i>
+            <?= htmlspecialchars($scName) ?> (<?= $cnt ?>)
+        </a>
+        <?php endforeach; ?>
+    </div>
+    <?php if (Auth::can('services.add')): ?>
+    <button type="button" class="btn btn-primary" onclick="openNewServiceModal()">
+        <i class="fa-solid fa-plus mr-1"></i> <?= htmlspecialchars(__('add_service')) ?>
+    </button>
+    <?php endif; ?>
 </div>
 
 <!-- Services List / Table -->

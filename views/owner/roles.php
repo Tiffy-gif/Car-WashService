@@ -561,12 +561,7 @@ include dirname(__DIR__) . '/layouts/header.php';
     <!-- ======================================================== -->
     <!-- ADD / EDIT / DUPLICATE ROLE FORM (MATCHING SCREENSHOT)    -->
     <!-- ======================================================== -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
-        <div>
-            <h1 style="font-size: 24px; font-weight: 800; color: var(--text-main); margin: 0;">
-                <?= ($action === 'edit') ? __('edit_role') : (($action === 'duplicate') ? __('duplicate_role') : __('add_role')) ?>
-            </h1>
-        </div>
+    <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
         <div class="role-breadcrumb">
             <a href="<?= APP_URL ?>/index.php?view=dashboard"><i class="fa-solid fa-house"></i></a>
             <span>/</span>
@@ -840,20 +835,22 @@ include dirname(__DIR__) . '/layouts/header.php';
     <!-- ======================================================== -->
     <!-- ROLES LIST VIEW                                          -->
     <!-- ======================================================== -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-        <div>
-            <h1 style="font-size: 22px; font-weight: 800; color: var(--text-main); margin: 0 0 4px 0;">
-                <i class="fa-solid fa-user-shield mr-1" style="color: var(--primary);"></i> <?= htmlspecialchars(__('roles_management')) ?>
-            </h1>
-            <p style="font-size: 14px; color: var(--text-muted); margin: 0;">
-                Configure user roles, fine-grained access permissions, commission eligibility, and job assignment flags.
-            </p>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
+                <i class="fa-solid fa-user-lock mr-1"></i> <?= count($rolesList) ?> Configured Roles
+            </span>
+            <span style="font-size: 13px; color: var(--text-muted);">
+                Granular Permissions &amp; System Access Control
+            </span>
         </div>
-        <?php if (Auth::can('roles.add')): ?>
-            <a href="<?= APP_URL ?>/index.php?view=roles&action=add" class="btn btn-primary">
-                <i class="fa-solid fa-plus mr-1"></i> <?= htmlspecialchars(__('add_role')) ?>
-            </a>
-        <?php endif; ?>
+        <div>
+            <?php if (Auth::can('roles.add')): ?>
+                <a href="<?= APP_URL ?>/index.php?view=roles&action=add" class="btn btn-primary">
+                    <i class="fa-solid fa-plus mr-1"></i> <?= htmlspecialchars(__('add_role')) ?>
+                </a>
+            <?php endif; ?>
+        </div>
     </div>
 
     <!-- Roles Table Card -->

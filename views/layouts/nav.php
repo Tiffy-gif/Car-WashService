@@ -4,6 +4,15 @@ declare(strict_types=1);
 $role = Auth::getRole();
 $currentView = $_GET['view'] ?? 'dashboard';
 
+// Pending parts requests counter for warehouse badge
+$navPendingParts = 0;
+if (Auth::check() && Auth::can('oil_care.list')) {
+    try {
+        $navPdo = Database::getInstance();
+        $navPendingParts = (int)$navPdo->query("SELECT COUNT(*) FROM parts_requests WHERE status = 'pending'")->fetchColumn();
+    } catch (\Throwable $t) {}
+}
+
 $navLogo = get_setting('shop_logo', '');
 $navNameEn = get_setting('shop_name_en', 'AquaGleam Car Wash & Detailing');
 $navNameKm = get_setting('shop_name_km', 'អាខ្វាហ្គ្លីម សេវាកម្មលាងរថយន្ត និងម៉ូតូទំនើប');
@@ -37,22 +46,28 @@ $rawMenuGroups = [
                 'permission' => 'pos.access',
             ],
             [
-                'view'       => 'shift',
-                'label'      => __('nav_shifts', 'Shifts & Cash Handover'),
-                'icon'       => 'fa-hand-holding-dollar',
-                'permission' => 'pos.access',
+                'view'       => 'bays_queue',
+                'label'      => __('nav_bays_queue', 'Live Bays & Queue'),
+                'icon'       => 'fa-warehouse',
+                'permission' => 'bays.view',
+            ],
+            [
+                'view'       => 'appointments',
+                'label'      => __('nav_appointments', 'Appointments'),
+                'icon'       => 'fa-calendar-check',
+                'permission' => 'extras.list',
             ],
             [
                 'view'       => 'orders',
-                'label'      => __('nav_orders'),
+                'label'      => __('nav_orders', 'Orders & Invoices'),
                 'icon'       => 'fa-list-ol',
                 'permission' => 'orders.list',
             ],
             [
-                'view'       => 'bays_queue',
-                'label'      => __('nav_bays_queue', 'Bays & Queue'),
-                'icon'       => 'fa-warehouse',
-                'permission' => 'bays.view',
+                'view'       => 'shift',
+                'label'      => __('nav_shifts', 'Shifts & Cash Handover'),
+                'icon'       => 'fa-hand-holding-dollar',
+                'permission' => 'pos.access',
             ],
             [
                 'view'       => 'washer_jobs',
@@ -66,18 +81,6 @@ $rawMenuGroups = [
                 'icon'       => 'fa-wrench',
                 'permission' => 'mechanic_jobs.view',
             ],
-            [
-                'view'       => 'vehicle_history',
-                'label'      => __('nav_vehicle_history'),
-                'icon'       => 'fa-clock-rotate-left',
-                'permission' => 'vehicle_history.list',
-            ],
-            [
-                'view'       => 'recovery_bulk_entry',
-                'label'      => 'Disaster & Paper Recovery',
-                'icon'       => 'fa-file-circle-check',
-                'permission' => 'recovery.view',
-            ],
         ],
     ],
     [
@@ -90,6 +93,12 @@ $rawMenuGroups = [
                 'label'      => __('nav_customers'),
                 'icon'       => 'fa-users',
                 'permission' => 'customers.list',
+            ],
+            [
+                'view'       => 'vehicle_history',
+                'label'      => __('nav_vehicle_history', 'Vehicle Service History'),
+                'icon'       => 'fa-clock-rotate-left',
+                'permission' => 'vehicle_history.list',
             ],
         ],
     ],
@@ -105,22 +114,18 @@ $rawMenuGroups = [
                 'permission' => 'services.list',
             ],
             [
-                'view'       => 'oil_care',
-                'label'      => __('nav_oil_care'),
-                'icon'       => 'fa-oil-can',
+                'view'       => 'products',
+                'label'      => __('nav_products_warehouse', 'Products & Warehouse'),
+                'icon'       => 'fa-boxes-stacked',
                 'permission' => 'oil_care.list',
+                'badge'      => $navPendingParts > 0 ? (string)$navPendingParts : null,
+                'badge_class'=> 'badge-amber',
             ],
             [
                 'view'       => 'stock_ledger',
-                'label'      => __('nav_stock_ledger', 'Stock Ledger & History'),
+                'label'      => __('nav_stock_ledger', 'Stock Ledger & Inbound'),
                 'icon'       => 'fa-clipboard-list',
                 'permission' => 'oil_care.list',
-            ],
-            [
-                'view'       => 'extras',
-                'label'      => __('nav_extras'),
-                'icon'       => 'fa-puzzle-piece',
-                'permission' => 'extras.list',
             ],
             [
                 'view'       => 'categories',
@@ -140,12 +145,6 @@ $rawMenuGroups = [
                 'label'      => __('nav_expenses'),
                 'icon'       => 'fa-wallet',
                 'permission' => 'expenses.list',
-            ],
-            [
-                'view'       => 'commissions',
-                'label'      => __('nav_commissions'),
-                'icon'       => 'fa-hand-holding-dollar',
-                'permission' => 'commissions.list',
             ],
             [
                 'view'       => 'reports',
@@ -185,8 +184,14 @@ $rawMenuGroups = [
                 'permission' => 'settings.view',
             ],
             [
+                'view'       => 'recovery_bulk_entry',
+                'label'      => __('nav_recovery', 'Disaster & Paper Recovery'),
+                'icon'       => 'fa-file-circle-check',
+                'permission' => 'recovery.view',
+            ],
+            [
                 'view'       => 'sync_monitor',
-                'label'      => 'Sync Monitor',
+                'label'      => __('nav_sync_monitor', 'Cloud Sync Monitor'),
                 'icon'       => 'fa-arrows-rotate',
                 'permission' => 'sync.view',
             ],
@@ -237,13 +242,22 @@ foreach ($rawMenuGroups as $grp) {
         </div>
     </div>
 
+    <?php
+    // Determine effective view for sub-tab alias matching
+    $effectiveView = $currentView;
+    if ($currentView === 'oil_care' || $currentView === 'parts_dispatch') {
+        $effectiveView = 'products';
+    } elseif ($currentView === 'extras' && ($_GET['tab'] ?? '') === 'appointments') {
+        $effectiveView = 'appointments';
+    }
+    ?>
     <ul class="nav-links" id="sidebarNavLinks">
         <?php foreach ($visibleMenuGroups as $grp): ?>
             <?php
             $itemCount = count($grp['items']);
             $hasActiveView = false;
             foreach ($grp['items'] as $it) {
-                if ($it['view'] === $currentView) {
+                if ($it['view'] === $effectiveView || $it['view'] === $currentView) {
                     $hasActiveView = true;
                     break;
                 }
@@ -254,10 +268,11 @@ foreach ($rawMenuGroups as $grp) {
                 <?php
                 $single = $grp['items'][0];
                 $singleUrl = ($single['view'] === 'pos') ? get_pos_url() : APP_URL . '/index.php?view=' . $single['view'];
+                $isSingleActive = ($single['view'] === $effectiveView || $single['view'] === $currentView);
                 ?>
                 <li class="nav-item-single">
                     <a href="<?= $singleUrl ?>" 
-                       class="nav-link <?= ($currentView === $single['view']) ? 'active' : '' ?>"
+                       class="nav-link <?= $isSingleActive ? 'active' : '' ?>"
                        data-tooltip="<?= htmlspecialchars($single['label']) ?>">
                         <i class="fa-solid <?= $single['icon'] ?>"></i>
                         <span><?= htmlspecialchars($single['label']) ?></span>
@@ -281,13 +296,19 @@ foreach ($rawMenuGroups as $grp) {
                     <div class="nav-sub-wrap" id="subwrap_<?= htmlspecialchars($grp['id']) ?>">
                         <ul class="nav-sub-links" role="region" aria-labelledby="btn_<?= htmlspecialchars($grp['id']) ?>">
                             <?php foreach ($grp['items'] as $it): ?>
-                                <?php $itUrl = ($it['view'] === 'pos') ? get_pos_url() : APP_URL . '/index.php?view=' . $it['view']; ?>
+                                <?php
+                                $itUrl = ($it['view'] === 'pos') ? get_pos_url() : APP_URL . '/index.php?view=' . $it['view'];
+                                $isItemActive = ($it['view'] === $effectiveView) || ($it['view'] === $currentView && !in_array($currentView, ['oil_care', 'extras'], true));
+                                ?>
                                 <li>
                                     <a href="<?= $itUrl ?>" 
-                                       class="nav-link nav-sub-link <?= ($currentView === $it['view']) ? 'active' : '' ?>"
+                                       class="nav-link nav-sub-link <?= $isItemActive ? 'active' : '' ?>"
                                        data-tooltip="<?= htmlspecialchars($it['label']) ?>">
                                         <i class="fa-solid <?= $it['icon'] ?>"></i>
                                         <span><?= htmlspecialchars($it['label']) ?></span>
+                                        <?php if (!empty($it['badge'])): ?>
+                                            <span class="badge <?= htmlspecialchars($it['badge_class'] ?? 'badge-amber') ?>" style="margin-left: auto; font-size: 10px; padding: 2px 7px; border-radius: 9999px; font-weight: 700;"><?= htmlspecialchars((string)$it['badge']) ?></span>
+                                        <?php endif; ?>
                                     </a>
                                 </li>
                             <?php endforeach; ?>
@@ -302,12 +323,18 @@ foreach ($rawMenuGroups as $grp) {
                         </div>
                         <ul class="sidebar-flyout-links">
                             <?php foreach ($grp['items'] as $it): ?>
-                                <?php $itUrl = ($it['view'] === 'pos') ? get_pos_url() : APP_URL . '/index.php?view=' . $it['view']; ?>
+                                <?php
+                                $itUrl = ($it['view'] === 'pos') ? get_pos_url() : APP_URL . '/index.php?view=' . $it['view'];
+                                $isItemActive = ($it['view'] === $effectiveView) || ($it['view'] === $currentView && !in_array($currentView, ['oil_care', 'extras'], true));
+                                ?>
                                 <li>
                                     <a href="<?= $itUrl ?>" 
-                                       class="sidebar-flyout-link <?= ($currentView === $it['view']) ? 'active' : '' ?>">
+                                       class="sidebar-flyout-link <?= $isItemActive ? 'active' : '' ?>">
                                         <i class="fa-solid <?= $it['icon'] ?>"></i>
                                         <span><?= htmlspecialchars($it['label']) ?></span>
+                                        <?php if (!empty($it['badge'])): ?>
+                                            <span class="badge <?= htmlspecialchars($it['badge_class'] ?? 'badge-amber') ?>" style="margin-left: auto; font-size: 10px; padding: 2px 6px; border-radius: 9999px; font-weight: 700;"><?= htmlspecialchars((string)$it['badge']) ?></span>
+                                        <?php endif; ?>
                                     </a>
                                 </li>
                             <?php endforeach; ?>

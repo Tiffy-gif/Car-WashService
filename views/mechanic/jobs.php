@@ -293,23 +293,25 @@ $techQueue = $queues['technical_queue'];
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">
-            <i class="fa-solid fa-wrench mr-1" style="color: #ea580c;"></i> <?= htmlspecialchars(__('nav_mechanic_screen')) ?>
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted);">
-            Bay 4 • Technical Service &amp; Maintenance Station
-        </p>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-success" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-circle-dot mr-1"></i> Technical Bay Active
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Station Live Feed &bull; Auto-syncing
+        </span>
     </div>
-
-    <div style="display: flex; gap: 12px; align-items: center;">
-        <div style="background: var(--bg-card); border: 1px solid var(--border); padding: 10px 18px; border-radius: var(--radius-md); text-align: right;">
-            <div class="text-xs text-muted">Today's Jobs</div>
-            <div style="font-size: 18px; font-weight: 700; color: #ea580c;">
-                <?= (int)$todayEarn['jobs_count'] ?> jobs
-            </div>
-        </div>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <a href="index.php?view=oil_care&tab=requests" class="btn btn-secondary btn-sm">
+            <i class="fa-solid fa-boxes-stacked mr-1"></i> Parts Dispatch
+        </a>
+        <a href="index.php?view=vehicle_history" class="btn btn-secondary btn-sm">
+            <i class="fa-solid fa-clock-rotate-left mr-1"></i> Vehicle History
+        </a>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="location.reload()">
+            <i class="fa-solid fa-arrows-rotate mr-1"></i> Refresh
+        </button>
     </div>
 </div>
 
@@ -432,6 +434,37 @@ include dirname(__DIR__) . '/layouts/header.php';
                     <?php endforeach; ?>
                 </div>
             <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- 3. Station Performance & Completed Jobs -->
+    <div class="card" style="padding: 16px; border-top: 5px solid #ea580c;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="width: 32px; height: 32px; border-radius: 6px; background: #ffedd5; color: #ea580c; display: flex; align-items: center; justify-content: center;">
+                    <i class="fa-solid fa-screwdriver-wrench"></i>
+                </div>
+                <div>
+                    <strong style="font-size: 15px; color: var(--text-main);">Today's Output</strong>
+                    <div class="text-xs text-muted">Completed repair &amp; oil jobs</div>
+                </div>
+            </div>
+            <span class="badge badge-amber" style="font-weight: 700;"><?= (int)$todayEarn['jobs_count'] ?> jobs</span>
+        </div>
+
+        <div style="min-height: 56px; display: flex; align-items: center; justify-content: space-between; background: var(--bg-subtle); padding: 10px 14px; border-radius: 6px; border: 1px solid var(--border);">
+            <div>
+                <div class="text-xs text-muted">Finished Today</div>
+                <div style="font-size: 18px; font-weight: 800; color: #ea580c;">
+                    <?= (int)$todayEarn['jobs_count'] ?> <span style="font-size: 12px; font-weight: 500; color: var(--text-muted);">processed</span>
+                </div>
+            </div>
+            <div style="text-align: right;">
+                <div class="text-xs text-muted">FIFO Queue</div>
+                <div style="font-size: 13px; font-weight: 700; color: <?= count($techQueue) > 0 ? '#ea580c' : 'var(--success)' ?>;">
+                    <?= count($techQueue) > 0 ? count($techQueue) . ' waiting' : 'Ready' ?>
+                </div>
+            </div>
         </div>
     </div>
 </div>

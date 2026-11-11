@@ -494,7 +494,7 @@ const I18N = {
         washes: 'ដង'
     },
     en: {
-        appName: 'Car Wash Counter POS',
+        appName: 'My Car Wash',
         appSubtitle: 'Counter POS',
         online: 'Online',
         offline: 'Offline',
@@ -571,7 +571,7 @@ const I18N = {
         cartServiceCrew: 'Service Crew & Details',
         generalCustomer: 'General Customer',
         shiftOpen: 'Shift Open',
-        subtotal: 'Subtotal',
+        subtotal: 'Sub Total',
         discount: 'Discount',
         totalPayable: 'Total Payable',
         payBtn: 'Checkout',

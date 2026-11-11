@@ -69,22 +69,21 @@ function getActionBadge(string $action): string {
 require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
 ?>
 
-<div class="page-header" style="margin-bottom: 20px;">
-        <div>
-            <h1 class="page-title" style="display: flex; align-items: center; gap: 8px;">
-                <i class="fa-solid fa-shield-halved" style="color: var(--primary);"></i>
-                Audit Trail &amp; Activity History
-            </h1>
-            <p class="text-muted" style="margin-top: 4px; font-size: 13px;">
-                Complete immutable security history recording who did what, when, from which device and address.
-            </p>
-        </div>
-        <div style="display: flex; gap: 8px; align-items: center;">
-            <span class="badge badge-info" style="padding: 8px 12px; font-size: 12px;">
-                <i class="fa-solid fa-lock mr-1"></i> Append-Only &bull; No Edits / No Deletions
-            </span>
-        </div>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-shield-halved mr-1"></i> Security Event Trail
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Compliance Audit &bull; Administrative &amp; Cashier Activity
+        </span>
     </div>
+    <div>
+        <span class="badge badge-info" style="padding: 8px 12px; font-size: 12px;">
+            <i class="fa-solid fa-lock mr-1"></i> Append-Only &bull; No Edits / No Deletions
+        </span>
+    </div>
+</div>
 
     <!-- Stats Cards -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-bottom: 24px;">

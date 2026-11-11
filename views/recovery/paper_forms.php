@@ -74,17 +74,16 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
 }
 </style>
 
-<div class="no-print-bar">
-    <div>
-        <h1 style="font-size: 18px; font-weight: 700; margin: 0; color: var(--text-main);">
-            <i class="fa-solid fa-print mr-2" style="color: var(--primary);"></i>Disaster Mode: Printable Paper Forms
-        </h1>
-        <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0 0;">
-            Print these blanks in advance to operate manually during power outages or server disruptions.
-        </p>
+<div class="no-print-bar" style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-amber" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-print mr-1"></i> Emergency Paper Forms
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Printable Offline Templates &bull; Standard Outage Fallback
+        </span>
     </div>
-
-    <div style="display: flex; gap: 10px; align-items: center;">
+    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
         <a href="index.php?view=paper_forms&form=job_card" class="btn btn-sm <?= ($formType === 'job_card') ? 'btn-primary' : 'btn-secondary' ?>">
             <i class="fa-solid fa-id-card mr-1"></i> 1. Printable Job Card
         </a>
@@ -92,7 +91,7 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
             <i class="fa-solid fa-table-list mr-1"></i> 2. Paper Reception Logbook
         </a>
         <a href="index.php?view=recovery_bulk_entry" class="btn btn-sm btn-secondary">
-            <i class="fa-solid fa-keyboard mr-1"></i> Go to Bulk Recovery Entry
+            <i class="fa-solid fa-keyboard mr-1"></i> Bulk Recovery Entry
         </a>
         <button type="button" class="btn btn-sm btn-success" onclick="window.print()">
             <i class="fa-solid fa-print mr-1"></i> Print This Form (Ctrl+P)

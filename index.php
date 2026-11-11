@@ -36,10 +36,7 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: ' . APP_URL . '/index.php?view=change_pin');
             exit;
         }
-        $defaultView = Auth::getDefaultViewForUser();
-        $targetUrl = ($defaultView === 'pos' && defined('POS_UI') && POS_UI === 'new')
-            ? APP_URL . '/pos/index.html#pos'
-            : APP_URL . '/index.php?view=' . $defaultView;
+        $targetUrl = Auth::getDefaultUrlForUser();
         header('Location: ' . $targetUrl, true, 302);
         exit;
     } else {
@@ -94,10 +91,7 @@ if ($action === 'demo_login') {
             header('Location: ' . APP_URL . '/index.php?view=change_pin');
             exit;
         }
-        $defaultView = Auth::getDefaultViewForUser();
-        $targetUrl = ($defaultView === 'pos' && defined('POS_UI') && POS_UI === 'new')
-            ? APP_URL . '/pos/index.html#pos'
-            : APP_URL . '/index.php?view=' . $defaultView;
+        $targetUrl = Auth::getDefaultUrlForUser();
         header('Location: ' . $targetUrl, true, 302);
         exit;
     } else {
@@ -140,10 +134,7 @@ if ($action === 'update_pin' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $_SESSION['must_change_pin'] = 0;
     audit_log('PIN_CHANGED', "User changed their PIN following an administrative reset", 'user', (string)Auth::getUserId());
 
-    $defaultView = Auth::getDefaultViewForUser();
-    $targetUrl = ($defaultView === 'pos' && defined('POS_UI') && POS_UI === 'new')
-        ? APP_URL . '/pos/index.html#pos'
-        : APP_URL . '/index.php?view=' . $defaultView . '&msg=pin_changed_success';
+    $targetUrl = Auth::getDefaultUrlForUser();
     header('Location: ' . $targetUrl, true, 302);
     exit;
 }
@@ -607,6 +598,11 @@ $role = Auth::getRole();
 
 // Default view per role/permissions if none specified
 if (!$view) {
+    $targetUrl = Auth::getDefaultUrlForUser();
+    if (!str_contains($targetUrl, 'index.php?view=')) {
+        header('Location: ' . $targetUrl, true, 302);
+        exit;
+    }
     $view = Auth::getDefaultViewForUser();
 }
 
@@ -621,11 +617,14 @@ $viewMap = [
     'change_pin'      => '/views/auth/change_pin.php',
     'dashboard'       => '/views/owner/dashboard.php',
     'services'        => '/views/owner/services.php',
+    'products'        => '/views/owner/oil_care.php',
+    'parts_dispatch'  => '/views/owner/oil_care.php',
     'customers'       => '/views/owner/customers.php',
     'pos'             => '/views/cashier/pos.php',
     'shift'           => '/views/cashier/shift.php',
     'close_day'       => '/views/cashier/shift.php',
     'orders'          => '/views/orders/index.php',
+    'appointments'    => '/views/owner/appointments.php',
     'bays_queue'      => '/views/owner/bays_queue.php',
     'bays'            => '/views/owner/bays_queue.php',
     'commissions'     => '/views/owner/commissions.php',
@@ -639,6 +638,7 @@ $viewMap = [
     'extras'          => '/views/owner/extras.php',
     'staff'           => '/views/owner/staff.php',
     'oil_care'        => '/views/owner/oil_care.php',
+    'supplies'        => '/views/owner/oil_care.php',
     'stock_ledger'    => '/views/owner/stock_ledger.php',
     'pos_devices'     => '/views/owner/pos_devices.php',
     'categories'      => '/views/owner/categories.php',
@@ -652,6 +652,15 @@ $viewMap = [
 
 $fallbackViewKey = Auth::getDefaultViewForUser();
 $defaultFallback = $viewMap[$fallbackViewKey] ?? '/views/auth/login.php';
+
+// Set default tab for alias views
+if ($view === 'products' && !isset($_GET['tab'])) {
+    $_GET['tab'] = 'products';
+} elseif ($view === 'parts_dispatch' && !isset($_GET['tab'])) {
+    $_GET['tab'] = 'requests';
+} elseif ($view === 'supplies' && !isset($_GET['tab'])) {
+    $_GET['tab'] = 'supplies';
+}
 
 $viewFile = __DIR__ . ($viewMap[$view] ?? $defaultFallback);
 if (file_exists($viewFile)) {

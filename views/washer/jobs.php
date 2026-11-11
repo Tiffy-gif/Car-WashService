@@ -137,20 +137,22 @@ $todayEarn = $earnStmt->fetch() ?: ['total_earned' => 0.00, 'jobs_count' => 0];
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">
-            <i class="fa-solid fa-soap mr-1" style="color: var(--primary);"></i> <?= htmlspecialchars(__('nav_washer_screen')) ?>
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted);">
-            Wash Station • Active Duty
-        </p>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-success" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-circle-dot mr-1"></i> Wash Station Active
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Bays 1–3 Operational &bull; Active Duty
+        </span>
     </div>
-    <div style="display: flex; gap: 12px; align-items: center;">
-        <div style="background: var(--bg-card); border: 1px solid var(--border); padding: 10px 18px; border-radius: var(--radius-md); text-align: right;">
-            <div class="text-xs text-muted">Cars Processed Today</div>
-            <div style="font-size: 18px; font-weight: 700; color: var(--success);"><span class="text-xs text-muted"><?= (int)$todayEarn['jobs_count'] ?> jobs</span></div>
-        </div>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <a href="index.php?view=bays_queue" class="btn btn-secondary btn-sm">
+            <i class="fa-solid fa-tv mr-1"></i> Live Bays Display
+        </a>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="location.reload()">
+            <i class="fa-solid fa-arrows-rotate mr-1"></i> Refresh
+        </button>
     </div>
 </div>
 
@@ -219,6 +221,36 @@ include dirname(__DIR__) . '/layouts/header.php';
                 <?php endif; ?>
             </div>
         <?php endforeach; ?>
+
+        <!-- Station Summary Card -->
+        <div class="card" style="padding: 16px; border-left: 5px solid var(--primary); display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div style="width: 28px; height: 28px; border-radius: 6px; background: #e0f2fe; color: var(--primary); display: flex; align-items: center; justify-content: center;">
+                            <i class="fa-solid fa-droplet"></i>
+                        </div>
+                        <strong style="font-size: 15px; color: var(--text-main);">Wash Station Output</strong>
+                    </div>
+                    <span class="badge badge-success"><?= (int)$todayEarn['jobs_count'] ?> finished</span>
+                </div>
+                <div style="min-height: 54px; display: flex; align-items: center; justify-content: space-between; background: var(--bg-subtle); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); margin-bottom: 10px;">
+                    <div>
+                        <div class="text-xs text-muted">Cars Washed Today</div>
+                        <div style="font-size: 18px; font-weight: 800; color: var(--primary);"><?= (int)$todayEarn['jobs_count'] ?> <span style="font-size: 12px; font-weight: 500; color: var(--text-muted);">vehicles</span></div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div class="text-xs text-muted">Queue Load</div>
+                        <div style="font-size: 13px; font-weight: 700; color: <?= count($washQueue) > 0 ? 'var(--warning)' : 'var(--success)' ?>;">
+                            <?= count($washQueue) > 0 ? count($washQueue) . ' waiting' : 'Clear' ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <a href="index.php?view=bays_queue" class="btn btn-secondary btn-sm" style="width: 100%; text-align: center;">
+                <i class="fa-solid fa-arrows-split-up-and-left mr-1"></i> Manage Queue &amp; Bays
+            </a>
+        </div>
     </div>
 </div>
 

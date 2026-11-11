@@ -57,29 +57,24 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
     </div>
 <?php endif; ?>
 
-<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 14px;">
-    <div>
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <h1 style="font-size: 24px; font-weight: 700; color: var(--text-main); margin: 0;">
-                <i class="fa-solid fa-cloud-arrow-up mr-2" style="color: #6366f1;"></i>Cloud Sync Monitor
-            </h1>
-            <?php if ($isNotConfigured): ?>
-                <span class="badge badge-warning" style="font-size: 13px; padding: 6px 12px;">
-                    <i class="fa-solid fa-triangle-exclamation mr-1"></i> Not Configured
-                </span>
-            <?php elseif ($isOffline): ?>
-                <span class="badge badge-danger" style="font-size: 13px; padding: 6px 12px;">
-                    <i class="fa-solid fa-plane-slash mr-1"></i> Shop Offline (Stand-alone)
-                </span>
-            <?php else: ?>
-                <span class="badge badge-success" style="font-size: 13px; padding: 6px 12px;">
-                    <i class="fa-solid fa-signal mr-1"></i> Online &amp; Connected
-                </span>
-            <?php endif; ?>
-        </div>
-        <p style="font-size: 13px; color: var(--text-muted); margin: 6px 0 0 0;">
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 14px;">
+    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <?php if ($isNotConfigured): ?>
+            <span class="badge badge-warning" style="font-size: 13px; padding: 6px 12px;">
+                <i class="fa-solid fa-triangle-exclamation mr-1"></i> Not Configured
+            </span>
+        <?php elseif ($isOffline): ?>
+            <span class="badge badge-danger" style="font-size: 13px; padding: 6px 12px;">
+                <i class="fa-solid fa-plane-slash mr-1"></i> Shop Offline (Stand-alone)
+            </span>
+        <?php else: ?>
+            <span class="badge badge-success" style="font-size: 13px; padding: 6px 12px;">
+                <i class="fa-solid fa-signal mr-1"></i> Online &amp; Connected
+            </span>
+        <?php endif; ?>
+        <span style="font-size: 13px; color: var(--text-muted);">
             Shop ID: <strong><?= htmlspecialchars($shopId !== '' ? $shopId : '(Not Set)') ?></strong> &bull; Endpoint: <code><?= htmlspecialchars($cloudUrl !== '' ? $cloudUrl : '(Not Set)') ?></code>
-        </p>
+        </span>
     </div>
 
     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">

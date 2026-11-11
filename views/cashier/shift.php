@@ -170,14 +170,16 @@ if ($isManagerOrOwner) {
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">
-            <i class="fa-solid fa-hand-holding-dollar mr-1" style="color: var(--primary);"></i> <?= htmlspecialchars(__('nav_shifts', 'Shifts & Cash Handover')) ?>
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted);">Manage starting cash, blind drawer handovers, manager spot audits, and day locking with Z-Reports.</p>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-hand-holding-dollar mr-1"></i> Cash &amp; Shift Operations
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Blind Handovers, Drawer Audits &amp; Daily Z-Reports
+        </span>
     </div>
-    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
         <a href="<?= get_pos_url() ?>" class="btn btn-secondary">
             <i class="fa-solid fa-cash-register mr-1"></i> POS Register
         </a>

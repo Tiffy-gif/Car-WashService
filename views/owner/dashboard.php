@@ -87,9 +87,9 @@ include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px; width: 100%;">
-    <div style="min-width: 0;">
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);"><?= htmlspecialchars(__('welcome_back')) ?>, <?= htmlspecialchars(Auth::getFullName() ?? 'Owner') ?></h1>
-        <p style="font-size: 14px; color: var(--text-muted);"><?= date('l, d F Y') ?> • Overview of Car Wash operations and shop performance.</p>
+    <div style="font-size: 14px; color: var(--text-muted); display: flex; align-items: center; gap: 8px;">
+        <i class="fa-regular fa-calendar" style="color: var(--primary);"></i>
+        <span><?= date('l, d F Y') ?> &bull; Overview of Car Wash operations and shop performance.</span>
     </div>
     <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; max-width: 100%;">
         <a href="<?= get_pos_url() ?>" class="btn btn-primary" style="flex-shrink: 0;">

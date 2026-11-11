@@ -215,20 +215,6 @@ $tabCounts = [
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">
-            <i class="fa-solid fa-tags mr-1" style="color: var(--primary);"></i> <?= htmlspecialchars(__('nav_categories')) ?>
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted);">
-            Manage and organize dynamic categories for Services, Products & Spare Parts, and Operating Expenses.
-        </p>
-    </div>
-    <button type="button" class="btn btn-primary" onclick="openNewCategoryModal('<?= $activeTab ?>')">
-        <i class="fa-solid fa-plus mr-1"></i> <?= htmlspecialchars(__('add_category')) ?>
-    </button>
-</div>
-
 <?php if ($message): ?>
     <div style="background: <?= ($messageType === 'danger') ? 'var(--danger-bg)' : 'var(--success-bg)' ?>; color: <?= ($messageType === 'danger') ? 'var(--danger)' : 'var(--success)' ?>; padding: 14px 20px; border-radius: var(--radius-md); margin-bottom: 24px; display: flex; align-items: center; gap: 10px;">
         <i class="fa-solid <?= ($messageType === 'danger') ? 'fa-circle-exclamation' : 'fa-circle-check' ?>"></i>
@@ -236,17 +222,22 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 <?php endif; ?>
 
-<!-- Tabs Header -->
-<div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 24px; flex-wrap: wrap;">
-    <a href="?view=categories&tab=service" class="btn btn-sm <?= ($activeTab === 'service') ? 'btn-primary' : 'btn-secondary' ?>">
-        <i class="fa-solid fa-shower mr-1"></i> Service Categories (<?= $tabCounts['service'] ?>)
-    </a>
-    <a href="?view=categories&tab=product" class="btn btn-sm <?= ($activeTab === 'product') ? 'btn-primary' : 'btn-secondary' ?>">
-        <i class="fa-solid fa-boxes-stacked mr-1"></i> Product Categories (<?= $tabCounts['product'] ?>)
-    </a>
-    <a href="?view=categories&tab=expense" class="btn btn-sm <?= ($activeTab === 'expense') ? 'btn-primary' : 'btn-secondary' ?>">
-        <i class="fa-solid fa-wallet mr-1"></i> Expense Categories (<?= $tabCounts['expense'] ?>)
-    </a>
+<!-- Tabs Header & Actions Bar -->
+<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 24px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <a href="?view=categories&tab=service" class="btn btn-sm <?= ($activeTab === 'service') ? 'btn-primary' : 'btn-secondary' ?>">
+            <i class="fa-solid fa-shower mr-1"></i> Service Categories (<?= $tabCounts['service'] ?>)
+        </a>
+        <a href="?view=categories&tab=product" class="btn btn-sm <?= ($activeTab === 'product') ? 'btn-primary' : 'btn-secondary' ?>">
+            <i class="fa-solid fa-boxes-stacked mr-1"></i> Product Categories (<?= $tabCounts['product'] ?>)
+        </a>
+        <a href="?view=categories&tab=expense" class="btn btn-sm <?= ($activeTab === 'expense') ? 'btn-primary' : 'btn-secondary' ?>">
+            <i class="fa-solid fa-wallet mr-1"></i> Expense Categories (<?= $tabCounts['expense'] ?>)
+        </a>
+    </div>
+    <button type="button" class="btn btn-primary" onclick="openNewCategoryModal('<?= $activeTab ?>')">
+        <i class="fa-solid fa-plus mr-1"></i> <?= htmlspecialchars(__('add_category')) ?>
+    </button>
 </div>
 
 <!-- Categories Table Card -->

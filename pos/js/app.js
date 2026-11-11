@@ -579,13 +579,13 @@ class PosApp {
         const brandSecondary = document.getElementById('brandShopNameSecondary');
 
         if (lang === 'en') {
-            if (brandPrimary) brandPrimary.textContent = nameEn || I18nManager.t('appName');
+            if (brandPrimary) brandPrimary.textContent = 'My Car Wash';
             if (brandSecondary) {
                 brandSecondary.textContent = '';
                 brandSecondary.style.display = 'none';
             }
         } else {
-            if (brandPrimary) brandPrimary.textContent = nameKm || I18nManager.t('appName');
+            if (brandPrimary) brandPrimary.textContent = 'My Car Wash';
             if (brandSecondary) {
                 brandSecondary.textContent = '';
                 brandSecondary.style.display = 'none';
@@ -737,10 +737,11 @@ class PosApp {
         this.updatePendingSyncBadge();
         this.updateCatalogSyncStatus();
 
-        // 7. If the POS has never been connected, show settings automatically on first open
+        // 7. If the POS has never been connected, show settings automatically on first open (only when unauthenticated)
         const hasConnected = localStorage.getItem('carwash_pos_has_connected');
-        if (hasConnected !== 'true') {
+        if (hasConnected !== 'true' && !this.currentUser) {
             setTimeout(() => {
+                if (this.currentUser) return;
                 this.loadSettingsForm();
                 this.showAlert(
                     'settingsAlert',
@@ -756,6 +757,14 @@ class PosApp {
 
         // 8. Register Service Worker (PWA)
         this.registerServiceWorker();
+
+        // 9. Live Digital Clock in Header (HH:MM:SS)
+        setInterval(() => {
+            const now = new Date();
+            const timeStr = now.toTimeString().split(' ')[0];
+            const el = document.querySelector('#catalogLastUpdatedText .sync-time');
+            if (el) el.textContent = timeStr;
+        }, 1000);
     }
 
     static registerServiceWorker() {
@@ -1055,6 +1064,19 @@ class PosApp {
         document.getElementById('btnCartPillQueue')?.addEventListener('click', () => this.switchView('queue'));
         document.getElementById('btnCartPillDiscount')?.addEventListener('click', () => {
             this.openDiscountModal();
+        });
+
+        // Bottom Dock Actions (Quick Service, Hold Order)
+        document.getElementById('btnQuickService')?.addEventListener('click', () => {
+            const catalog = PosStorage.getCatalog();
+            const washSvc = catalog?.services?.find(s => !PosApp.isMechanicalService(s)) || catalog?.services?.[0];
+            if (washSvc) {
+                this.addServiceToCart(washSvc.id);
+                this.showToastNotice(`Added Quick Service: ${washSvc.name_en || washSvc.name_km}`, 'success');
+            }
+        });
+        document.getElementById('btnHoldOrder')?.addEventListener('click', () => {
+            this.switchView('queue');
         });
 
         // Cart Discount Summary Row - Remove Button (x)
@@ -2460,19 +2482,35 @@ class PosApp {
         let user = PosStorage.getUser();
         let token = PosStorage.getSessionToken();
 
-        // If no token, check if server has an active web session (e.g. from Back Office login)
-        if (!token) {
-            try {
-                const res = await PosApi.getWebSession();
-                if (res && res.success && res.session_token && res.user) {
-                    token = res.session_token;
-                    user = res.user;
-                    PosStorage.setSessionToken(token);
-                    PosStorage.setUser(user);
+        // Check if server has an active Back Office web session (e.g. from Back Office login redirect)
+        // If web session is available, bridge it to keep Back Office and POS in sync
+        try {
+            const res = await PosApi.getWebSession();
+            if (res && res.success && res.session_token && res.user) {
+                token = res.session_token;
+                user = res.user;
+                PosStorage.setSessionToken(token);
+                PosStorage.setUser(user);
+                try { localStorage.setItem('carwash_pos_has_connected', 'true'); } catch (e) {}
+                if (res.device) {
+                    PosConfig.save({
+                        deviceUid: res.device.device_uid || 'POS-TERMINAL-01',
+                        deviceName: res.device.device_name || 'Counter Terminal'
+                    });
                 }
-            } catch (e) {
-                // Not authenticated in web session
+                if (res.settings || res.shop) {
+                    const merged = { ...(res.settings || {}), ...(res.shop || {}) };
+                    PosStorage.setSettings(merged);
+                    if (res.exchange_rate) {
+                        PosConfig.save({ exchangeRate: parseInt(res.exchange_rate) });
+                    }
+                    this.applyShopBranding();
+                    this.updateTestModeQuickAccounts();
+                }
             }
+        } catch (e) {
+            // Not authenticated in web session (e.g. NO_WEB_SESSION) or offline;
+            // fall back to existing local storage session if valid
         }
 
         if (user && token) {
@@ -2483,14 +2521,22 @@ class PosApp {
             // Retry pending offline orders automatically
             this.syncPendingOrdersNow();
         } else {
-            PosStorage.clearUser();
-            this.currentUser = null;
-            this.renderLoggedOutState();
-            // Check test mode silently on initial startup
-            this.refreshCatalogSilently(false).then(() => {
-                this.updateTestModeQuickAccounts();
-            }).catch(() => {});
+            this.redirectToLogin();
         }
+    }
+
+    /**
+     * Redirect to unified Back Office login portal
+     */
+    static redirectToLogin(reason = '') {
+        PosStorage.clearUser();
+        this.currentUser = null;
+        const base = PosConfig.getDefaultBackofficeUrl() || '..';
+        let url = `${base}/index.php?view=login`;
+        if (reason) {
+            url += `&msg=${encodeURIComponent(reason)}`;
+        }
+        window.location.replace(url);
     }
 
     /**
@@ -2883,24 +2929,14 @@ class PosApp {
         try {
             await PosApi.staffLogout();
         } catch (e) {}
-        PosStorage.clearUser();
-        this.currentUser = null;
-        this.applyLayoutPreference('right');
-        this.renderLoggedOutState(isIdle);
+        this.redirectToLogin(isIdle ? 'idle_timeout' : 'logged_out');
     }
 
     /**
-     * Handle 401 SESSION_INVALID: clear user & show login screen while keeping pending orders
+     * Handle 401 SESSION_INVALID: clear user & redirect to unified login portal
      */
     static handleSessionInvalid(message = null) {
-        PosStorage.clearUser();
-        this.currentUser = null;
-        this.applyLayoutPreference('right');
-        this.renderLoggedOutState(false);
-        const msg = message || (I18nManager.getLang() === 'km'
-            ? 'វគ្គការងាររបស់អ្នកបានផុតកំណត់។ សូមចូលប្រើប្រាស់ឡើងវិញ។'
-            : 'Session expired or invalid. Please enter your PIN to continue.');
-        this.showAlert('loginAlert', msg, 'warning');
+        this.redirectToLogin('session_invalid');
     }
 
     /**
@@ -3112,38 +3148,7 @@ class PosApp {
     }
 
     static renderLoggedOutState(isIdle = false) {
-        document.getElementById('viewLogin').style.display = 'flex';
-        document.getElementById('mainNav').style.display = 'none';
-        document.getElementById('washerNav').style.display = 'none';
-        document.getElementById('mechanicNav').style.display = 'none';
-        document.getElementById('userPill').style.display = 'none';
-        document.getElementById('btnLogout').style.display = 'none';
-        const menuItemLogout = document.getElementById('menuItemLogout');
-        if (menuItemLogout) menuItemLogout.style.display = 'none';
-
-        document.body.classList.remove('role-cashier');
-        const endShiftItem = document.getElementById('menuItemEndShift');
-        if (endShiftItem) endShiftItem.style.display = 'none';
-        const spotAuditItem = document.getElementById('menuItemSpotAudit');
-        if (spotAuditItem) spotAuditItem.style.display = 'none';
-        const dayLockBanner = document.getElementById('posDayLockBanner');
-        if (dayLockBanner) dayLockBanner.style.display = 'none';
-        document.getElementById('modalStartShift')?.classList.remove('open');
-        document.getElementById('modalEndShift')?.classList.remove('open');
-        document.getElementById('modalManagerPin')?.classList.remove('open');
-        const spotOverlay = document.getElementById('overlaySpotAudit');
-        if (spotOverlay) spotOverlay.style.display = 'none';
-
-        document.querySelectorAll('.view-section').forEach(view => view.classList.remove('active'));
-
-        // Reset PIN and update quick hints
-        this.currentPin = '';
-        this.updatePinDots();
-        this.updateTestModeQuickAccounts();
-
-        if (!isIdle) {
-            this.clearAlert('loginAlert');
-        }
+        this.redirectToLogin(isIdle ? 'idle_timeout' : '');
     }
 
     static switchView(viewName) {
@@ -3512,6 +3517,20 @@ class PosApp {
         return shortMap[trimmed] || trimmed;
     }
 
+    static getCategoryIcon(code, nameEn) {
+        const c = (code || '').toLowerCase();
+        const n = (nameEn || '').toLowerCase();
+        if (c.includes('wash') || n.includes('wash')) return 'fa-car-side';
+        if (c === 'oil' || c === 'engine_oil' || n.includes('engine oil')) return 'fa-oil-can';
+        if (c.includes('oil_part') || (n.includes('oil') && n.includes('part')) || c.includes('part') || n.includes('part')) return 'fa-droplet';
+        if (c.includes('repair') || c.includes('maint') || n.includes('maintenance') || n.includes('repair')) return 'fa-wrench';
+        if (c.includes('filter') || n.includes('filter')) return 'fa-filter';
+        if (c.includes('fluid') || c.includes('coolant') || n.includes('fluid') || n.includes('coolant')) return 'fa-temperature-half';
+        if (c.includes('care') || n.includes('care') || n.includes('polish')) return 'fa-wand-magic-sparkles';
+        if (c.includes('spare') || n.includes('spare')) return 'fa-gear';
+        return 'fa-box-archive';
+    }
+
     /**
      * Render vertical Category Column buttons dynamically from Back Office categories
      * First button is 'All', followed by categories in back office order (sort_order ASC, id ASC).
@@ -3634,8 +3653,9 @@ class PosApp {
 
             const displayName = this.getShortCategoryName(rawName, lang);
             const fullName = (lang === 'km') ? (cat.name_km || cat.name_en) : (cat.name_en || cat.name_km);
+            const catIcon = cat.icon || PosApp.getCategoryIcon(cat.code, cat.name_en);
 
-            btn.innerHTML = `<span>${this.escapeHtml(displayName)}</span>`;
+            btn.innerHTML = `<i class="fa-solid ${catIcon}"></i><span>${this.escapeHtml(displayName)}</span>`;
             btn.title = fullName || displayName;
 
             if (!activeItemsExist) {
@@ -3708,8 +3728,8 @@ class PosApp {
             const isKm = (I18nManager.getLang() === 'km');
             const isMech = this.isMechanicalService(svc);
             const svcBadgeHtml = isMech
-                ? `<span class="card-tag-type mechanical"><i class="fa-solid fa-wrench"></i> MECHANICAL</span>`
-                : `<span class="card-tag-type wash"><i class="fa-solid fa-shower"></i> WASH</span>`;
+                ? `<span class="card-tag-type mechanical"><i class="fa-solid fa-sparkle">✦</i> MECHANICAL</span>`
+                : `<span class="card-tag-type wash"><i class="fa-solid fa-sparkle">✦</i> WASH</span>`;
             const compactBadgeHtml = isMech
                 ? `<span class="item-badge mechanical" style="background:#fef3c7;color:#b45309;font-weight:700;"><i class="fa-solid fa-wrench"></i> Mech</span>`
                 : `<span class="item-badge wash" style="background:#e0f2fe;color:#0369a1;font-weight:700;"><i class="fa-solid fa-shower"></i> Wash</span>`;
@@ -3732,7 +3752,7 @@ class PosApp {
                          ontouchend="PosApp.handleCardPressEnd(event)"
                          ontouchmove="PosApp.handleCardPressMove(event)">
                         ${svcBadgeHtml}
-                        <span class="card-tag-status duration"><i class="fa-regular fa-clock"></i> ${svc.duration_min || 20}m</span>
+                        <span class="card-tag-status duration"><span class="badge-dot-green">●</span> ${svc.duration_min || 20}m</span>
                         <span class="service-wait-time-badge" data-service-id="${svc.id}" style="display: ${waitDisplay};"><i class="fa-regular fa-clock"></i> ${svcWaitText || ''}</span>
                         <div class="item-card-media-box">
                             ${hasSvcImg ? `
@@ -3758,8 +3778,9 @@ class PosApp {
                             <div class="item-meta-row">
                                 <div class="item-price-block">
                                     <span class="item-price-usd">$${priceUsd.toFixed(2)}</span>
-                                    <span class="item-price-khr">${priceKhr.toLocaleString()} ៛</span>
+                                    <span class="item-price-khr" style="display: none;">${priceKhr.toLocaleString()} ៛</span>
                                 </div>
+                                <button type="button" class="btn-card-add" onclick="event.stopPropagation(); PosApp.addServiceToCart(${svc.id})">Add +</button>
                             </div>
                         </div>
                     </div>
@@ -3787,8 +3808,9 @@ class PosApp {
                         <div class="item-meta-row">
                             <div class="item-price-block">
                                 <span class="item-price-usd">$${priceUsd.toFixed(2)}</span>
-                                <span class="item-price-khr">${priceKhr.toLocaleString()} ៛</span>
+                                <span class="item-price-khr" style="display: none;">${priceKhr.toLocaleString()} ៛</span>
                             </div>
+                            <button type="button" class="btn-card-add" onclick="event.stopPropagation(); PosApp.addServiceToCart(${svc.id})">Add +</button>
                         </div>
                     </div>
                 `;
@@ -3869,8 +3891,9 @@ class PosApp {
                             <div class="item-meta-row">
                                 <div class="item-price-block">
                                     <span class="item-price-usd">$${priceUsd.toFixed(2)}</span>
-                                    <span class="item-price-khr">${priceKhr.toLocaleString()} ៛</span>
+                                    <span class="item-price-khr" style="display: none;">${priceKhr.toLocaleString()} ៛</span>
                                 </div>
+                                <button type="button" class="btn-card-add" onclick="event.stopPropagation(); PosApp.addProductToCart(${prod.id})">Add +</button>
                             </div>
                         </div>
                     </div>
@@ -3897,8 +3920,9 @@ class PosApp {
                         <div class="item-meta-row">
                             <div class="item-price-block">
                                 <span class="item-price-usd">$${priceUsd.toFixed(2)}</span>
-                                <span class="item-price-khr">${priceKhr.toLocaleString()} ៛</span>
+                                <span class="item-price-khr" style="display: none;">${priceKhr.toLocaleString()} ៛</span>
                             </div>
+                            <button type="button" class="btn-card-add" onclick="event.stopPropagation(); PosApp.addProductToCart(${prod.id})">Add +</button>
                         </div>
                     </div>
                 `;
@@ -4486,7 +4510,10 @@ class PosApp {
 
         // Update Totals Summary
         const totals = this.calculateTotals();
-        document.getElementById('cartSubtotalText').textContent = `$${totals.subtotalUsd.toFixed(2)} (${totals.subtotalKhr.toLocaleString()} ៛)`;
+        const subtotalEl = document.getElementById('cartSubtotalText');
+        if (subtotalEl) {
+            subtotalEl.textContent = `$${totals.subtotalUsd.toFixed(2)}`;
+        }
 
         const discRow = document.getElementById('discountSummaryRow');
         const discText = document.getElementById('cartDiscountText');
@@ -4596,7 +4623,7 @@ class PosApp {
             payBtn.classList.add('is-disabled');
             payBtn.innerHTML = `
                 <span class="btn-checkout-content">
-                    <i class="fa-solid fa-cash-register checkout-btn-icon"></i>
+                    <i class="fa-solid fa-credit-card checkout-btn-icon"></i>
                     <span class="checkout-btn-text" data-i18n="collectPayment">${I18nManager.t('collectPayment') || 'Collect Payment'}</span>
                 </span>
             `;
@@ -4611,7 +4638,7 @@ class PosApp {
             const totals = this.calculateTotals();
             payBtn.innerHTML = `
                 <span class="btn-checkout-content">
-                    <i class="fa-solid fa-cash-register checkout-btn-icon"></i>
+                    <i class="fa-solid fa-credit-card checkout-btn-icon"></i>
                     <span class="checkout-btn-text" data-i18n="collectPayment">${I18nManager.t('collectPayment') || 'Collect Payment'}</span>
                     <span class="btn-checkout-amount" id="checkoutBtnAmount">$${totals.totalUsd.toFixed(2)}</span>
                 </span>
@@ -7043,6 +7070,10 @@ class PosApp {
             } else {
                 if (res?.error === 'PAYMENT_REQUIRED') {
                     this.showAppAlert(`Payment Required: Upfront payment is mandatory before vehicle ${plate} can enter service.`);
+                    const targetOrd = Object.values(this.currentQueueOrdersMap || {}).find(o => parseInt(o.id) === parseInt(orderId) || o.order_number === orderId);
+                    if (targetOrd) {
+                        setTimeout(() => this.openPayOrderModal(targetOrd), 300);
+                    }
                 } else if (res?.error === 'RECEIPT_REQUIRED') {
                     try {
                         const ack = await PosApi.ackReceiptIssued(orderId);
@@ -7095,6 +7126,10 @@ class PosApp {
             const errMsg = e.data?.message || e.message || '';
             if (errCode === 'PAYMENT_REQUIRED' || errMsg.includes('PAYMENT_REQUIRED')) {
                 this.showAppAlert(`Payment Required: Upfront payment is mandatory before vehicle ${plate} can enter service.`);
+                const targetOrd = Object.values(this.currentQueueOrdersMap || {}).find(o => parseInt(o.id) === parseInt(orderId) || o.order_number === orderId);
+                if (targetOrd) {
+                    setTimeout(() => this.openPayOrderModal(targetOrd), 300);
+                }
             } else if (errCode === 'RECEIPT_REQUIRED' || errMsg.includes('RECEIPT_REQUIRED')) {
                 try {
                     const ack = await PosApi.ackReceiptIssued(orderId);
@@ -7256,16 +7291,24 @@ class PosApp {
             return;
         }
 
+        const techQueue = this.currentBaysData?.technical_queue || [];
+        const isTechOrder = techQueue.some(q => parseInt(q.order_id) === parseInt(orderId));
+
         let html = '';
         freeBays.forEach(bay => {
             const isWash = (bay.bay_type === 'wash');
+            const isBayRecommended = isTechOrder ? !isWash : isWash;
+            const stepNotice = isTechOrder
+                ? (!isWash ? '<span style="font-size: 0.72rem; color: #ea580c; font-weight: 700;"><i class="fa-solid fa-wrench"></i> Step 1 Recommended</span>' : '<span style="font-size: 0.72rem; color: #94a3b8;"><i class="fa-solid fa-circle-info"></i> Step 2 (Wash after Bay 4)</span>')
+                : (isWash ? '<span style="font-size: 0.72rem; color: #0284c7; font-weight: 700;"><i class="fa-solid fa-shower"></i> Recommended Wash Bay</span>' : '<span style="font-size: 0.72rem; color: #94a3b8;">Oil / Tech Bay</span>');
+
             html += `
-                <div class="choose-bay-option" onclick="PosApp.handleChooseBaySelect(${bay.id}, ${orderId}, '${this.escapeHtml(plateNumber)}', '${this.escapeHtml(bay.bay_name)}')">
+                <div class="choose-bay-option ${isBayRecommended ? 'is-recommended' : ''}" onclick="PosApp.handleChooseBaySelect(${bay.id}, ${orderId}, '${this.escapeHtml(plateNumber)}', '${this.escapeHtml(bay.bay_name)}')">
                     <div style="display: flex; align-items: center; gap: 0.65rem;">
-                        <i class="fa-solid fa-warehouse" style="color: var(--primary); font-size: 1.25rem;"></i>
+                        <i class="fa-solid fa-warehouse" style="color: ${isBayRecommended ? 'var(--primary)' : 'var(--text-muted)'}; font-size: 1.25rem;"></i>
                         <div>
                             <strong style="font-size: 0.95rem; color: var(--text-main); display: block;">${this.escapeHtml(bay.bay_name)}</strong>
-                            <span style="font-size: 0.75rem; color: var(--text-muted);">${isWash ? 'Wash Bay' : 'Oil / Technical Bay'}</span>
+                            <div>${stepNotice}</div>
                         </div>
                     </div>
                     <span class="bay-status-badge free"><i class="fa-solid fa-arrow-right"></i> ${I18nManager.t('assignBay') || 'Assign'}</span>
@@ -7876,9 +7919,17 @@ class PosApp {
                 if (!target) {
                     target = { ...this.currentPayingOrder };
                 }
-                target.status = 'paid';
+                // Preserve operational status if vehicle is still waiting to enter service or washing
+                if (target.status === 'finished') {
+                    target.status = 'paid';
+                } else if (target.status === 'washing') {
+                    target.status = 'washing';
+                } else {
+                    target.status = 'waiting';
+                }
                 target.payment_status = 'paid';
                 target.is_paid = 1;
+                target.receipt_issued_at = new Date().toISOString().replace('T', ' ').substring(0, 19);
                 target.discount_usd = discount;
                 target.total_usd = finalTotal;
                 target.total_khr = Math.round(finalTotal * this.getExchangeRate());
@@ -7901,6 +7952,7 @@ class PosApp {
                     document.getElementById('modalReceipt')?.classList.add('open');
                 }
 
+                await this.fetchBaysAndQueue(true);
                 await this.renderJobQueue();
                 await this.renderDailyClose();
             } else {

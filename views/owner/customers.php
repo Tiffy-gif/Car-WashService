@@ -183,12 +183,16 @@ foreach ($allVehicles as $v) {
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);"><?= htmlspecialchars(__('nav_customers')) ?></h1>
-        <p style="font-size: 14px; color: var(--text-muted);">Manage customer records, phone numbers, and registered vehicle plates.</p>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-users mr-1"></i> <?= count($customers) ?> Registered Profiles
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Customer CRM &amp; Vehicle Fleet Directory
+        </span>
     </div>
-    <div style="display: flex; gap: 12px; align-items: center;">
+    <div>
         <button type="button" class="btn btn-primary" onclick="openNewCustomerModal()">
             <i class="fa-solid fa-user-plus mr-1"></i> <?= htmlspecialchars(__('add_customer')) ?>
         </button>

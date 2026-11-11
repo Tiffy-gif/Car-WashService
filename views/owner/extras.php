@@ -105,14 +105,6 @@ while ($r = $setStmt->fetch()) {
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">
-            <i class="fa-solid fa-puzzle-piece mr-1" style="color: var(--primary);"></i> Extras & Value Additions
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted);">Appointment booking, chemical stock tracking, membership packages, and Telegram alerts.</p>
-    </div>
-</div>
 
 <?php if ($message): ?>
     <div style="background: <?= ($messageType === 'danger') ? 'var(--danger-bg)' : 'var(--success-bg)' ?>; color: <?= ($messageType === 'danger') ? 'var(--danger)' : 'var(--success)' ?>; padding: 14px 20px; border-radius: var(--radius-md); margin-bottom: 24px; display: flex; align-items: center; gap: 10px;">

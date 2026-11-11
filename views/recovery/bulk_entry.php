@@ -147,16 +147,15 @@ $recoveredOrders = $pdo->query("
 require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 14px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main); margin: 0;">
-            <i class="fa-solid fa-file-circle-check mr-2" style="color: #ea580c;"></i>Disaster Recovery: Bulk Paper Entry
-        </h1>
-        <p style="font-size: 13px; color: var(--text-muted); margin: 4px 0 0 0;">
-            Enter manual paper job cards and reception logbook records into the system following an outage.
-        </p>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-amber" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-file-circle-check mr-1"></i> Paper-to-Digital Sync
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Disaster Recovery &bull; Manual Outage Job Entry
+        </span>
     </div>
-
     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
         <a href="index.php?view=paper_forms&form=job_card" class="btn btn-secondary btn-sm" target="_blank">
             <i class="fa-solid fa-print mr-1"></i> Print Blank Job Cards

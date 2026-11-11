@@ -301,16 +301,15 @@ include dirname(__DIR__) . '/layouts/header.php';
 }
 </style>
 
-<!-- Page Header & Actions -->
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 24px; font-weight: 800; color: var(--text-main); display: flex; align-items: center; gap: 10px;">
-            <i class="fa-solid fa-warehouse" style="color: var(--primary);"></i>
-            <span><?= htmlspecialchars(__('nav_bays_queue', 'Wash Supervisor & Bays Board')) ?></span>
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted); margin-top: 4px;">
-            Shop floor control • Priority dispatching (P0–P3) • Mixed order handshakes • Idle bay alerts
-        </p>
+<!-- Actions Toolbar -->
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-success" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-circle-dot mr-1"></i> Live Bay Controller
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            3 Wash Bays &bull; 1 Technical Bay &bull; Real-time FIFO Queue
+        </span>
     </div>
     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
         <button type="button" class="btn btn-secondary btn-sm" onclick="toggleChimeAudio()" id="btnChimeToggle" title="Test / Mute Alert Chime">

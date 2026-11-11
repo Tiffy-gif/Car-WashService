@@ -11,13 +11,15 @@ require_once dirname(__DIR__, 2) . '/core/TechnicalManager.php';
 require_once dirname(__DIR__, 2) . '/core/StockControl.php';
 
 Auth::requirePermission('oil_care.list');
-$pageTitle = 'Oil Change & Car Care';
 $pdo = Database::getInstance();
 
 $currentRole = Auth::getRole();
 $message = null;
 $messageType = 'success';
-$activeTab = $_GET['tab'] ?? (in_array($currentRole, ['stock_control', 'warehouse'], true) ? 'requests' : 'reminders');
+
+$pendingReqCount = (int)$pdo->query("SELECT COUNT(*) FROM parts_requests WHERE status = 'pending'")->fetchColumn();
+$activeTab = $_GET['tab'] ?? ($pendingReqCount > 0 ? 'requests' : (in_array($currentRole, ['stock_control', 'warehouse'], true) ? 'requests' : 'products'));
+$pageTitle = __('nav_products_warehouse', 'Products & Warehouse');
 
 if (isset($csrfError)) {
     $message = $csrfError;
@@ -280,6 +282,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         }
         $activeTab = 'discrepancies';
     }
+
+    // 7. Adjust Washing Supplies / Chemicals Stock
+    elseif ($action === 'adjust_supply_stock') {
+        $itemId = (int)($_POST['item_id'] ?? 0);
+        $addQty = (float)($_POST['quantity_change'] ?? 0.00);
+        if ($itemId > 0 && $addQty != 0) {
+            $pdo->prepare("UPDATE inventory SET quantity = quantity + ? WHERE id = ?")->execute([$addQty, $itemId]);
+            $message = "Chemical / Washing supply stock updated successfully!";
+            $activeTab = 'supplies';
+        }
+    }
 }
 
 // Fetch Oil Change Due Reminders (latest record per vehicle)
@@ -392,29 +405,17 @@ $discrepancies = $pdo->query("
     SELECT * FROM stock_discrepancies ORDER BY id DESC LIMIT 100
 ")->fetchAll(PDO::FETCH_ASSOC);
 
+// Fetch Chemical & Washing Supplies
+$supplies = $pdo->query("SELECT * FROM inventory ORDER BY category ASC, id ASC")->fetchAll(PDO::FETCH_ASSOC);
+$lowSuppliesCount = 0;
+foreach ($supplies as $s) {
+    if ((float)$s['quantity'] <= (float)$s['min_alert_qty']) {
+        $lowSuppliesCount++;
+    }
+}
+
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
-
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">
-            <i class="fa-solid fa-warehouse mr-1" style="color: #ea580c;"></i> Warehouse &amp; Stock Control
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted);">Manage parts requests, real-time inventory, physical count discrepancies, and oil change records.</p>
-    </div>
-    <div style="display: flex; gap: 12px; align-items: center;">
-        <?php if (Auth::can('pos.access')): ?>
-            <a href="<?= get_pos_url() ?>" class="btn btn-primary">
-                <i class="fa-solid fa-cash-register mr-1"></i> New Order / POS
-            </a>
-        <?php endif; ?>
-        <?php if (Auth::can('oil_care.add')): ?>
-            <button type="button" class="btn btn-secondary" onclick="openNewProductModal()">
-                <i class="fa-solid fa-plus mr-1"></i> Add Product to Catalog
-            </button>
-        <?php endif; ?>
-    </div>
-</div>
 
 <?php if ($message): ?>
     <div style="background: <?= ($messageType === 'danger') ? 'var(--danger-bg)' : 'var(--success-bg)' ?>; color: <?= ($messageType === 'danger') ? 'var(--danger)' : 'var(--success)' ?>; padding: 14px 20px; border-radius: var(--radius-md); margin-bottom: 24px; display: flex; align-items: center; gap: 10px;">
@@ -423,28 +424,48 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 <?php endif; ?>
 
-<!-- Tabs Header -->
-<div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 24px; flex-wrap: wrap;">
-    <button type="button" data-tab-target="requests" class="btn btn-sm <?= ($activeTab === 'requests') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('requests')">
-        <i class="fa-solid fa-boxes-packing mr-1" style="color: #ea580c;"></i> Parts Requests
-        <?php if ($pendingReqCount > 0): ?>
-            <span class="badge badge-danger" style="margin-left: 6px; font-weight: 800;"><?= $pendingReqCount ?> Pending</span>
-        <?php else: ?>
-            <span class="badge badge-slate" style="margin-left: 6px;">0</span>
+<!-- Tabs Header & Actions Bar -->
+<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 24px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button type="button" data-tab-target="products" class="btn btn-sm <?= ($activeTab === 'products') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('products')">
+            <i class="fa-solid fa-boxes-stacked mr-1"></i> Products &amp; Parts (<?= $catCounts['all'] ?>)
+        </button>
+        <button type="button" data-tab-target="supplies" class="btn btn-sm <?= ($activeTab === 'supplies') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('supplies')">
+            <i class="fa-solid fa-flask mr-1" style="color: #0284c7;"></i> Chemicals &amp; Washing Supplies (<?= count($supplies) ?>)
+            <?php if ($lowSuppliesCount > 0): ?>
+                <span class="badge badge-amber" style="margin-left: 6px; font-weight: 700;"><?= $lowSuppliesCount ?> Low</span>
+            <?php endif; ?>
+        </button>
+        <button type="button" data-tab-target="requests" class="btn btn-sm <?= ($activeTab === 'requests') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('requests')">
+            <i class="fa-solid fa-dolly mr-1" style="color: #ea580c;"></i> Parts Requests
+            <?php if ($pendingReqCount > 0): ?>
+                <span class="badge badge-danger" style="margin-left: 6px; font-weight: 800;"><?= $pendingReqCount ?> Pending</span>
+            <?php else: ?>
+                <span class="badge badge-slate" style="margin-left: 6px;">0</span>
+            <?php endif; ?>
+        </button>
+        <button type="button" data-tab-target="discrepancies" class="btn btn-sm <?= ($activeTab === 'discrepancies') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('discrepancies')">
+            <i class="fa-solid fa-scale-unbalanced mr-1" style="color: #8b5cf6;"></i> Discrepancy Log (<?= count($discrepancies) ?>)
+        </button>
+        <button type="button" data-tab-target="reminders" class="btn btn-sm <?= ($activeTab === 'reminders') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('reminders')">
+            <i class="fa-solid fa-bell mr-1" style="color: #f59e0b;"></i> Oil Due Reminders (<?= count($allReminders) ?>)
+            <?php if ($dueSoonCount > 0 || $overdueCount > 0): ?>
+                <span class="badge badge-amber" style="margin-left: 6px;"><?= $dueSoonCount + $overdueCount ?> Alert</span>
+            <?php endif; ?>
+        </button>
+    </div>
+    <div style="display: flex; gap: 10px; align-items: center;">
+        <?php if (Auth::can('pos.access')): ?>
+            <a href="<?= get_pos_url() ?>" class="btn btn-primary btn-sm">
+                <i class="fa-solid fa-cash-register mr-1"></i> New Order / POS
+            </a>
         <?php endif; ?>
-    </button>
-    <button type="button" data-tab-target="products" class="btn btn-sm <?= ($activeTab === 'products') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('products')">
-        <i class="fa-solid fa-boxes-stacked mr-1"></i> Products &amp; Stock (<?= $catCounts['all'] ?>)
-    </button>
-    <button type="button" data-tab-target="discrepancies" class="btn btn-sm <?= ($activeTab === 'discrepancies') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('discrepancies')">
-        <i class="fa-solid fa-scale-unbalanced mr-1" style="color: #8b5cf6;"></i> Discrepancy Log (<?= count($discrepancies) ?>)
-    </button>
-    <button type="button" data-tab-target="reminders" class="btn btn-sm <?= ($activeTab === 'reminders') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('reminders')">
-        <i class="fa-solid fa-bell mr-1" style="color: #f59e0b;"></i> Oil Due Reminders (<?= count($allReminders) ?>)
-        <?php if ($dueSoonCount > 0 || $overdueCount > 0): ?>
-            <span class="badge badge-amber" style="margin-left: 6px;"><?= $dueSoonCount + $overdueCount ?> Alert</span>
+        <?php if (Auth::can('oil_care.add')): ?>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openNewProductModal()">
+                <i class="fa-solid fa-plus mr-1"></i> Add Product
+            </button>
         <?php endif; ?>
-    </button>
+    </div>
 </div>
 
 <!-- ========================================== -->
@@ -956,7 +977,105 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 </div>
 
-<!-- Modal 1: Add / Edit Product -->
+<!-- ========================================== -->
+<!-- TAB: CHEMICALS & WASHING SUPPLIES INVENTORY -->
+<!-- ========================================== -->
+<div id="tab_supplies" class="tab-pane" style="display: <?= ($activeTab === 'supplies') ? 'block' : 'none' ?>;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+        <div>
+            <h2 style="font-size: 17px; font-weight: 700; color: var(--text-main);">
+                <i class="fa-solid fa-flask mr-1" style="color: #0284c7;"></i> Chemical &amp; Washing Supplies Inventory
+            </h2>
+            <p class="text-xs text-muted">Shop consumables, shampoos, hydrophobic waxes, and microfiber accessories used in washing &amp; detailing bays.</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <span class="badge badge-slate" style="padding: 6px 12px;">Total Items: <strong><?= count($supplies) ?></strong></span>
+            <?php if ($lowSuppliesCount > 0): ?>
+                <span class="badge badge-amber" style="padding: 6px 12px;"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Low Stock Alert: <strong><?= $lowSuppliesCount ?></strong></span>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Supply Name</th>
+                        <th>Category</th>
+                        <th>Current Quantity</th>
+                        <th>Min Alert Level</th>
+                        <th>Unit Cost</th>
+                        <th>Stock Status</th>
+                        <th style="text-align: right;">Quick Restock</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($supplies)): ?>
+                    <tr>
+                        <td colspan="7" style="text-align: center; padding: 48px; color: var(--text-muted);">
+                            <i class="fa-solid fa-flask" style="font-size: 36px; margin-bottom: 12px; opacity: 0.3;"></i>
+                            <div>No washing chemical supplies found in inventory.</div>
+                        </td>
+                    </tr>
+                    <?php else: ?>
+                        <?php foreach ($supplies as $it): 
+                            $isLow = (float)$it['quantity'] <= (float)$it['min_alert_qty'];
+                        ?>
+                        <tr>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <?php 
+                                    $hasImg = !empty($it['thumb_path']) && file_exists(dirname(__DIR__, 2) . '/' . $it['thumb_path']);
+                                    if ($hasImg): ?>
+                                        <img src="<?= APP_URL ?>/<?= htmlspecialchars($it['thumb_path']) ?>?v=<?= strtotime($it['image_updated_at'] ?? 'now') ?>" alt="Supply" style="width: 42px; height: 42px; object-fit: contain; border-radius: var(--radius-md); background: #ffffff; border: 1px solid var(--border); padding: 2px; flex-shrink: 0; box-shadow: var(--shadow-xs);">
+                                    <?php else: ?>
+                                        <div style="width: 42px; height: 42px; border-radius: var(--radius-md); background: var(--bg-subtle); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; border: 1px solid var(--border);">
+                                            <i class="fa-solid <?= ($it['category'] === 'soap' ? 'fa-soap' : ($it['category'] === 'wax' ? 'fa-shield-halved' : ($it['category'] === 'accessory' ? 'fa-rug' : 'fa-flask'))) ?>"></i>
+                                        </div>
+                                    <?php endif; ?>
+                                    <div>
+                                        <div style="font-weight: 700; color: var(--text-main); font-size: 14.5px;"><?= htmlspecialchars($it['item_name_en']) ?></div>
+                                        <div class="text-xs text-muted"><?= htmlspecialchars($it['item_name_km']) ?></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="badge badge-slate" style="text-transform: uppercase; font-weight: 700;"><?= htmlspecialchars($it['category']) ?></span>
+                            </td>
+                            <td>
+                                <strong style="font-size: 16px; color: <?= $isLow ? 'var(--danger)' : 'var(--text-main)' ?>;">
+                                    <?= (float)$it['quantity'] ?> <?= htmlspecialchars($it['unit']) ?>
+                                </strong>
+                            </td>
+                            <td><?= (float)$it['min_alert_qty'] ?> <?= htmlspecialchars($it['unit']) ?></td>
+                            <td><?= formatUSD((float)$it['unit_cost_usd']) ?></td>
+                            <td>
+                                <?php if ($isLow): ?>
+                                    <span class="badge badge-danger"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Low Stock</span>
+                                <?php else: ?>
+                                    <span class="badge badge-success"><i class="fa-solid fa-circle-check mr-1"></i> Sufficient</span>
+                                <?php endif; ?>
+                            </td>
+                            <td style="text-align: right;">
+                                <form action="" method="POST" style="display: inline-flex; gap: 6px; align-items: center; margin: 0;">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="action" value="adjust_supply_stock">
+                                    <input type="hidden" name="item_id" value="<?= $it['id'] ?>">
+                                    <input type="number" step="0.5" name="quantity_change" class="form-input" style="width: 70px; min-height: 32px; padding: 4px 8px; text-align: center;" value="5">
+                                    <button type="submit" class="btn btn-secondary btn-sm" title="Restock item">
+                                        <i class="fa-solid fa-plus mr-1"></i> Restock
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
 <div class="modal-backdrop" id="productModal">
     <div class="modal" style="max-width: 600px;">
         <div class="modal-header">

@@ -8,7 +8,7 @@ require_once dirname(__DIR__, 2) . '/core/Language.php';
 require_once dirname(__DIR__, 2) . '/core/Helpers.php';
 
 Auth::requirePermission('staff.list');
-$pageTitle = 'Manage Staff & Washers';
+$pageTitle = __('nav_staff', 'Staff & User Management');
 $pdo = Database::getInstance();
 
 $message = null;
@@ -327,14 +327,16 @@ foreach ($staffList as $st) {
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">
-            <i class="fa-solid fa-users-gear mr-1" style="color: var(--primary);"></i> <?= htmlspecialchars($pageTitle) ?>
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted);">Manage team credentials, roles (Owner, Cashier, Washer), commissions, and security.</p>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-user-shield mr-1"></i> <?= count($staffList) ?> Team Members
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Staff Accounts, Roles &amp; Security PINs
+        </span>
     </div>
-    <div style="display: flex; gap: 12px; align-items: center;">
+    <div>
         <?php if (Auth::can('staff.add')): ?>
             <button type="button" class="btn btn-primary" onclick="openNewStaffModal()">
                 <i class="fa-solid fa-user-plus mr-1"></i> Add New Staff Member
@@ -421,8 +423,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                     <th style="width: 200px;">Full Name</th>
                     <th style="width: 140px;">Username</th>
                     <th style="width: 140px;">Phone</th>
-                    <th style="width: 120px;">Role</th>
-                    <th>Commission Structure</th>
+                    <th style="width: 140px;">Role</th>
                     <th style="width: 110px;">Status</th>
                     <th style="text-align: right; width: 180px;">Actions</th>
                 </tr>
@@ -461,21 +462,6 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <span class="badge <?= $rBadge ?>">
                             <?= htmlspecialchars($roleTitle) ?>
                         </span>
-                    </td>
-                    <td>
-                        <?php if (!empty($st['is_commission_eligible']) || in_array($st['role'], ['washer', 'mechanic'], true)): ?>
-                            <?php if ($st['commission_type'] === 'percentage'): ?>
-                                <span class="badge <?= ($st['role'] === 'mechanic') ? 'badge-amber' : 'badge-purple' ?>">
-                                    <i class="fa-solid fa-percent mr-1"></i> <?= (float)$st['commission_rate'] ?>% per job
-                                </span>
-                            <?php else: ?>
-                                <span class="badge badge-blue">
-                                    <i class="fa-solid fa-dollar-sign mr-1"></i> <?= formatUSD((float)$st['commission_rate']) ?> fixed per job
-                                </span>
-                            <?php endif; ?>
-                        <?php else: ?>
-                            <span class="text-xs text-muted">Fixed Salary (N/A)</span>
-                        <?php endif; ?>
                     </td>
                     <td>
                         <?php 
@@ -595,12 +581,11 @@ include dirname(__DIR__) . '/layouts/header.php';
 
                 <div class="form-group">
                     <label class="form-label">System Role *</label>
-                    <select name="role" id="add_role" class="form-select" onchange="toggleCommSection('add')">
+                    <select name="role" id="add_role" class="form-select">
                         <?php foreach ($activeRoles as $ar): 
                             $rLabel = (Language::current() === 'km') ? ($ar['name_km'] ?: $ar['name_en']) : $ar['name_en'];
                         ?>
                             <option value="<?= htmlspecialchars($ar['code']) ?>" 
-                                    data-commission="<?= (int)$ar['is_commission_eligible'] ?>"
                                     <?= ($ar['code'] === 'washer') ? 'selected' : '' ?>>
                                 <?= htmlspecialchars($rLabel) ?> (<?= htmlspecialchars($ar['code']) ?>)
                             </option>
@@ -608,23 +593,8 @@ include dirname(__DIR__) . '/layouts/header.php';
                     </select>
                 </div>
 
-                <!-- Commission Fields (Only relevant for washer & mechanic) -->
-                <div id="add_comm_section" style="background: var(--bg-subtle); padding: 14px; border-radius: var(--radius-md); border: 1px solid var(--border);">
-                    <label class="form-label" style="margin-bottom: 8px;">Crew Commission Structure (Washer / Mechanic)</label>
-                    <div class="grid grid-cols-2" style="gap: 14px;">
-                        <div>
-                            <label class="text-xs text-muted">Commission Type</label>
-                            <select name="commission_type" class="form-select">
-                                <option value="percentage">Percentage (%) of Job/Order Total</option>
-                                <option value="fixed">Fixed Dollar ($) per Vehicle/Job</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-xs text-muted">Commission Rate (e.g. 20 or 2.50)</label>
-                            <input type="number" step="0.25" min="0" name="commission_rate" class="form-input" value="20.00">
-                        </div>
-                    </div>
-                </div>
+                <input type="hidden" name="commission_type" value="none">
+                <input type="hidden" name="commission_rate" value="0.00">
             </div>
 
             <div class="modal-footer">
@@ -675,34 +645,19 @@ include dirname(__DIR__) . '/layouts/header.php';
 
                 <div class="form-group">
                     <label class="form-label">System Role *</label>
-                    <select name="role" id="edit_role" class="form-select" onchange="toggleCommSection('edit')">
+                    <select name="role" id="edit_role" class="form-select">
                         <?php foreach ($activeRoles as $ar): 
                             $rLabel = (Language::current() === 'km') ? ($ar['name_km'] ?: $ar['name_en']) : $ar['name_en'];
                         ?>
-                            <option value="<?= htmlspecialchars($ar['code']) ?>" 
-                                    data-commission="<?= (int)$ar['is_commission_eligible'] ?>">
+                            <option value="<?= htmlspecialchars($ar['code']) ?>">
                                 <?= htmlspecialchars($rLabel) ?> (<?= htmlspecialchars($ar['code']) ?>)
                             </option>
                         <?php endforeach; ?>
                     </select>
                 </div>
 
-                <div id="edit_comm_section" style="background: var(--bg-subtle); padding: 14px; border-radius: var(--radius-md); border: 1px solid var(--border);">
-                    <label class="form-label" style="margin-bottom: 8px;">Crew Commission Structure (Washer / Mechanic)</label>
-                    <div class="grid grid-cols-2" style="gap: 14px;">
-                        <div>
-                            <label class="text-xs text-muted">Commission Type</label>
-                            <select name="commission_type" id="edit_comm_type" class="form-select">
-                                <option value="percentage">Percentage (%) of Job/Order Total</option>
-                                <option value="fixed">Fixed Dollar ($) per Vehicle/Job</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-xs text-muted">Commission Rate</label>
-                            <input type="number" step="0.25" min="0" name="commission_rate" id="edit_comm_rate" class="form-input" value="20.00">
-                        </div>
-                    </div>
-                </div>
+                <input type="hidden" name="commission_type" id="edit_comm_type" value="none">
+                <input type="hidden" name="commission_rate" id="edit_comm_rate" value="0.00">
             </div>
 
             <div class="modal-footer">
@@ -789,13 +744,8 @@ function openResetPasswordModal(btnOrUserId, fullName, username) {
 }
 
 function toggleCommSection(prefix) {
-    const roleSelect = document.getElementById(prefix + '_role');
     const commSection = document.getElementById(prefix + '_comm_section');
-    if (commSection && roleSelect) {
-        const opt = roleSelect.options[roleSelect.selectedIndex];
-        const isComm = opt ? (opt.getAttribute('data-commission') === '1' || opt.value === 'washer' || opt.value === 'mechanic') : false;
-        commSection.style.display = isComm ? 'block' : 'none';
-    }
+    if (commSection) commSection.style.display = 'none';
 }
 </script>
 

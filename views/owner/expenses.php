@@ -133,15 +133,17 @@ $todayUsd = (float)$todayStmt->fetchColumn();
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">
-            <i class="fa-solid fa-wallet mr-1" style="color: var(--primary);"></i> <?= htmlspecialchars(__('nav_expenses')) ?>
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted);">Log and track operating expenditures: water, electricity, soap chemicals, wages, and repairs.</p>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-receipt mr-1"></i> <?= count($expenses) ?> Expense Records
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Monthly Operating Expenses &amp; Outflow Ledger
+        </span>
     </div>
-    <div style="display: flex; gap: 12px; align-items: center;">
-        <input type="month" class="form-input" style="min-height: 42px; padding: 6px 14px; width: 170px;" value="<?= htmlspecialchars($selectedMonth) ?>" onchange="location.href='?view=expenses&month=' + this.value">
+    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <input type="month" class="form-input" style="min-height: 40px; padding: 6px 14px; width: 170px;" value="<?= htmlspecialchars($selectedMonth) ?>" onchange="location.href='?view=expenses&month=' + this.value">
         <button type="button" class="btn btn-primary" onclick="openNewExpenseModal()">
             <i class="fa-solid fa-plus mr-1"></i> Add New Expense
         </button>

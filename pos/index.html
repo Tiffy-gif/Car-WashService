@@ -14,7 +14,7 @@
     <link rel="icon" type="image/png" href="icons/icon-192.png">
     <!-- Offline FontAwesome & Google Fonts -->
     <link rel="stylesheet" href="css/font-awesome.min.css">
-    <link rel="stylesheet" href="css/app.css?v=20261022_108">
+    <link rel="stylesheet" href="css/app.css?v=20261111_redesign">
     <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
 </head>
 
@@ -26,10 +26,10 @@
         <div class="brand-area" id="brandArea">
             <div class="brand-logo-icon">
                 <img id="brandLogoImg" src="" alt="Shop Logo" style="display: none; max-width: 100%; max-height: 100%; object-fit: contain;">
-                <i class="fa-solid fa-car-wash" id="brandDefaultIcon"></i>
+                <i class="fa-solid fa-car-side" id="brandDefaultIcon" style="color: #2563eb; font-size: 20px;"></i>
             </div>
             <div class="brand-title">
-                <h1 id="brandShopNamePrimary" data-i18n="appName">ប្រព័ន្ធគិតលុយលាងរថយន្ត</h1>
+                <h1 id="brandShopNamePrimary">My Car Wash</h1>
                 <span id="brandShopNameSecondary" style="display: none;"></span>
             </div>
         </div>
@@ -38,29 +38,29 @@
         <div class="header-center-nav">
             <!-- Navigation Tabs (When logged in) -->
             <nav class="pos-nav" id="mainNav" style="display: none;">
-                <button class="nav-tab active" data-view="pos" title="បញ្ជរបង់ប្រាក់">
-                    <i class="fa-solid fa-cash-register"></i>
-                    <span data-i18n="navPos">បញ្ជរ</span>
+                <button class="nav-tab active" data-view="pos" title="Register">
+                    <i class="fa-solid fa-user-plus"></i>
+                    <span data-i18n="navPos">Register</span>
                 </button>
-                <button class="nav-tab" data-view="queue" title="ជួរការងារ">
+                <button class="nav-tab" data-view="queue" title="Queue">
                     <i class="fa-solid fa-list-check"></i>
-                    <span data-i18n="navQueue">ជួរការងារ</span>
+                    <span data-i18n="navQueue">Queue</span>
                 </button>
-                <button class="nav-tab" data-view="appointments" id="tabAppointments" title="ការណាត់ជួប">
+                <button class="nav-tab" data-view="appointments" id="tabAppointments" title="Appointments">
                     <i class="fa-solid fa-calendar-check"></i>
-                    <span data-i18n="navAppointments">ការណាត់ជួប</span>
+                    <span data-i18n="navAppointments">Appointments</span>
                 </button>
-                <button class="nav-tab" data-view="orders" title="វិក្កយបត្រថ្ងៃនេះ">
+                <button class="nav-tab" data-view="orders" title="Orders">
                     <i class="fa-solid fa-receipt"></i>
-                    <span data-i18n="navTodayOrders">វិក្កយបត្រ</span>
+                    <span data-i18n="navTodayOrders">Orders</span>
                 </button>
-                <button class="nav-tab" data-view="oil" title="រំលឹកប្តូរប្រេង">
+                <button class="nav-tab" data-view="oil" title="Oil Service">
                     <i class="fa-solid fa-oil-can"></i>
-                    <span data-i18n="navOilReminders">ប្តូរប្រេង</span>
+                    <span data-i18n="navOilReminders">Oil Service</span>
                 </button>
-                <button class="nav-tab" data-view="close" title="បិទបញ្ជីថ្ងៃ">
+                <button class="nav-tab" data-view="close" title="Daily Close">
                     <i class="fa-solid fa-calendar-check"></i>
-                    <span data-i18n="navClose">បិទបញ្ជី</span>
+                    <span data-i18n="navClose">Daily Close</span>
                 </button>
             </nav>
 
@@ -90,9 +90,9 @@
             </div>
 
             <!-- Last Updated / Sync Info with Green Status Dot and Refresh Button -->
-            <div class="catalog-sync-wrapper" id="catalogSyncWrap" title="ស្ថានភាពបណ្តាញ និងបច្ចុប្បន្នភាព">
-                
-                <button type="button" class="btn-sync-refresh" id="btnManualSyncCatalog" title="Update services & prices now">
+            <div class="catalog-sync-wrapper" id="catalogSyncWrap" title="Clock & Network Status">
+                <i class="fa-solid fa-clock" style="color: #64748b; font-size: 13.5px; margin-right: 4px;"></i>
+                <button type="button" class="btn-sync-refresh" id="btnManualSyncCatalog" title="Update services & prices now" style="display: none;">
                     <i class="fa-solid fa-arrows-rotate" id="syncCatalogIcon"></i>
                 </button>
                 <div class="catalog-sync-indicator" id="catalogSyncIndicator">
@@ -108,20 +108,24 @@
                 <span data-i18n="syncPending">pending</span>
             </div>
 
-            <!-- Language Switcher: Segmented Control (EN | ខ្មែរ) -->
+            <!-- Language Switcher: Modern Pill -->
             <div class="lang-segmented-control" id="langSegmentedControl">
-                <button type="button" class="lang-seg-btn active" data-lang="km" id="btnLangKm">ខ្មែរ</button>
-                <button type="button" class="lang-seg-btn" data-lang="en" id="btnLangEn">EN</button>
+                <button type="button" class="lang-seg-btn active" data-lang="en" id="btnLangEn">
+                    <span>EN</span> <i class="fa-solid fa-chevron-down" style="font-size: 9px; color: #64748b; margin-left: 2px;"></i>
+                </button>
+                <button type="button" class="lang-seg-btn" data-lang="km" id="btnLangKm" style="display: none;">
+                    <span>ខ្មែរ</span> <i class="fa-solid fa-chevron-down" style="font-size: 9px; color: #64748b; margin-left: 2px;"></i>
+                </button>
             </div>
             <!-- Hidden compatibility button for btnLangToggle -->
             <button class="btn btn-outline btn-sm" id="btnLangToggle" style="display: none;" title="Change Language">EN</button>
 
             <!-- User Pill (2-line: name on line 1, role on line 2 in active language only) - Always Visible -->
-            <div class="user-pill" id="userPill" style="display: none;">
+            <div class="user-pill" id="userPill">
                 <i class="fa-solid fa-circle-user"></i>
                 <div class="user-info" id="userName">
-                    <span class="user-fullname" id="userFullName">Cashier</span>
-                    <span class="user-role-badge" id="userRoleBadge">អ្នកគិតលុយ</span>
+                    <span class="user-fullname" id="userFullName">visual</span>
+                    <span class="user-role-badge" id="userRoleBadge">Cashier <i class="fa-solid fa-chevron-down" style="font-size: 8px; margin-left: 1px;"></i></span>
                 </div>
             </div>
 
@@ -149,8 +153,8 @@
                 </button>
             </div>
 
-            <!-- Notification Bell with Unread Count (Requirement 4) -->
-            <div class="header-menu-wrapper" id="notifBellWrapper">
+            <!-- Notification Bell with Unread Count (Hidden to match Executive UI mockup) -->
+            <div class="header-menu-wrapper" id="notifBellWrapper" style="display: none !important;">
                 <button type="button" class="btn btn-icon btn-topbar-tool" id="btnNotificationBell" title="Notifications" aria-haspopup="true">
                     <i class="fa-solid fa-bell"></i>
                     <span class="notification-badge" id="notifBadge" style="display: none;">0</span>
@@ -172,13 +176,13 @@
             </button>
 
             <!-- Back Office Link for Managers & Owners (Requirement 4) -->
-            <a href="../index.php" target="_blank" class="btn btn-outline btn-sm btn-topbar-backoffice" id="btnHeaderBackoffice" style="display: none; align-items: center; gap: 6px; text-decoration: none; font-weight: 600; padding: 4px 10px; border-radius: var(--radius-sm); color: var(--text-main); border: 1px solid var(--border); font-size: 0.82rem;" title="Go to Back Office">
-                <i class="fa-solid fa-arrow-up-right-from-square" style="color: var(--primary);"></i>
+            <a href="../index.php" target="_blank" class="btn btn-outline btn-sm btn-topbar-backoffice" id="btnHeaderBackoffice" title="Go to Back Office">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i>
                 <span data-i18n="backofficeBtn">Backoffice</span>
             </a>
 
-            <!-- Grouped Dropdown Menu Button -->
-            <div class="header-menu-wrapper" id="headerMenuWrapper">
+            <!-- Grouped Dropdown Menu Button (Hidden to match Executive UI mockup) -->
+            <div class="header-menu-wrapper" id="headerMenuWrapper" style="display: none !important;">
                 <button type="button" class="btn btn-icon btn-topbar-tool btn-header-menu-dropdown" id="btnHeaderMenu" title="Menu & Settings" data-i18n-title="menuTools" aria-haspopup="true" aria-expanded="false">
                     <i class="fa-solid fa-gear"></i>
                 </button>
@@ -235,119 +239,30 @@
     <!-- Main Container -->
     <main class="pos-main">
 
-        <!-- 1. Staff Login Screen -->
-        <section class="login-screen" id="viewLogin">
-            <div class="login-card">
-                <div class="login-header">
-                    <div class="logo-badge" id="loginLogoBadge">
-                        <img id="loginLogoImg" src="" alt="Shop Logo"
-                            style="display: none; max-width: 68px; max-height: 68px; object-fit: contain; border-radius: 10px;">
-                        <i class="fa-solid fa-spray-can-sparkles" id="loginDefaultIcon"></i>
-                    </div>
-                    <div id="loginShopNameWrap" style="margin-bottom: 0.35rem; display: none;">
-                        <h2 id="loginShopName"
-                            style="margin: 0; font-size: 1.25rem; font-weight: 700; color: var(--primary);"></h2>
-                    </div>
-                    <h2 id="loginStaffTitle" data-i18n="staffLoginTitle">ចូលប្រព័ន្ធបុគ្គលិក</h2>
-                    <p id="loginStaffSubtitle" data-i18n="staffLoginSubtitle">សូមបញ្ចូលគណនីបេឡាធិការ ឬមេការ</p>
+        <!-- 1. Staff Login Screen (Redirects to Unified Back Office Login) -->
+        <section class="login-screen" id="viewLogin" style="display: none; justify-content: center; align-items: center; min-height: 70vh;">
+            <div class="login-card" style="text-align: center; padding: 2.5rem 2rem;">
+                <div style="margin-bottom: 1.25rem;">
+                    <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--primary);"></i>
                 </div>
+                <h2 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 0.5rem;" data-i18n="redirectingToLogin">កំពុងបញ្ជូនទៅកាន់ទំព័រចូលប្រព័ន្ធ...</h2>
+                <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1.5rem;">Redirecting to unified login portal...</p>
+                <a href="../index.php?view=login" class="btn btn-primary btn-sm">
+                    <i class="fa-solid fa-arrow-right-to-bracket mr-1"></i> <span data-i18n="loginBtn">ចូលប្រព័ន្ធ</span>
+                </a>
+            </div>
 
-                <div id="loginAlert" class="alert alert-danger" style="display: none;"></div>
-
-                <!-- Account Locked Countdown Banner (Requirement 1) -->
-                <div id="loginLockBanner" class="alert alert-warning login-lock-banner" style="display: none;">
-                    <div class="lock-banner-content">
-                        <div class="lock-banner-icon"><i class="fa-solid fa-lock"></i></div>
-                        <div class="lock-banner-text">
-                            <strong id="lockBannerTitle" data-i18n="accountLocked">គណនីត្រូវបានចាក់សោរបណ្តោះអាសន្ន</strong>
-                            <div id="lockBannerMsg"><span id="lockMinutesText">សូមរង់ចាំ 10 នាទីទៀត</span></div>
-                            <div class="lock-countdown-badge" id="lockCountdownWrap">
-                                <i class="fa-regular fa-clock"></i> <span id="lockCountdownTimer">10:00</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <form id="formLogin">
-                    <div class="form-group">
-                        <label for="loginUsername" data-i18n="username">ឈ្មោះអ្នកប្រើប្រាស់</label>
-                        <input type="text" id="loginUsername" class="form-control" placeholder="e.g. cashier or owner"
-                            required autofocus autocomplete="username">
-                    </div>
-
-                    <!-- 6-Digit PIN Display & Big Tablet-Friendly Keypad (Requirement 1) -->
-                    <div class="form-group pin-group">
-                        <div class="pin-header-row">
-                            <label for="loginPin" data-i18n="pinLabel">លេខកូដសម្ងាត់ PIN (៦ ខ្ទង់)</label>
-                            <span class="pin-hint-badge" id="pinCountBadge">0 / 6</span>
-                        </div>
-                        <div class="pin-dots-display" id="pinDotsDisplay" tabindex="0" role="textbox" aria-label="PIN Entry">
-                            <div class="pin-dot" data-index="0"></div>
-                            <div class="pin-dot" data-index="1"></div>
-                            <div class="pin-dot" data-index="2"></div>
-                            <div class="pin-dot" data-index="3"></div>
-                            <div class="pin-dot" data-index="4"></div>
-                            <div class="pin-dot" data-index="5"></div>
-                        </div>
-                        <input type="password" id="loginPin" class="pin-hidden-input" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" aria-hidden="true" tabindex="-1">
-                    </div>
-
-                    <!-- Tablet & Touch Friendly Big Number Pad -->
-                    <div class="pin-pad-grid" id="pinPadGrid">
-                        <button type="button" class="pin-pad-btn" data-key="1">1</button>
-                        <button type="button" class="pin-pad-btn" data-key="2">2</button>
-                        <button type="button" class="pin-pad-btn" data-key="3">3</button>
-                        <button type="button" class="pin-pad-btn" data-key="4">4</button>
-                        <button type="button" class="pin-pad-btn" data-key="5">5</button>
-                        <button type="button" class="pin-pad-btn" data-key="6">6</button>
-                        <button type="button" class="pin-pad-btn" data-key="7">7</button>
-                        <button type="button" class="pin-pad-btn" data-key="8">8</button>
-                        <button type="button" class="pin-pad-btn" data-key="9">9</button>
-                        <button type="button" class="pin-pad-btn pin-action-btn pin-clear-btn" id="btnPinClear" title="Clear PIN" data-key="clear">
-                            <i class="fa-solid fa-rotate-left"></i>
-                            <span class="btn-subtext">C</span>
-                        </button>
-                        <button type="button" class="pin-pad-btn" data-key="0">0</button>
-                        <button type="button" class="pin-pad-btn pin-action-btn pin-backspace-btn" id="btnPinBackspace" title="Backspace" data-key="backspace">
-                            <i class="fa-solid fa-delete-left"></i>
-                        </button>
-                    </div>
-
-                    <button type="submit" class="btn btn-primary btn-lg" style="width: 100%; margin-top: 1rem;" id="btnLoginSubmit">
-                        <i class="fa-solid fa-arrow-right-to-bracket"></i>
-                        <span data-i18n="loginBtn">ចូលប្រព័ន្ធ</span>
-                    </button>
-                </form>
-
-                <!-- Quick Fill Test Account Shortcuts - Shown ONLY when Back Office Test Mode is ON (Requirement 2) -->
-                <div class="quick-login-hints" id="quickLoginHints" style="display: none;">
-                    <div class="quick-hint-header">
-                        <span class="quick-hint-label"><i class="fa-solid fa-vial"></i> Quick Test Accounts (PIN: 123456)</span>
-                        <span class="test-mode-badge" data-i18n="testModeActive">Test Mode ON</span>
-                    </div>
-                    <div class="quick-staff-buttons">
-                        <button type="button" class="quick-staff-btn"
-                            onclick="PosApp.fillCredentials('cashier', '123456')">
-                            <i class="fa-solid fa-user-tag"></i> cashier
-                        </button>
-                        <button type="button" class="quick-staff-btn"
-                            onclick="PosApp.fillCredentials('owner', '123456')">
-                            <i class="fa-solid fa-shield"></i> owner
-                        </button>
-                        <button type="button" class="quick-staff-btn"
-                            onclick="PosApp.fillCredentials('washer1', '123456')">
-                            <i class="fa-solid fa-hands-bubbles"></i> washer1
-                        </button>
-                        <button type="button" class="quick-staff-btn"
-                            onclick="PosApp.fillCredentials('mechanic1', '123456')">
-                            <i class="fa-solid fa-wrench"></i> mechanic1
-                        </button>
-                        <button type="button" class="quick-staff-btn"
-                            onclick="PosApp.fillCredentials('manager', '123456')">
-                            <i class="fa-solid fa-user-tie"></i> manager
-                        </button>
-                    </div>
-                </div>
+            <!-- Hidden compatibility stubs for background scripts -->
+            <div style="display: none;" aria-hidden="true">
+                <input type="text" id="loginUsername">
+                <input type="password" id="loginPin">
+                <div id="pinDotsDisplay"></div>
+                <div id="pinPadGrid"></div>
+                <div id="loginAlert"></div>
+                <div id="loginLockBanner"></div>
+                <div id="quickLoginHints"></div>
+                <form id="formLogin"></form>
+                <button id="btnLoginSubmit"></button>
             </div>
         </section>
 
@@ -382,14 +297,14 @@
                             <!-- License Plate Input (Mandatory) -->
                             <div class="intake-field intake-plate-field">
                                 <label for="custPlateInput" class="intake-label">
-                                    <i class="fa-solid fa-id-card"></i> <span>ស្លាកលេខ / Plate #</span> <span class="required-star">*</span>
+                                    <i class="fa-solid fa-car-side"></i> <span>Plate #</span> <span class="required-star">*</span>
                                 </label>
                                 <div class="intake-input-wrap">
                                     <input type="text" id="custPlateInput" class="intake-input plate-input"
-                                        placeholder="e.g. 2BC-1234" autocomplete="off" autocapitalize="characters" spellcheck="false">
+                                        placeholder="E.G. 2BC-1234" autocomplete="off" autocapitalize="characters" spellcheck="false">
                                     <input type="hidden" id="custSearchInput" class="search-input">
                                     <button type="button" class="btn-intake-icon" id="btnOpenSavedCustomers" title="Saved customers directory" aria-label="Saved customers">
-                                        <i class="fa-solid fa-address-book"></i>
+                                        <i class="fa-solid fa-qrcode"></i>
                                     </button>
                                 </div>
                                 <!-- Autocomplete Results Dropdown -->
@@ -399,7 +314,7 @@
                             <!-- Customer Name Input (Optional: Defaults to Walk-in Guest) -->
                             <div class="intake-field intake-name-field">
                                 <label for="custNameInput" class="intake-label">
-                                    <i class="fa-solid fa-user"></i> <span>ឈ្មោះ / Customer Name</span>
+                                    <i class="fa-solid fa-user"></i> <span>Customer Name</span>
                                 </label>
                                 <input type="text" id="custNameInput" class="intake-input"
                                     placeholder="Walk-in Guest" autocomplete="off">
@@ -408,7 +323,7 @@
                             <!-- Customer Phone Input (Optional) -->
                             <div class="intake-field intake-phone-field">
                                 <label for="custPhoneInput" class="intake-label">
-                                    <i class="fa-solid fa-phone"></i> <span>ទូរស័ព្ទ / Phone</span>
+                                    <i class="fa-solid fa-phone"></i> <span>Phone</span>
                                 </label>
                                 <input type="tel" id="custPhoneInput" class="intake-input"
                                     placeholder="Optional" autocomplete="off">
@@ -422,7 +337,7 @@
                                 </button>
                                 <button type="button" class="btn btn-primary btn-intake-action" id="btnOpenNewCustomerModal" title="Add / Register new customer profile">
                                     <i class="fa-solid fa-user-plus"></i>
-                                    <span data-i18n="addCustomer">Register</span>
+                                    <span data-i18n="addCustomer">+ New Customer</span>
                                 </button>
                                 <button type="button" id="btnWalkIn" style="display: none;" title="Set to Walk-in Guest"></button>
                             </div>
@@ -515,6 +430,24 @@
                                 <!-- Category buttons dynamically rendered from Back Office sync_catalog -->
                             </div>
                         </aside>
+                    </div>
+
+                    <!-- Bottom Dock Bar (Quick Service, Hold Order, Help Hint) -->
+                    <div class="pos-bottom-dock" id="posBottomDock">
+                        <div class="dock-hint-badge">
+                            <i class="fa-solid fa-message" style="color: #2563eb;"></i>
+                            <span>Select a service and add to cart</span>
+                        </div>
+                        <div class="dock-actions-wrap">
+                            <button type="button" class="btn-dock-action" id="btnQuickService">
+                                <i class="fa-solid fa-bolt" style="color: #2563eb;"></i>
+                                <span>Quick Service</span>
+                            </button>
+                            <button type="button" class="btn-dock-action" id="btnHoldOrder">
+                                <i class="fa-solid fa-pause" style="color: #475569;"></i>
+                                <span>Hold Order</span>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Hidden backward-compatibility elements -->
@@ -673,8 +606,8 @@
 
                         <!-- Subtotal Line -->
                         <div class="summary-line">
-                            <span data-i18n="subtotal">Subtotal</span>
-                            <span style="font-weight: 700; color: var(--text-main);" id="cartSubtotalText">$0.00 (0 ៛)</span>
+                            <span data-i18n="subtotal">Sub Total</span>
+                            <span style="font-weight: 700; color: var(--text-main);" id="cartSubtotalText">$0.00</span>
                         </div>
 
                         <!-- Applied Discount Line (Between Subtotal and Grand Total) -->
@@ -701,15 +634,26 @@
                             </div>
                         </div>
 
-                        <!-- Row of Action Buttons (Clear, Queue, Discount) -->
+                        <!-- Primary Collect Payment Button (Above Action Pills as shown in picture) -->
+                        <div class="cart-checkout-action-wrap primary-wrap">
+                            <button type="button" class="btn-checkout-primary is-disabled" id="btnOpenCheckout" disabled>
+                                <span class="btn-checkout-content">
+                                    <i class="fa-solid fa-credit-card checkout-btn-icon"></i>
+                                    <span class="checkout-btn-text" data-i18n="collectPayment">Collect Payment</span>
+                                    <span class="btn-checkout-amount" id="checkoutBtnAmount" style="display: none;">$0.00</span>
+                                </span>
+                            </button>
+                        </div>
+
+                        <!-- Row of Action Buttons (Clear Cart, Saved Bills, Discount) -->
                         <div class="cart-action-pills-row">
                             <button type="button" class="btn-cart-pill pill-clear" id="btnCartPillClear" disabled title="Clear Cart">
                                 <i class="fa-regular fa-trash-can"></i>
-                                <span data-i18n="clearBtn">Clear</span>
+                                <span data-i18n="clearBtn">Clear Cart</span>
                             </button>
                             <button type="button" class="btn-cart-pill pill-saved" id="btnCartPillQueue" title="Job Queue / Saved Bills">
                                 <i class="fa-solid fa-list-check"></i>
-                                <span data-i18n="savedBills">Queue</span>
+                                <span data-i18n="savedBills">Saved Bills</span>
                             </button>
                             <button type="button" class="btn-cart-pill pill-discount" id="btnCartPillDiscount" disabled title="Discount">
                                 <i class="fa-solid fa-tag"></i>
@@ -718,14 +662,11 @@
                             </button>
                         </div>
 
-                        <!-- Large Pay / Checkout Button -->
-                        <div class="cart-checkout-action-wrap">
-                            <button type="button" class="btn-checkout-primary is-disabled" id="btnOpenCheckout" disabled>
-                                <span class="btn-checkout-content">
-                                    <i class="fa-solid fa-cash-register checkout-btn-icon"></i>
-                                    <span class="checkout-btn-text" data-i18n="collectPayment">Collect Payment</span>
-                                    <span class="btn-checkout-amount" id="checkoutBtnAmount" style="display: none;">$0.00</span>
-                                </span>
+                        <!-- Secondary Collect Payment Button & Helper Text (Below Action Pills) -->
+                        <div class="cart-checkout-action-wrap secondary-wrap">
+                            <button type="button" class="btn-checkout-secondary" id="btnOpenCheckoutSecondary" disabled>
+                                <i class="fa-solid fa-credit-card"></i>
+                                <span data-i18n="collectPayment">Collect Payment</span>
                             </button>
                             <div class="checkout-helper-text" id="checkoutHelperText">
                                 <i class="fa-solid fa-circle-info"></i>

@@ -529,8 +529,17 @@ class Auth {
 
     public static function getDefaultUrlForUser(): string {
         $view = self::getDefaultViewForUser();
-        if ($view === 'pos' && defined('POS_UI') && POS_UI === 'new') {
-            return APP_URL . '/pos/index.html#pos';
+        $role = self::getRole();
+        if (defined('POS_UI') && POS_UI === 'new') {
+            if ($view === 'pos' || $role === 'cashier') {
+                return APP_URL . '/pos/index.html#pos';
+            }
+            if ($view === 'washer_jobs' || $role === 'washer') {
+                return APP_URL . '/pos/index.html#washer';
+            }
+            if ($view === 'mechanic_jobs' || in_array($role, ['technical', 'mechanic'], true)) {
+                return APP_URL . '/pos/index.html#mechanic';
+            }
         }
         return APP_URL . '/index.php?view=' . $view;
     }

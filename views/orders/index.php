@@ -549,14 +549,16 @@ $tabCounts['pending_transfers'] = (int)$pendingCntStmt->fetchColumn();
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-    <div>
-        <h1 style="font-size: 22px; font-weight: 700; color: var(--text-main);">
-            <i class="fa-solid fa-list-ol mr-1" style="color: var(--primary);"></i> <?= htmlspecialchars(__('nav_orders')) ?>
-        </h1>
-        <p style="font-size: 14px; color: var(--text-muted);">Real-time tracking of vehicle wash status: Waiting &rarr; Washing &rarr; Finished &rarr; Paid.</p>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-receipt mr-1"></i> <?= $tabCounts['all'] ?> Orders Today
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Real-time Sales &amp; Wash Order Management
+        </span>
     </div>
-    <div style="display: flex; gap: 12px;">
+    <div>
         <a href="<?= get_pos_url() ?>" class="btn btn-primary">
             <i class="fa-solid fa-plus mr-1"></i> New Wash Order
         </a>

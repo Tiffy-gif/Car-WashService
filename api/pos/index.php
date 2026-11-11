@@ -105,6 +105,32 @@ if (!empty($origin) && !$isAllowedOrigin) {
 
 $pdo = Database::getInstance();
 
+// Extract action early for health checks and gateway status
+$rawInput = file_get_contents('php://input');
+$inputData = [];
+if (!empty($rawInput)) {
+    $decoded = json_decode($rawInput, true);
+    if (is_array($decoded)) {
+        $inputData = $decoded;
+    }
+}
+if (!empty($_POST)) {
+    $inputData = array_merge($inputData, $_POST);
+}
+$action = $_GET['action'] ?? $inputData['action'] ?? '';
+
+// Plain health-check action or root gateway check (always returns HTTP 200 online status)
+if ($action === '' || $action === 'ping' || $action === 'health') {
+    echo json_encode([
+        'success' => true,
+        'status' => 'online',
+        'message' => 'POS API Gateway is online and ready.',
+        'endpoint' => 'http://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . '/Car-WashService/api/pos/',
+        'server_time' => date('Y-m-d H:i:s')
+    ]);
+    exit;
+}
+
 // Rate limiting on device key authentication failures
 $clientIp = class_exists('AuditLogger') ? AuditLogger::getClientIp() : ($_SERVER['REMOTE_ADDR'] ?? '127.0.0.1');
 try {
@@ -150,23 +176,66 @@ if (!$apiKey) {
     }
 }
 
-if (!$apiKey) {
-    http_response_code(401);
-    echo json_encode([
-        'success' => false,
-        'error' => 'DEVICE_KEY_REQUIRED',
-        'message' => 'Unauthorized: POS Device API Key is missing. Pass header X-Device-Key: <key>'
-    ]);
-    exit;
+$device = null;
+if ($apiKey) {
+    // Check device status in pos_devices table by SHA-256 hash or plaintext fallback
+    $keyHash = hash('sha256', $apiKey);
+    $devStmt = $pdo->prepare("SELECT * FROM pos_devices WHERE api_key_hash = ? OR api_key = ?");
+    $devStmt->execute([$keyHash, $apiKey]);
+    $device = $devStmt->fetch();
 }
 
-// Check device status in pos_devices table by SHA-256 hash
-$keyHash = hash('sha256', $apiKey);
-$devStmt = $pdo->prepare("SELECT * FROM pos_devices WHERE api_key_hash = ?");
-$devStmt->execute([$keyHash]);
-$device = $devStmt->fetch();
+// Fallback: If device is not found by API key (or key was stale/empty), check staff token or active web session
+if (!$device) {
+    // 1. Check valid unexpired X-Staff-Token
+    $stToken = $_SERVER['HTTP_X_STAFF_TOKEN'] ?? ($headers['X-Staff-Token'] ?? ($headers['x-staff-token'] ?? ''));
+    if ($stToken !== '') {
+        $stHash = hash('sha256', trim($stToken));
+        $devSess = $pdo->prepare("SELECT d.* FROM pos_sessions s JOIN pos_devices d ON s.device_id = d.id WHERE s.token_hash = ? AND s.expires_at > ? LIMIT 1");
+        $devSess->execute([$stHash, date('Y-m-d H:i:s')]);
+        $device = $devSess->fetch(PDO::FETCH_ASSOC);
+    }
+}
 
 if (!$device) {
+    // 2. Check if request is authenticated via active Back Office web session (e.g. from login redirect)
+    if (class_exists('Auth')) {
+        Auth::startSession();
+        if (Auth::check()) {
+            $userRole = Auth::getRole();
+            $deviceRoleMap = [
+                'cashier' => 'POS-Cashier',
+                'mechanic' => 'Technical',
+                'technical' => 'Technical',
+                'warehouse' => 'Warehouse',
+                'washer' => 'Washer',
+                'wash_supervisor' => 'Washer'
+            ];
+            $prefName = $deviceRoleMap[$userRole] ?? '';
+            if ($prefName !== '') {
+                $devStmt = $pdo->prepare("SELECT * FROM pos_devices WHERE status = 'active' AND (device_name LIKE ? OR device_uid LIKE ?) ORDER BY id ASC LIMIT 1");
+                $devStmt->execute(["%$prefName%", "%$prefName%"]);
+                $device = $devStmt->fetch(PDO::FETCH_ASSOC);
+            }
+            if (!$device) {
+                $devStmt = $pdo->query("SELECT * FROM pos_devices WHERE status = 'active' ORDER BY id ASC LIMIT 1");
+                $device = $devStmt->fetch(PDO::FETCH_ASSOC);
+            }
+        }
+    }
+}
+
+if (!$device) {
+    if (!$apiKey) {
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'error' => 'DEVICE_KEY_REQUIRED',
+            'message' => 'Unauthorized: POS Device API Key is missing. Pass header X-Device-Key: <key>'
+        ]);
+        exit;
+    }
+
     if (class_exists('AuditLogger')) {
         AuditLogger::log('POS_DEVICE_AUTH_FAILED', 'Unrecognized POS device key attempted from IP ' . $clientIp, 'device');
     }
@@ -251,36 +320,11 @@ function compute_system_revision(PDO $pdo, int $userId = 0): array {
     }
 }
 
-// Router for API action
-$rawInput = file_get_contents('php://input');
-$inputData = [];
-if (!empty($rawInput)) {
-    $decoded = json_decode($rawInput, true);
-    if (is_array($decoded)) {
-        $inputData = $decoded;
-    }
-}
-// Merge $_POST if present
-if (!empty($_POST)) {
-    $inputData = array_merge($inputData, $_POST);
-}
-
-$action = $_GET['action'] ?? $inputData['action'] ?? '';
-
-// Plain health-check action
-if ($action === 'ping' || $action === 'health') {
-    echo json_encode([
-        'success' => true,
-        'status' => 'healthy',
-        'device' => $device['device_name'] ?? 'Unknown'
-    ]);
-    exit;
-}
-
 // ========================================================
 // CENTRAL AUTHENTICATION & SESSION VALIDATION
 // ========================================================
 $DEVICE_ONLY_ACTIONS = [
+    '',
     'staff_login',
     'get_web_session',
     'sync_catalog',
@@ -852,6 +896,48 @@ if ($action === 'get_web_session') {
     $sessStmt = $pdo->prepare("INSERT INTO pos_sessions (token_hash, user_id, device_id, created_at, last_seen_at, expires_at, ip) VALUES (?, ?, ?, ?, ?, ?, ?)");
     $sessStmt->execute([$tokenHash, (int)$user['id'], (int)$device['id'], $nowStr, $nowStr, $expiresAtStr, $clientIp]);
 
+    // Fetch system settings & shop data for POS initialization
+    $settings = [];
+    $sRows = $pdo->query("SELECT setting_key, setting_value FROM settings")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($sRows as $sr) {
+        $settings[$sr['setting_key']] = $sr['setting_value'];
+    }
+
+    $logoUrl = !empty($settings['shop_logo']) ? (API_BASE_URL . '/' . ltrim($settings['shop_logo'], '/')) : null;
+    $khqrUrl = !empty($settings['khqr_image']) ? (API_BASE_URL . '/' . ltrim($settings['khqr_image'], '/')) : null;
+
+    $settings['shop_logo_url'] = $logoUrl;
+    $settings['logo_url'] = $logoUrl;
+    $settings['khqr_url'] = $khqrUrl;
+
+    $shopData = [
+        'shop_name_en' => $settings['shop_name_en'] ?? 'Car Wash & Detailing',
+        'shop_name_km' => $settings['shop_name_km'] ?? 'សេវាកម្មលាងរថយន្ត និងម៉ូតូទំនើប',
+        'shop_address' => $settings['shop_address'] ?? '',
+        'shop_phone' => $settings['shop_phone'] ?? '',
+        'shop_logo' => $settings['shop_logo'] ?? '',
+        'shop_logo_url' => $logoUrl,
+        'name_en' => $settings['shop_name_en'] ?? 'Car Wash & Detailing',
+        'name_km' => $settings['shop_name_km'] ?? 'សេវាកម្មលាងរថយន្ត និងម៉ូតូទំនើប',
+        'address' => $settings['shop_address'] ?? '',
+        'phone' => $settings['shop_phone'] ?? '',
+        'logo' => $settings['shop_logo'] ?? '',
+        'logo_url' => $logoUrl,
+        'receipt_footer' => $settings['receipt_footer'] ?? 'Thank you for your visit! / សូមអរគុណ!',
+        'receipt_show_logo' => ($settings['receipt_show_logo'] ?? '1') === '1',
+        'receipt_language' => $settings['receipt_language'] ?? 'both',
+        'exchange_rate' => get_exchange_rate(),
+        'aba_account_name' => $settings['aba_account_name'] ?? '',
+        'aba_account_num' => $settings['aba_account_num'] ?? '',
+        'khqr_image' => $settings['khqr_image'] ?? '',
+        'khqr_url' => $khqrUrl,
+        'default_oil_mileage' => (int)($settings['default_oil_mileage'] ?? 10000),
+        'default_oil_months' => (int)($settings['default_oil_months'] ?? 3),
+        'default_language' => $settings['default_language'] ?? 'en',
+        'demo_mode' => (int)($settings['demo_mode'] ?? 0),
+        'app_timezone' => $settings['app_timezone'] ?? 'Asia/Phnom_Penh'
+    ];
+
     echo json_encode([
         'success' => true,
         'message' => 'Web session bridged to POS staff session',
@@ -864,7 +950,10 @@ if ($action === 'get_web_session') {
             'device_name' => $device['device_name'],
             'device_uid' => $device['device_uid'],
             'location' => $device['location']
-        ]
+        ],
+        'exchange_rate' => get_exchange_rate(),
+        'settings' => $settings,
+        'shop' => $shopData
     ]);
     exit;
 }
@@ -2715,7 +2804,15 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
             $paidAtVal = null;
         } else {
             $targetPaymentStatus = 'paid';
-            $targetOrderStatus = 'paid';
+            // If the vehicle has already completed service, mark as paid.
+            // If vehicle is waiting to enter a bay or actively washing (upfront payment), preserve its operational workflow status!
+            if ($ord['status'] === 'finished') {
+                $targetOrderStatus = 'paid';
+            } elseif ($ord['status'] === 'washing') {
+                $targetOrderStatus = 'washing';
+            } else {
+                $targetOrderStatus = 'waiting';
+            }
             $paidAtVal = date('Y-m-d H:i:s');
         }
 
@@ -2946,7 +3043,7 @@ if ($action === 'get_queue') {
                (SELECT ot.task_type FROM order_tasks ot WHERE ot.order_id = o.id AND ot.status != 'completed' ORDER BY ot.sequence ASC LIMIT 1) as current_task_type,
                (SELECT ot.title FROM order_tasks ot WHERE ot.order_id = o.id AND ot.status != 'completed' ORDER BY ot.sequence ASC LIMIT 1) as current_task_title
         FROM orders o
-        WHERE (DATE(o.created_at) = CURDATE() OR o.status IN ('waiting', 'washing')) AND o.status != 'cancelled'
+        WHERE (DATE(o.created_at) = CURDATE() OR DATE(o.paid_at) = CURDATE() OR DATE(o.finished_at) = CURDATE() OR o.status IN ('waiting', 'washing')) AND o.status != 'cancelled'
         ORDER BY CASE o.status
             WHEN 'washing' THEN 1
             WHEN 'waiting' THEN 2

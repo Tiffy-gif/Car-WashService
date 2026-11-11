@@ -196,12 +196,18 @@ $pdo->exec("
     CREATE TABLE inspection_checklists (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_id INTEGER NOT NULL,
+        task_id INTEGER DEFAULT NULL,
+        item_key TEXT DEFAULT '',
         item_name TEXT NOT NULL,
         is_mandatory INTEGER NOT NULL DEFAULT 1,
         status TEXT NOT NULL DEFAULT 'pass',
         photo_url TEXT DEFAULT 'uploads/inspections/sample.jpg',
         notes TEXT DEFAULT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        checked_by_id INTEGER DEFAULT NULL,
+        checked_by_name TEXT DEFAULT NULL,
+        checked_at TEXT DEFAULT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE service_duration_reviews (

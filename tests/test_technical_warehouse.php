@@ -73,9 +73,9 @@ echo "1. Testing Vehicle Receive & Technical Job Order Creation (2 Lanes)...\n";
 $oNum = 'TEST-TECH-' . date('His');
 $pdo->prepare("
     INSERT INTO orders (
-        order_number, order_uid, plate_number, vehicle_type, status, repair_status, total_usd, total_khr,
+        order_number, order_uid, plate_number, vehicle_type, status, repair_status, payment_status, receipt_printed_at, receipt_issued_at, total_usd, total_khr,
         arrived_at, queue_priority, priority_level, created_at, is_active
-    ) VALUES (?, ?, 'TEST-8899', 'suv', 'washing', 'waiting', 75.00, 307500, CURRENT_TIMESTAMP, 0, 'P3', CURRENT_TIMESTAMP, 1)
+    ) VALUES (?, ?, 'TEST-8899', 'suv', 'waiting', 'waiting', 'paid', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 75.00, 307500, CURRENT_TIMESTAMP, 0, 'P3', CURRENT_TIMESTAMP, 1)
 ")->execute([$oNum, generate_unique_id('ORD')]);
 $orderId = (int)$pdo->lastInsertId();
 
@@ -85,6 +85,9 @@ $pdo->prepare("INSERT INTO order_items (order_id, product_id, service_name, item
 
 // Receive car into Bay 4 by Technician
 $recRes = BayManager::assignCarToBay($pdo, 4, $orderId, $techId, $techName, 'technical');
+if (empty($recRes['success'])) {
+    echo "DEBUG assignCarToBay failed: " . json_encode($recRes) . "\n";
+}
 assertTest(!empty($recRes['success']), "Car assigned to Bay 4 (Oil Bay)");
 
 // Create Job Order and simultaneous lanes

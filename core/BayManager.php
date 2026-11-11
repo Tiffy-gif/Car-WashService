@@ -869,7 +869,8 @@ class BayManager {
             FROM orders o
             LEFT JOIN customers c ON o.customer_id = c.id
             LEFT JOIN order_items oi ON o.id = oi.order_id
-            WHERE o.status IN ('waiting', 'washing') AND (o.bay_id IS NULL OR o.bay_id = 0) AND (o.is_active = 1 OR o.is_active IS NULL)
+            WHERE (o.status IN ('waiting', 'washing') OR (o.status = 'paid' AND (o.bay_id IS NULL OR o.bay_id = 0) AND o.finished_at IS NULL AND EXISTS (SELECT 1 FROM order_tasks ot WHERE ot.order_id = o.id AND ot.status IN ('waiting', 'ready_for_tech', 'in_progress'))))
+              AND (o.bay_id IS NULL OR o.bay_id = 0) AND (o.is_active = 1 OR o.is_active IS NULL)
             GROUP BY o.id
             ORDER BY CASE WHEN o.queue_priority > 0 THEN o.queue_priority ELSE 999999 END ASC, COALESCE(o.arrived_at, o.created_at) ASC, o.id ASC
         ";
@@ -1728,8 +1729,8 @@ class BayManager {
                 return ['success' => false, 'error' => 'ORDER_NOT_FOUND', 'message' => "Order #{$orderId} not found"];
             }
 
-            // Check if order already finished/paid/cancelled
-            if (in_array($order['status'], ['finished', 'paid', 'cancelled'], true)) {
+            // Check if order already finished/paid/cancelled or (for technical finish) repair already finished
+            if (in_array($order['status'], ['finished', 'paid', 'cancelled'], true) || ($userRole === 'technical' && ($order['repair_status'] ?? '') === 'finished')) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
@@ -1907,7 +1908,7 @@ class BayManager {
                 if ($freeBayStmt->rowCount() === 0) {
                     // Check if bay was already free or assigned elsewhere
                     $recheckBay = $pdo->query("SELECT id, current_order_id, status FROM bays WHERE id = " . (int)$bay['id'])->fetch(PDO::FETCH_ASSOC);
-                    if ($recheckBay && (int)($recheckBay['current_order_id'] ?? 0) !== $orderId) {
+                    if ($bayId !== null && $bayId > 0 && $recheckBay && !empty($recheckBay['current_order_id']) && (int)$recheckBay['current_order_id'] !== $orderId) {
                         if ($pdo->inTransaction()) {
                             $pdo->rollBack();
                         }
@@ -1917,6 +1918,7 @@ class BayManager {
                             'message' => "Bay {$bayName} was concurrently modified by another transaction. Completion aborted."
                         ];
                     }
+                    // When completing an order (bayId is null or bay already released/reassigned), do not abort the order completion
                 }
             } else {
                 // Free any bay associated with this order

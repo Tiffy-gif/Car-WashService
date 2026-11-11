@@ -518,16 +518,16 @@ $keyLabels = [
 require_once dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 12px;">
-    <div>
-        <h1 style="font-size: 24px; font-weight: 700; color: var(--text-main); margin-bottom: 4px;">
-            <i class="fa-solid fa-gear mr-2" style="color: var(--primary);"></i><?= htmlspecialchars(__('nav_settings', 'Shop Settings')) ?>
-        </h1>
-        <p style="color: var(--text-muted); font-size: 14px;">
-            Configure shop information, receipts, exchange rate, payments, reminders, and system parameters dynamically.
-        </p>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
+            <i class="fa-solid fa-sliders mr-1"></i> System Preferences
+        </span>
+        <span style="font-size: 13px; color: var(--text-muted);">
+            Shop Profile, Currency, Hardware &amp; Security Controls
+        </span>
     </div>
-    <div style="display: flex; gap: 8px;">
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
         <a href="<?= APP_URL ?>/index.php?view=receipt&test=1" target="_blank" class="btn btn-secondary btn-sm" title="Print a sample 80mm receipt with current settings">
             <i class="fa-solid fa-print mr-1"></i> <?= htmlspecialchars(__('print_test_receipt', 'Test Receipt (80mm)')) ?>
         </a>
@@ -1603,9 +1603,9 @@ $baysList = BayManager::getAllBays($pdo);
                 <div class="text-xs text-muted" style="margin-top: 4px;">Channel username or numeric ID where notifications should be posted</div>
             </div>
 
-            <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: var(--radius-md); padding: 14px 18px; margin: 16px 0; color: #0369a1; font-size: 13px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: var(--radius-md); padding: 14px 18px; margin: 16px 0; color: #0369a1; font-size: 13px;">
                 <div>
-                    <strong>Also accessible in Extras:</strong> Telegram alert status can also be managed and viewed under <a href="<?= APP_URL ?>/index.php?view=extras&tab=telegram" style="color: #0284c7; font-weight: 700; text-decoration: underline;">Owner &gt; Extras &amp; Stock</a>.
+                    <strong><i class="fa-solid fa-circle-info mr-1"></i> Telegram Ready Alerts:</strong> Automated alerts trigger in real time whenever a customer's vehicle is marked "Ready for Pickup" or at daily shift closeout.
                 </div>
             </div>
 
