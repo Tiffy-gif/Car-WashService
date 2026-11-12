@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Technician Duty — Idea 2 (3-Stage Kanban Pipeline)</title>
+<link rel="stylesheet" href="css/font-awesome.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #f1f5f9;
+    color: #0f172a;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+  .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; }
+  .card-shadow { box-shadow: 0 1px 3px rgba(15,23,42,.06), 0 6px 18px -4px rgba(15,23,42,.08); }
+
+  /* App Layout */
+  .app-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  @media (min-width: 1024px) {
+    .app-container { height: 100vh; overflow: hidden; }
+  }
+
+  /* Header */
+  .app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #e2e8f0;
+    background: #ffffff;
+    padding: 0.75rem 1.5rem;
+    flex-shrink: 0;
+  }
+  .header-brand { display: flex; align-items: center; gap: 0.75rem; }
+  .brand-icon {
+    display: flex; height: 2.5rem; width: 2.5rem; align-items: center; justify-content: center;
+    border-radius: 0.75rem; background: linear-gradient(135deg, #f97316, #ea580c);
+    color: #ffffff; box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3); font-size: 1.15rem;
+  }
+  .brand-text h1 { font-size: 1.05rem; font-weight: 800; letter-spacing: 0.02em; color: #0f172a; }
+  .brand-text p { font-size: 0.75rem; font-weight: 500; color: #64748b; }
+
+  .header-actions { display: flex; align-items: center; gap: 0.75rem; }
+  .pill-live {
+    display: flex; align-items: center; gap: 0.45rem; border-radius: 9999px;
+    background: #eff6ff; padding: 0.35rem 0.85rem; font-size: 0.75rem; font-weight: 700;
+    color: #1d4ed8; border: 1px solid #bfdbfe;
+  }
+  .pulse-dot {
+    width: 0.5rem; height: 0.5rem; border-radius: 50%; background: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.25);
+  }
+  .btn-pos-back {
+    display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 0.5rem;
+    border: 1px solid #e2e8f0; background: #ffffff; padding: 0.5rem 1rem;
+    font-size: 0.75rem; font-weight: 700; color: #0f172a; text-decoration: none;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .btn-pos-back:hover { background: #f8fafc; }
+
+  /* Subheader Pipeline Summary Bar */
+  .pipeline-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.65rem 1.5rem;
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
+  .pipeline-stats {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+  }
+  .pipe-stat-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: #475569;
+    font-weight: 600;
+  }
+  .pipe-stat-num {
+    background: #f1f5f9;
+    padding: 0.15rem 0.5rem;
+    border-radius: 9999px;
+    font-weight: 800;
+    color: #0f172a;
+  }
+
+  /* 3-Column Board Container */
+  .kanban-board {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  @media (min-width: 1024px) {
+    .kanban-board {
+      grid-template-columns: repeat(3, 1fr);
+      overflow-y: hidden;
+      overflow-x: auto;
+    }
+  }
+
+  /* Kanban Column */
+  .kanban-col {
+    background: #e9eef5;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.9rem;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: 100%;
+  }
+
+  .col-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #cbd5e1;
+    background: #ffffff;
+    border-top-left-radius: 0.9rem;
+    border-top-right-radius: 0.9rem;
+  }
+  .col-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.825rem;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+  .col-badge {
+    padding: 0.2rem 0.55rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 800;
+  }
+
+  .col-stage1 .col-title { color: #d97706; }
+  .col-stage1 .col-badge { background: #fef3c7; color: #b45309; }
+
+  .col-stage2 .col-title { color: #2563eb; }
+  .col-stage2 .col-badge { background: #dbeafe; color: #1d4ed8; }
+
+  .col-stage3 .col-title { color: #059669; }
+  .col-stage3 .col-badge { background: #d1fae5; color: #047857; }
+
+  /* Cards list inside column */
+  .cards-list {
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  /* Kanban Card */
+  .kanban-card {
+    background: #ffffff;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 0.75rem;
+    padding: 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    position: relative;
+  }
+  .kanban-card:hover {
+    border-color: #94a3b8;
+    box-shadow: 0 4px 12px rgba(15,23,42,0.06);
+  }
+  .kanban-card.active-lift {
+    border-color: #3b82f6;
+    background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+    box-shadow: 0 0 0 2px rgba(59,130,246,0.15), 0 4px 12px rgba(15,23,42,0.08);
+  }
+
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .plate-pill {
+    background: #0f172a;
+    color: #ffffff;
+    padding: 0.25rem 0.6rem;
+    border-radius: 0.4rem;
+    font-weight: 800;
+    font-size: 0.825rem;
+    letter-spacing: 0.05em;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .card-source-tag {
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.2rem 0.5rem;
+    border-radius: 0.35rem;
+  }
+  .tag-wash { background: #e0f2fe; color: #0369a1; }
+  .tag-direct { background: #ede9fe; color: #6d28d9; }
+
+  .card-car-info {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #1e293b;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .card-subtext {
+    font-size: 0.725rem;
+    color: #64748b;
+  }
+
+  /* Lift Badge Banner */
+  .lift-active-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #1e40af;
+  }
+
+  /* Task Steps List inside Active Card */
+  .task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+  }
+  .task-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.35rem 0.45rem;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.4rem;
+    font-size: 0.75rem;
+  }
+  .task-left {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-weight: 600;
+    color: #1e293b;
+  }
+  .task-check {
+    width: 1.1rem;
+    height: 1.1rem;
+    border-radius: 0.25rem;
+    border: 1.5px solid #cbd5e1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    cursor: pointer;
+    background: #ffffff;
+  }
+  .task-check.done {
+    background: #10b981;
+    border-color: #10b981;
+    color: #ffffff;
+  }
+  .task-status-pill {
+    font-size: 0.675rem;
+    font-weight: 700;
+    padding: 0.15rem 0.45rem;
+    border-radius: 0.3rem;
+  }
+  .ts-done { background: #d1fae5; color: #065f46; }
+  .ts-prog { background: #fef3c7; color: #92400e; }
+  .ts-wait { background: #f1f5f9; color: #64748b; }
+
+  /* Fluid & Parts Meter */
+  .fluid-meter {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 0.5rem;
+    padding: 0.45rem 0.65rem;
+    font-size: 0.75rem;
+  }
+  .fluid-title { font-weight: 700; color: #9a3412; display: flex; align-items: center; gap: 0.35rem; }
+  .fluid-controls { display: flex; align-items: center; gap: 0.4rem; }
+  .btn-meter {
+    width: 1.5rem; height: 1.5rem; border-radius: 0.3rem; border: 1px solid #fed7aa;
+    background: #ffffff; font-weight: 800; cursor: pointer; color: #c2410c;
+  }
+  .btn-meter:hover { background: #ffedd5; }
+
+  /* Inspection Checklist Preview (Column 3) */
+  .inspect-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem;
+  }
+  .inspect-pill {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.4rem;
+    padding: 0.4rem 0.5rem;
+    font-size: 0.725rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .inspect-pill-title { font-weight: 700; color: #334155; }
+  .inspect-pill-value {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 600;
+  }
+  .val-pass { color: #059669; }
+  .val-warn { color: #d97706; }
+  .val-fail { color: #dc2626; }
+
+  /* Buttons & CTAs */
+  .btn-action-primary {
+    background: #2563eb;
+    color: #ffffff;
+    border: none;
+    padding: 0.65rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(37,99,235,0.25);
+    transition: background 0.15s, transform 0.05s;
+    width: 100%;
+  }
+  .btn-action-primary:hover { background: #1d4ed8; }
+  .btn-action-primary:active { transform: scale(0.98); }
+
+  .btn-action-pull {
+    background: #f97316;
+    color: #ffffff;
+    border: none;
+    padding: 0.6rem 0.9rem;
+    border-radius: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    cursor: pointer;
+    width: 100%;
+    transition: background 0.15s;
+  }
+  .btn-action-pull:hover { background: #ea580c; }
+
+  .btn-action-success {
+    background: #10b981;
+    color: #ffffff;
+    border: none;
+    padding: 0.65rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    cursor: pointer;
+    width: 100%;
+    box-shadow: 0 2px 6px rgba(16,185,129,0.25);
+    transition: background 0.15s;
+  }
+  .btn-action-success:hover { background: #059669; }
+
+  .btn-outline-sm {
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #334155;
+    padding: 0.35rem 0.65rem;
+    border-radius: 0.4rem;
+    font-size: 0.725rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .btn-outline-sm:hover { background: #f8fafc; border-color: #94a3b8; }
+
+  /* Modal Overlay (Parts Requisition) */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15,23,42,0.6);
+    backdrop-filter: blur(2px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 1rem;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: #ffffff;
+    border-radius: 1rem;
+    width: 100%;
+    max-width: 500px;
+    padding: 1.25rem;
+    box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 0.75rem;
+  }
+  .modal-title { font-size: 1rem; font-weight: 800; color: #0f172a; }
+</style>
+</head>
+<body>
+
+<div class="app-container">
+
+  <!-- Main Top App Bar -->
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="brand-icon">
+        <i class="fa fa-wrench"></i>
+      </div>
+      <div class="brand-text">
+        <h1>MECHANIC WORKFLOW PIPELINE</h1>
+        <p>Technician Duty Station &bull; Bay 4 Hydraulic Lift</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <div class="pill-live">
+        <div class="pulse-dot"></div>
+        <span>Bay 4 Lift: OCCUPIED</span>
+      </div>
+      <a href="index.html#mechanic" class="btn-pos-back">
+        <i class="fa fa-arrow-left"></i> POS System
+      </a>
+    </div>
+  </header>
+
+  <!-- Pipeline Overview Subheader -->
+  <div class="pipeline-bar">
+    <div class="pipeline-stats">
+      <div class="pipe-stat-item">
+        <span>Intake Waiting:</span>
+        <span class="pipe-stat-num" id="statIntake">2</span>
+      </div>
+      <div class="pipe-stat-item">
+        <span>Lift Active:</span>
+        <span class="pipe-stat-num" style="background:#dbeafe; color:#1d4ed8;">1</span>
+      </div>
+      <div class="pipe-stat-item">
+        <span>Ready for Sign-off:</span>
+        <span class="pipe-stat-num" style="background:#d1fae5; color:#047857;">1</span>
+      </div>
+    </div>
+    <div style="font-size:0.75rem; color:#64748b; font-weight:600;">
+      <i class="fa fa-info-circle"></i> Touch any card to inspect or move forward in stage
+    </div>
+  </div>
+
+  <!-- 3-Column Kanban Board -->
+  <main class="kanban-board scroll-thin">
+
+    <!-- ================= STAGE 1: INTAKE & HANDOVERS ================= -->
+    <section class="kanban-col col-stage1">
+      <div class="col-header">
+        <div class="col-title">
+          <i class="fa fa-inbox"></i>
+          <span>1. Intake &amp; Handovers</span>
+        </div>
+        <span class="col-badge" id="badgeStage1">2 Waiting</span>
+      </div>
+
+      <div class="cards-list scroll-thin" id="stage1List">
+        
+        <!-- Card 1: Handover from Wash Bay 2 -->
+        <article class="kanban-card card-shadow" id="card-w4579">
+          <div class="card-top">
+            <span class="plate-pill mono">
+              <i class="fa fa-car"></i> 2BP-7744
+            </span>
+            <span class="card-source-tag tag-wash">
+              <i class="fa fa-tint"></i> From Wash Bay 2
+            </span>
+          </div>
+          <div>
+            <div class="card-car-info">
+              <span>Honda CR-V</span>
+              <span style="font-size:0.75rem; color:#64748b;">(2021 Silver)</span>
+            </div>
+            <div class="card-subtext" style="margin-top:0.25rem;">
+              <strong>Services:</strong> Full Synthetic Oil (4.0L) + Tire Rotation + Multi-Point Check
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.725rem; color:#64748b;">
+            <span><i class="fa fa-clock-o"></i> Wash finished 8m ago</span>
+            <span style="color:#d97706; font-weight:700;"><i class="fa fa-exclamation-circle"></i> Waiting Lift</span>
+          </div>
+          <button class="btn-action-pull" onclick="pullToLift('2BP-7744', 'Honda CR-V', '4.0L')">
+            <i class="fa fa-arrow-right"></i> Pull onto Bay 4 Lift
+          </button>
+        </article>
+
+        <!-- Card 2: Direct Mechanical Drop-off -->
+        <article class="kanban-card card-shadow" id="card-w4581">
+          <div class="card-top">
+            <span class="plate-pill mono">
+              <i class="fa fa-car"></i> 2AM-9912
+            </span>
+            <span class="card-source-tag tag-direct">
+              <i class="fa fa-user"></i> Direct Drop-off
+            </span>
+          </div>
+          <div>
+            <div class="card-car-info">
+              <span>Ford Ranger Wildtrak</span>
+              <span style="font-size:0.75rem; color:#64748b;">(2022 Orange)</span>
+            </div>
+            <div class="card-subtext" style="margin-top:0.25rem;">
+              <strong>Services:</strong> Diesel Engine Oil (8.5L) + Fuel Filter + Brake Pad Check
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.725rem; color:#64748b;">
+            <span><i class="fa fa-clock-o"></i> Checked in 15m ago</span>
+            <span style="color:#64748b; font-weight:600;">Queue #2</span>
+          </div>
+          <button class="btn-action-pull" style="background:#64748b;" onclick="alert('Bay 4 Lift currently occupied. Finish active vehicle or move to queue.')">
+            <i class="fa fa-clock-o"></i> Hold in Queue
+          </button>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ================= STAGE 2: BAY 4 LIFT ACTIVE ================= -->
+    <section class="kanban-col col-stage2">
+      <div class="col-header">
+        <div class="col-title">
+          <i class="fa fa-tachometer"></i>
+          <span>2. Bay 4 Lift Service</span>
+        </div>
+        <span class="col-badge">1 Active</span>
+      </div>
+
+      <div class="cards-list scroll-thin">
+        
+        <!-- Active Lift Card -->
+        <article class="kanban-card active-lift card-shadow">
+          <div class="card-top">
+            <span class="plate-pill mono" style="background:#1e40af;">
+              <i class="fa fa-car"></i> 2AZ-4577
+            </span>
+            <span style="background:#dbeafe; color:#1e40af; font-size:0.7rem; font-weight:800; padding:0.2rem 0.5rem; border-radius:0.35rem;">
+              <i class="fa fa-play-circle"></i> ON LIFT (22:45)
+            </span>
+          </div>
+
+          <div>
+            <div class="card-car-info" style="font-size:0.95rem;">
+              <span>Lexus RX350 Luxury</span>
+              <span style="font-size:0.75rem; color:#64748b;">(2020 Pearl White)</span>
+            </div>
+            <div class="card-subtext" style="margin-top:0.2rem;">
+              Customer: <strong>Sokha Mean</strong> &bull; Order #W-4577
+            </div>
+          </div>
+
+          <!-- Oil Meter -->
+          <div class="fluid-meter">
+            <div class="fluid-title">
+              <i class="fa fa-filter"></i>
+              <span>5W-30 Full Synthetic</span>
+            </div>
+            <div class="fluid-controls">
+              <button class="btn-meter" onclick="adjOil(-0.1)">-</button>
+              <strong id="oilMeterDisplay" class="mono" style="font-size:0.85rem; color:#9a3412;">4.2 L</strong>
+              <button class="btn-meter" onclick="adjOil(+0.1)">+</button>
+            </div>
+          </div>
+
+          <!-- Task Checklist -->
+          <div class="task-list">
+            <div style="font-size:0.725rem; font-weight:700; color:#475569; display:flex; justify-content:space-between; margin-bottom:0.15rem;">
+              <span>PROCEDURAL TASK STEPS</span>
+              <span id="taskProgressTxt" style="color:#2563eb;">2 of 4 Done</span>
+            </div>
+
+            <!-- Task Item 1 -->
+            <div class="task-row">
+              <div class="task-left">
+                <div class="task-check done" onclick="toggleTask(this)">
+                  <i class="fa fa-check"></i>
+                </div>
+                <span>Drain old engine oil &amp; inspect drain plug washer</span>
+              </div>
+              <span class="task-status-pill ts-done">Done</span>
+            </div>
+
+            <!-- Task Item 2 -->
+            <div class="task-row">
+              <div class="task-left">
+                <div class="task-check done" onclick="toggleTask(this)">
+                  <i class="fa fa-check"></i>
+                </div>
+                <span>Replace oil filter &amp; torque to 25 Nm</span>
+              </div>
+              <span class="task-status-pill ts-done">Done</span>
+            </div>
+
+            <!-- Task Item 3 -->
+            <div class="task-row">
+              <div class="task-left">
+                <div class="task-check" onclick="toggleTask(this)"></div>
+                <span>Fill 4.2L Synthetic 5W-30 &amp; check dipstick</span>
+              </div>
+              <span class="task-status-pill ts-prog">In Progress</span>
+            </div>
+
+            <!-- Task Item 4 -->
+            <div class="task-row">
+              <div class="task-left">
+                <div class="task-check" onclick="toggleTask(this)"></div>
+                <span>Front disc brake pads check &amp; clean</span>
+              </div>
+              <span class="task-status-pill ts-wait">Pending</span>
+            </div>
+          </div>
+
+          <!-- Card Actions -->
+          <div style="display:flex; gap:0.5rem;">
+            <button class="btn-outline-sm" style="flex:1; justify-content:center;" onclick="openPartsModal()">
+              <i class="fa fa-cube"></i> Request Parts
+            </button>
+            <button class="btn-outline-sm" style="flex:1; justify-content:center;" onclick="logPhoto()">
+              <i class="fa fa-camera"></i> Attach Photo
+            </button>
+          </div>
+
+          <button class="btn-action-primary" onclick="moveToStage3()">
+            <span>Complete Tasks &rarr; Move to Inspection Sign-off</span>
+            <i class="fa fa-arrow-right"></i>
+          </button>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- ================= STAGE 3: INSPECTION & SIGN-OFF ================= -->
+    <section class="kanban-col col-stage3">
+      <div class="col-header">
+        <div class="col-title">
+          <i class="fa fa-check-circle"></i>
+          <span>3. Inspection &amp; Sign-Off</span>
+        </div>
+        <span class="col-badge" id="badgeStage3">1 Ready</span>
+      </div>
+
+      <div class="cards-list scroll-thin" id="stage3List">
+        
+        <!-- Inspection Complete Card -->
+        <article class="kanban-card card-shadow" id="cardSignOff">
+          <div class="card-top">
+            <span class="plate-pill mono" style="background:#065f46;">
+              <i class="fa fa-car"></i> 2BB-3388
+            </span>
+            <span style="background:#d1fae5; color:#065f46; font-size:0.7rem; font-weight:800; padding:0.2rem 0.5rem; border-radius:0.35rem;">
+              <i class="fa fa-check"></i> ALL TASKS FINISHED
+            </span>
+          </div>
+
+          <div>
+            <div class="card-car-info">
+              <span>Toyota Land Cruiser 300</span>
+              <span style="font-size:0.75rem; color:#64748b;">(2023 Black)</span>
+            </div>
+            <div class="card-subtext" style="margin-top:0.25rem;">
+              Service: <strong>Full 10,000km Maintenance Package</strong> (Oil, Filters, Brake Fluid)
+            </div>
+          </div>
+
+          <!-- Quick Inspection Result Summary -->
+          <div class="inspect-grid">
+            <div class="inspect-pill">
+              <span class="inspect-pill-title">Battery 12V</span>
+              <div class="inspect-pill-value">
+                <span class="mono">12.6 V</span>
+                <span class="val-pass"><i class="fa fa-check-circle"></i> Good</span>
+              </div>
+            </div>
+            <div class="inspect-pill">
+              <span class="inspect-pill-title">Brake Pads</span>
+              <div class="inspect-pill-value">
+                <span class="mono">7.5 mm</span>
+                <span class="val-pass"><i class="fa fa-check-circle"></i> Pass</span>
+              </div>
+            </div>
+            <div class="inspect-pill">
+              <span class="inspect-pill-title">Tire Tread</span>
+              <div class="inspect-pill-value">
+                <span class="mono">5.2 mm</span>
+                <span class="val-pass"><i class="fa fa-check-circle"></i> Pass</span>
+              </div>
+            </div>
+            <div class="inspect-pill">
+              <span class="inspect-pill-title">Oil Leaks</span>
+              <div class="inspect-pill-value">
+                <span>Underbody</span>
+                <span class="val-pass"><i class="fa fa-check-circle"></i> None</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Handover Destination -->
+          <div style="background:#f1f5f9; padding:0.5rem; border-radius:0.4rem; font-size:0.725rem; color:#475569;">
+            <i class="fa fa-info-circle" style="color:#0ea5e9;"></i>
+            Handover to: <strong>Exterior Final Touchup &amp; Customer Delivery</strong>
+          </div>
+
+          <!-- Final Sign-off Button -->
+          <button class="btn-action-success" onclick="completeAndHandover(this)">
+            <i class="fa fa-check-square-o"></i> Sign-Off &amp; Release Vehicle
+          </button>
+        </article>
+
+      </div>
+    </section>
+
+  </main>
+
+</div>
+
+<!-- Parts Requisition Modal -->
+<div class="modal-overlay" id="partsModal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 class="modal-title"><i class="fa fa-cube" style="color:#f97316;"></i> Requisition Parts from Inventory</h3>
+      <button onclick="closePartsModal()" style="border:none; background:none; font-size:1.25rem; cursor:pointer; color:#64748b;">&times;</button>
+    </div>
+    <div style="font-size:0.8rem; color:#64748b;">
+      Select additional warehouse parts required for <strong>2AZ-4577 (Lexus RX350)</strong>:
+    </div>
+    <div style="display:flex; flex-direction:column; gap:0.5rem;">
+      <label style="display:flex; align-items:center; justify-content:space-between; background:#f8fafc; border:1px solid #e2e8f0; border-radius:0.5rem; padding:0.6rem 0.8rem; font-size:0.8rem; cursor:pointer;">
+        <span><input type="checkbox" checked style="margin-right:0.5rem;"> OEM Oil Filter Element (#04152-YZZA1)</span>
+        <strong style="color:#0f172a;">$9.50</strong>
+      </label>
+      <label style="display:flex; align-items:center; justify-content:space-between; background:#f8fafc; border:1px solid #e2e8f0; border-radius:0.5rem; padding:0.6rem 0.8rem; font-size:0.8rem; cursor:pointer;">
+        <span><input type="checkbox" checked style="margin-right:0.5rem;"> Copper Crush Drain Washer</span>
+        <strong style="color:#0f172a;">$1.20</strong>
+      </label>
+      <label style="display:flex; align-items:center; justify-content:space-between; background:#f8fafc; border:1px solid #e2e8f0; border-radius:0.5rem; padding:0.6rem 0.8rem; font-size:0.8rem; cursor:pointer;">
+        <span><input type="checkbox" style="margin-right:0.5rem;"> Cabin Air Filter (Carbon Activated)</span>
+        <strong style="color:#0f172a;">$18.00</strong>
+      </label>
+    </div>
+    <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
+      <button onclick="closePartsModal()" class="btn-outline-sm" style="padding:0.5rem 1rem;">Cancel</button>
+      <button onclick="savePartsRequisition()" class="btn-action-primary" style="width:auto; padding:0.5rem 1.25rem;">
+        <i class="fa fa-check"></i> Add to Job Order
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let oilVal = 4.2;
+  function adjOil(delta) {
+    oilVal = Math.max(0, Math.round((oilVal + delta) * 10) / 10);
+    document.getElementById('oilMeterDisplay').textContent = oilVal.toFixed(1) + ' L';
+  }
+
+  function toggleTask(el) {
+    el.classList.toggle('done');
+    const row = el.closest('.task-row');
+    const pill = row.querySelector('.task-status-pill');
+    if (el.classList.contains('done')) {
+      el.innerHTML = '<i class="fa fa-check"></i>';
+      pill.textContent = 'Done';
+      pill.className = 'task-status-pill ts-done';
+    } else {
+      el.innerHTML = '';
+      pill.textContent = 'Pending';
+      pill.className = 'task-status-pill ts-wait';
+    }
+    updateTaskCount();
+  }
+
+  function updateTaskCount() {
+    const total = document.querySelectorAll('.task-row').length;
+    const done = document.querySelectorAll('.task-check.done').length;
+    document.getElementById('taskProgressTxt').textContent = `${done} of ${total} Done`;
+  }
+
+  function pullToLift(plate, model, oil) {
+    if (confirm(`Pull ${plate} (${model}) onto Bay 4 Lift? (Make sure the lift area is clear).`)) {
+      alert(`Vehicle ${plate} assigned to Bay 4 Lift!`);
+      const card = document.getElementById('card-w4579');
+      if (card) card.remove();
+      document.getElementById('badgeStage1').textContent = '1 Waiting';
+      document.getElementById('statIntake').textContent = '1';
+    }
+  }
+
+  function moveToStage3() {
+    alert("Moving 2AZ-4577 (Lexus RX350) to Stage 3 for Final Safety Inspection & Sign-off!");
+  }
+
+  function completeAndHandover(btn) {
+    btn.innerHTML = '<i class="fa fa-check-circle"></i> Released to Delivery!';
+    btn.style.background = '#059669';
+    btn.disabled = true;
+    setTimeout(() => {
+      const card = document.getElementById('cardSignOff');
+      if (card) {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+      }
+      document.getElementById('badgeStage3').textContent = '0 Ready';
+    }, 800);
+  }
+
+  function openPartsModal() {
+    document.getElementById('partsModal').classList.add('open');
+  }
+  function closePartsModal() {
+    document.getElementById('partsModal').classList.remove('open');
+  }
+  function savePartsRequisition() {
+    alert("Parts requisition added to job order bill!");
+    closePartsModal();
+  }
+  function logPhoto() {
+    alert("Camera prompt: Capture underbody inspection / brake pad condition photo.");
+  }
+</script>
+
+</body>
+</html>
+

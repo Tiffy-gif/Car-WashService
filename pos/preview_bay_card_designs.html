@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Live Wash Bay UI Card Designs | Car Wash POS</title>
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/font-awesome.min.css">
+    <style>
+        :root {
+            --primary: #0284c7;
+            --primary-hover: #0369a1;
+            --success: #16a34a;
+            --success-hover: #15803d;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --purple: #8b5cf6;
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --border-hover: #cbd5e1;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', 'Kantumruy Pro', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            margin: 0;
+            padding: 1.5rem;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .header-bar {
+            max-width: 1400px;
+            margin: 0 auto 1.5rem auto;
+            background: #ffffff;
+            border: 2px solid var(--border);
+            border-radius: 14px;
+            padding: 1rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .header-bar h1 {
+            font-size: 1.3rem;
+            font-weight: 900;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .header-bar p {
+            margin: 0.2rem 0 0 0;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .showcase-grid {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        @media (max-width: 1100px) {
+            .showcase-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .style-column {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .style-label {
+            background: #0f172a;
+            color: #ffffff;
+            padding: 0.4rem 0.85rem;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 800;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            width: fit-content;
+        }
+
+        /* ========================================================
+           DESIGN STYLE 1: MODERN INDUSTRIAL SLEEK (Ultra Clean)
+           ======================================================== */
+        .bay-card-v1 {
+            background: #ffffff;
+            border: 2px solid var(--border);
+            border-radius: 16px;
+            padding: 1.25rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .bay-card-v1:hover {
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.07);
+            border-color: #cbd5e1;
+        }
+
+        .bay-card-v1.state-busy {
+            border-left: 6px solid #2563eb;
+        }
+
+        .bay-card-v1.state-free {
+            border-left: 6px solid #16a34a;
+            background: linear-gradient(to right, #f0fdf4 0%, #ffffff 40%);
+        }
+
+        .bay-card-v1.state-tech {
+            border-left: 6px solid #8b5cf6;
+        }
+
+        .v1-top-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.85rem;
+        }
+
+        .v1-bay-name {
+            font-size: 1.2rem;
+            font-weight: 900;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .v1-chip {
+            font-size: 0.78rem;
+            font-weight: 800;
+            padding: 0.25rem 0.65rem;
+            border-radius: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .v1-plate-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.85rem 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .v1-plate {
+            font-family: monospace;
+            font-size: 1.65rem;
+            font-weight: 900;
+            color: #0f172a;
+            background: #ffffff;
+            border: 2px solid #0f172a;
+            padding: 0.15rem 0.65rem;
+            border-radius: 6px;
+            letter-spacing: 0.05em;
+        }
+
+        .v1-timer {
+            font-family: monospace;
+            font-size: 1.15rem;
+            font-weight: 800;
+            color: #1d4ed8;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            padding: 0.35rem 0.65rem;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .v1-btn-action {
+            width: 100%;
+            height: 52px;
+            border-radius: 10px;
+            border: none;
+            font-size: 0.98rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            transition: all 0.15s ease;
+        }
+
+        /* ========================================================
+           DESIGN STYLE 2: AUTOMOTIVE PRO HUD (Vehicle Silhouette + Progress Ring)
+           ======================================================== */
+        .bay-card-v2 {
+            background: #ffffff;
+            border: 2px solid var(--border);
+            border-radius: 18px;
+            padding: 1.35rem;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .bay-card-v2.state-busy {
+            border-color: #93c5fd;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        }
+
+        .bay-card-v2.state-free {
+            border-color: #86efac;
+            background: linear-gradient(180deg, #ffffff 0%, #f0fdf4 100%);
+        }
+
+        .bay-card-v2.state-tech {
+            border-color: #c4b5fd;
+            background: linear-gradient(180deg, #ffffff 0%, #faf5ff 100%);
+        }
+
+        .v2-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .v2-bay-pill {
+            background: #0f172a;
+            color: #ffffff;
+            font-size: 0.85rem;
+            font-weight: 900;
+            padding: 0.3rem 0.85rem;
+            border-radius: 9999px;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .v2-vehicle-silhouette-box {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .v2-veh-icon-circle {
+            width: 58px;
+            height: 58px;
+            border-radius: 14px;
+            background: #eff6ff;
+            border: 1.5px solid #bfdbfe;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.6rem;
+            color: #0284c7;
+            flex-shrink: 0;
+        }
+
+        .v2-plate-title {
+            font-family: monospace;
+            font-size: 1.75rem;
+            font-weight: 900;
+            color: #0f172a;
+            letter-spacing: 0.05em;
+            line-height: 1.1;
+        }
+
+        .v2-progress-strip {
+            height: 6px;
+            background: #e2e8f0;
+            border-radius: 999px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+
+        .v2-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #0284c7);
+            border-radius: 999px;
+        }
+
+        .v2-btn-giant {
+            width: 100%;
+            height: 56px;
+            border-radius: 12px;
+            border: none;
+            font-size: 1.05rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            transition: all 0.15s ease;
+        }
+
+        /* ========================================================
+           DESIGN STYLE 3: TACTICAL COMMAND DUAL-BAR (High Contrast Plate)
+           ======================================================== */
+        .bay-card-v3 {
+            background: #ffffff;
+            border: 2px solid #0f172a;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+        }
+
+        .v3-header-banner {
+            background: #0f172a;
+            color: #ffffff;
+            padding: 0.75rem 1.15rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .v3-bay-tag {
+            font-size: 1.1rem;
+            font-weight: 900;
+            letter-spacing: 0.02em;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .v3-content-body {
+            padding: 1.15rem;
+        }
+
+        .v3-plate-display {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .v3-plate-badge {
+            background: #f1f5f9;
+            border: 2px solid #0f172a;
+            padding: 0.35rem 0.85rem;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 1.8rem;
+            font-weight: 900;
+            letter-spacing: 0.06em;
+            color: #0f172a;
+        }
+
+        .v3-time-box {
+            text-align: right;
+            font-family: monospace;
+            font-size: 1.25rem;
+            font-weight: 900;
+            color: #1e40af;
+        }
+
+        .v3-button-bar {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .v3-btn-main {
+            flex: 1;
+            height: 54px;
+            border-radius: 10px;
+            border: 2px solid transparent;
+            font-size: 1rem;
+            font-weight: 900;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            text-transform: uppercase;
+        }
+
+        .v3-btn-icon-sub {
+            width: 54px;
+            height: 54px;
+            border-radius: 10px;
+            background: #f1f5f9;
+            border: 2px solid var(--border);
+            color: var(--text-main);
+            font-size: 1.2rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header-bar">
+        <div>
+            <h1>
+                <i class="fa-solid fa-layer-group" style="color: var(--primary);"></i>
+                <span>Wash Bay UI Card Design Exploration</span>
+            </h1>
+            <p>Comparing 3 senior-level UI designs for the Left Live Bay Status card.</p>
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+            <a href="preview_washer_idea1.html" class="btn btn-outline" style="text-decoration: none; font-weight: 700;">
+                <i class="fa-solid fa-desktop"></i> View in Idea 1 Screen
+            </a>
+            <a href="index.html#washer" class="btn btn-primary" style="text-decoration: none; font-weight: 700;">
+                <i class="fa-solid fa-arrow-left"></i> POS App
+            </a>
+        </div>
+    </div>
+
+    <!-- 3 DISTINCT BAY CARD DESIGN OPTIONS -->
+    <div class="showcase-grid">
+
+        <!-- ========================================================
+             STYLE 1: MODERN INDUSTRIAL SLEEK
+             ======================================================== -->
+        <div class="style-column">
+            <span class="style-label"><i class="fa-solid fa-star"></i> Style 1: Modern Industrial Sleek</span>
+            
+            <!-- BUSY STATE -->
+            <div class="bay-card-v1 state-busy">
+                <div class="v1-top-row">
+                    <div class="v1-bay-name">
+                        <i class="fa-solid fa-warehouse" style="color: #2563eb;"></i>
+                        <span>Bay 1 (Wash Lane 1)</span>
+                    </div>
+                    <span class="v1-chip" style="background: #dbeafe; color: #1e40af;">
+                        ● IN SERVICE
+                    </span>
+                </div>
+
+                <div class="v1-plate-row">
+                    <div>
+                        <div class="v1-plate">2BQ-8899</div>
+                        <div style="font-size: 0.85rem; font-weight: 700; color: #0f172a; margin-top: 0.35rem;">
+                            Toyota Highlander (SUV)
+                        </div>
+                        <div style="font-size: 0.78rem; font-weight: 700; color: #0284c7; margin-top: 0.15rem;">
+                            <i class="fa-solid fa-sparkles"></i> Full Wash (Ext + Int) + Wax
+                        </div>
+                    </div>
+                    <div class="v1-timer">
+                        <i class="fa-regular fa-clock"></i> 16m
+                    </div>
+                </div>
+
+                <button type="button" class="v1-btn-action" style="background: #16a34a; color: white;" onclick="alert('Complete Wash clicked!')">
+                    <i class="fa-solid fa-circle-check"></i> Complete Wash (Bay 1)
+                </button>
+            </div>
+
+            <!-- FREE STATE -->
+            <div class="bay-card-v1 state-free">
+                <div class="v1-top-row">
+                    <div class="v1-bay-name">
+                        <i class="fa-solid fa-warehouse" style="color: #16a34a;"></i>
+                        <span>Bay 2 (Wash Lane 2)</span>
+                    </div>
+                    <span class="v1-chip" style="background: #dcfce7; color: #15803d;">
+                        ● FREE & READY
+                    </span>
+                </div>
+
+                <div class="v1-plate-row" style="background: white; border-color: #bbf7d0;">
+                    <div>
+                        <div style="font-size: 1rem; font-weight: 900; color: #15803d;">
+                            <i class="fa-solid fa-circle-check"></i> Bay Clean & Vacant
+                        </div>
+                        <div style="font-size: 0.82rem; color: #64748b; margin-top: 0.2rem;">
+                            Next in line: <strong>2AB-5566</strong> (Lexus RX350)
+                        </div>
+                    </div>
+                    <span style="font-size: 0.78rem; font-weight: 800; background: #e0f2fe; color: #0369a1; padding: 4px 8px; border-radius: 6px;">
+                        Queue: 3 Cars
+                    </span>
+                </div>
+
+                <button type="button" class="v1-btn-action" style="background: #0284c7; color: white;" onclick="alert('Pull in Next clicked!')">
+                    <i class="fa-solid fa-arrow-right-to-bracket"></i> Pull In Next: <strong>2AB-5566</strong>
+                </button>
+            </div>
+
+        </div>
+
+        <!-- ========================================================
+             STYLE 2: AUTOMOTIVE PRO HUD (Vehicle Avatar & Strip)
+             ======================================================== -->
+        <div class="style-column">
+            <span class="style-label" style="background: #0284c7;"><i class="fa-solid fa-car"></i> Style 2: Automotive Pro HUD</span>
+            
+            <!-- BUSY STATE -->
+            <div class="bay-card-v2 state-busy">
+                <div class="v2-header">
+                    <span class="v2-bay-pill">
+                        <i class="fa-solid fa-warehouse"></i> BAY 01
+                    </span>
+                    <span style="font-size: 0.8rem; font-weight: 900; color: #1d4ed8; background: #eff6ff; padding: 0.25rem 0.65rem; border-radius: 8px;">
+                        <i class="fa-regular fa-clock"></i> 16 MIN ELAPSED
+                    </span>
+                </div>
+
+                <div class="v2-vehicle-silhouette-box">
+                    <div class="v2-veh-icon-circle">
+                        <i class="fa-solid fa-car-side"></i>
+                    </div>
+                    <div>
+                        <div class="v2-plate-title">2BQ-8899</div>
+                        <div style="font-size: 0.9rem; font-weight: 800; color: #0f172a;">Toyota Highlander • Silver</div>
+                        <div style="font-size: 0.8rem; color: #0284c7; font-weight: 700;">Full Wash + Spray Wax</div>
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; font-size: 0.75rem; font-weight: 800; color: #64748b; margin-bottom: 4px;">
+                    <span>Wash Stage: Hand Dry & QC</span>
+                    <span>70%</span>
+                </div>
+                <div class="v2-progress-strip">
+                    <div class="v2-progress-fill" style="width: 70%;"></div>
+                </div>
+
+                <button type="button" class="v2-btn-giant" style="background: #16a34a; color: white;" onclick="alert('Complete Wash clicked!')">
+                    <i class="fa-solid fa-check"></i> Complete Wash
+                </button>
+            </div>
+
+            <!-- FREE STATE -->
+            <div class="bay-card-v2 state-free">
+                <div class="v2-header">
+                    <span class="v2-bay-pill" style="background: #15803d;">
+                        <i class="fa-solid fa-warehouse"></i> BAY 02
+                    </span>
+                    <span style="font-size: 0.8rem; font-weight: 900; color: #15803d; background: #dcfce7; padding: 0.25rem 0.65rem; border-radius: 8px;">
+                        <i class="fa-solid fa-check"></i> READY FOR VEHICLE
+                    </span>
+                </div>
+
+                <div class="v2-vehicle-silhouette-box">
+                    <div class="v2-veh-icon-circle" style="background: #dcfce7; border-color: #86efac; color: #15803d;">
+                        <i class="fa-solid fa-arrow-right-to-bracket"></i>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.8rem; font-weight: 800; color: #15803d; text-transform: uppercase;">Next in FIFO Queue</div>
+                        <div class="v2-plate-title" style="color: #15803d;">2AB-5566</div>
+                        <div style="font-size: 0.82rem; font-weight: 700; color: #64748b;">Lexus RX350 (SUV)</div>
+                    </div>
+                </div>
+
+                <button type="button" class="v2-btn-giant" style="background: #0284c7; color: white; margin-top: 1.4rem;" onclick="alert('Pull in Next clicked!')">
+                    <i class="fa-solid fa-play"></i> Pull In <strong>2AB-5566</strong>
+                </button>
+            </div>
+
+        </div>
+
+        <!-- ========================================================
+             STYLE 3: TACTICAL COMMAND DUAL-BAR (High Contrast)
+             ======================================================== -->
+        <div class="style-column">
+            <span class="style-label" style="background: #8b5cf6;"><i class="fa-solid fa-shield-halved"></i> Style 3: Tactical Dual-Bar</span>
+            
+            <!-- BUSY STATE -->
+            <div class="bay-card-v3">
+                <div class="v3-header-banner">
+                    <div class="v3-bay-tag">
+                        <i class="fa-solid fa-warehouse"></i>
+                        <span>BAY 01</span>
+                    </div>
+                    <span style="background: #2563eb; color: white; font-size: 0.75rem; font-weight: 900; padding: 2px 8px; border-radius: 4px;">
+                        IN SERVICE
+                    </span>
+                </div>
+
+                <div class="v3-content-body">
+                    <div class="v3-plate-display">
+                        <span class="v3-plate-badge">2BQ-8899</span>
+                        <div class="v3-time-box">
+                            <i class="fa-regular fa-clock"></i> 16:45
+                            <div style="font-size: 0.72rem; color: #64748b; font-weight: 700;">Target: 25m</div>
+                        </div>
+                    </div>
+
+                    <div style="font-size: 0.92rem; font-weight: 800; color: #0f172a; margin-bottom: 0.2rem;">
+                        Toyota Highlander (SUV)
+                    </div>
+                    <div style="font-size: 0.82rem; color: #0284c7; font-weight: 700; margin-bottom: 1rem;">
+                        Full Wash (Ext + Int) + Wax
+                    </div>
+
+                    <div class="v3-button-bar">
+                        <button type="button" class="v3-btn-main" style="background: #16a34a; color: white;" onclick="alert('Complete Wash clicked!')">
+                            <i class="fa-solid fa-check"></i> Complete Wash
+                        </button>
+                        <button type="button" class="v3-btn-icon-sub" title="Add Wash Notes" onclick="alert('Notes: Rinsed and clayed.')">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TECH HANDOVER STATE -->
+            <div class="bay-card-v3" style="border-color: #8b5cf6;">
+                <div class="v3-header-banner" style="background: #8b5cf6;">
+                    <div class="v3-bay-tag">
+                        <i class="fa-solid fa-wrench"></i>
+                        <span>BAY 03 • READY FOR TECH</span>
+                    </div>
+                    <span style="background: #6b21a8; color: white; font-size: 0.75rem; font-weight: 900; padding: 2px 8px; border-radius: 4px;">
+                        HANDOVER
+                    </span>
+                </div>
+
+                <div class="v3-content-body">
+                    <div class="v3-plate-display">
+                        <span class="v3-plate-badge" style="border-color: #8b5cf6; color: #6b21a8;">2AF-1234</span>
+                        <div class="v3-time-box" style="color: #6b21a8;">
+                            <i class="fa-solid fa-flag-checkered"></i> 100%
+                        </div>
+                    </div>
+
+                    <div style="font-size: 0.92rem; font-weight: 800; color: #0f172a; margin-bottom: 0.2rem;">
+                        Mazda 3 (Sedan)
+                    </div>
+                    <div style="font-size: 0.82rem; color: #7c3aed; font-weight: 700; margin-bottom: 1rem;">
+                        Wash Finished • Needs Oil Change in Bay 4
+                    </div>
+
+                    <div class="v3-button-bar">
+                        <button type="button" class="v3-btn-main" style="background: #8b5cf6; color: white;" onclick="alert('Handoff to Tech clicked!')">
+                            <i class="fa-solid fa-paper-plane"></i> Handover to Tech Bay 4
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+</body>
+</html>
+

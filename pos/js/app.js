@@ -2336,8 +2336,8 @@ class PosApp {
                 // Update timestamp display
                 this.updateCatalogSyncStatus(true);
 
-                // Background sync customers list only if staff session token is active
-                if (typeof PosStorage !== 'undefined' && PosStorage.getSessionToken()) {
+                // Background sync customers list only if staff has customer access
+                if (typeof PosStorage !== 'undefined' && PosStorage.getSessionToken() && this.canAccessCustomerList()) {
                     PosApi.syncCustomers().catch(() => {});
                 }
             } else {
@@ -2743,7 +2743,9 @@ class PosApp {
 
                 // Update services, prices, products automatically every time staff logs in
                 await this.refreshCatalogSilently(false);
-                await PosApi.syncCustomers().catch(() => {});
+                if (this.canAccessCustomerList()) {
+                    await PosApi.syncCustomers().catch(() => {});
+                }
 
                 this.renderLoggedInState();
 
@@ -3173,6 +3175,9 @@ class PosApp {
         });
 
         document.querySelectorAll('.view-section').forEach(view => view.classList.remove('active'));
+
+        // Dismiss open modals when navigating between major views
+        document.querySelectorAll('.modal-backdrop.open').forEach(m => m.classList.remove('open'));
 
         const target = document.getElementById(`view${viewName.charAt(0).toUpperCase() + viewName.slice(1)}`);
         if (target) {
@@ -6970,79 +6975,179 @@ class PosApp {
         // Requirement 3: Washer screen shows the 3 bays (wash bays)
         const washBays = (bays || []).filter(b => b.bay_type === 'wash');
         const displayBays = washBays.length > 0 ? washBays : bays;
-
         const nextCar = washQueue && washQueue.length > 0 ? washQueue[0] : null;
+
+        // Update Header Counts & Status
+        const inWashCount = displayBays.filter(b => b.status !== 'free').length;
+        const availCount = displayBays.filter(b => b.status === 'free').length;
+        const statusCountsEl = document.getElementById('washerStatusCounts');
+        if (statusCountsEl) {
+            statusCountsEl.textContent = `${inWashCount} in wash • ${availCount} available`;
+        }
+
+        const countBadge = document.getElementById('washerBaysCountBadge');
+        if (countBadge) {
+            countBadge.textContent = displayBays.length;
+        }
+
+        const readyHint = document.getElementById('washerReadyBayHint');
+        const readyText = document.getElementById('washerReadyBayText');
+        const freeBay = displayBays.find(b => b.status === 'free');
+        if (readyHint && readyText) {
+            if (freeBay && nextCar) {
+                readyText.textContent = `Bay ${freeBay.bay_name || freeBay.id} ready to pull in`;
+                readyHint.style.display = 'inline-flex';
+            } else {
+                readyHint.style.display = 'none';
+            }
+        }
+
+        const stagesList = ['Pre-rinse', 'Foam', 'Scrub', 'Dry & Shine', 'QC'];
 
         let html = '';
         displayBays.forEach(bay => {
             const isFree = (bay.status === 'free');
-            const statusLabel = isFree ? (I18nManager.t('free') || 'FREE') : (I18nManager.t('busy') || 'BUSY');
+            const isMixed = (bay.is_mixed == 1 || (bay.current_car && bay.current_car.is_mixed == 1));
+            const duration = bay.in_bay_minutes ?? 0;
+            const plate = bay.plate_number || '--';
+            const service = bay.service_names ? this.stripHtml(bay.service_names) : 'Car Wash Service';
+            const vehicleCar = bay.vehicle_type ? (bay.vehicle_type.toUpperCase() + ' • ' + (bay.customer_name || 'Walk-in')) : (bay.customer_name || 'Vehicle in Wash');
 
-            let cardContentHtml = '';
+            const borderClass = isMixed ? 'border-finished' : isFree ? 'border-free' : 'border-service';
+            const accentClass = isMixed ? 'accent-finished' : isFree ? 'accent-free' : 'accent-service';
+            const tileClass = isMixed ? 'tile-finished' : isFree ? 'tile-free' : 'tile-service';
+            const chipClass = isMixed ? 'chip-finished' : isFree ? 'chip-free' : 'chip-service';
+            const chipIcon = isMixed ? 'fa-wrench' : isFree ? 'fa-circle-check' : 'fa-droplet';
+            const chipLabel = isMixed ? (I18nManager.t('readyForTech') || 'Ready for Tech') : isFree ? (I18nManager.t('free') || 'Available') : (I18nManager.t('inService') || 'In Service');
+
+            // Middle Section
+            let bodyHtml = '';
+            let stageHtml = '';
+            let actionHtml = '';
+
             if (isFree) {
-                if (nextCar) {
-                    const putTitle = I18nManager.t('putInBay') || 'Put Next Car in Bay';
-                    cardContentHtml = `
-                        <div class="bay-empty-state" style="border-color: #86efac; background: #f0fdf4;">
-                            <span style="font-weight: 700; color: #15803d; font-size: 0.85rem;"><i class="fa-solid fa-check-circle"></i> ${I18nManager.t('free') || 'Free'}</span>
-                            <span style="font-size: 0.78rem; color: #166534;">Next: <strong>${this.escapeHtml(nextCar.plate_number)}</strong></span>
+                bodyHtml = `
+                    <div class="bay-free-body">
+                        <div class="free-check-circle"><i class="fa-solid fa-check"></i></div>
+                        <div>
+                            <div class="free-title">${I18nManager.t('bayCleanReady') || 'Bay is clean &amp; ready for vehicle'}</div>
+                            <div class="free-subtitle">
+                                ${nextCar ? `Next in line: <b class="mono" style="color: #0f172a;">${this.escapeHtml(nextCar.plate_number)}</b> &middot; ${this.escapeHtml(nextCar.vehicle_type || 'Vehicle')}` : (I18nManager.t('noCarsWaiting') || 'No vehicles waiting in queue')}
+                            </div>
                         </div>
-                        <button type="button" class="btn-assign-next" ${!this.isOnline ? 'disabled title="Offline"' : ''} onclick="PosApp.handleWasherAssignBay(${bay.id}, ${nextCar.order_id}, '${this.escapeHtml(nextCar.plate_number)}', '${this.escapeHtml(bay.bay_name)}')">
-                            <i class="fa-solid fa-arrow-right-to-bracket"></i> ${putTitle}: <strong>${this.escapeHtml(nextCar.plate_number)}</strong>
+                    </div>
+                `;
+
+                const btnText = nextCar ? `${I18nManager.t('putInBay') || 'PULL IN NEXT'}: ${this.escapeHtml(nextCar.plate_number)}` : (I18nManager.t('waitingForVehicles') || 'WAITING FOR VEHICLES');
+                actionHtml = `
+                    <div class="bay-actions-row">
+                        <button type="button" class="btn-pullin-blue" ${!nextCar || !this.isOnline ? 'disabled' : ''} onclick="PosApp.handleWasherAssignBay(${bay.id}, ${nextCar ? nextCar.order_id : 0}, '${nextCar ? this.escapeHtml(nextCar.plate_number) : ''}', '${this.escapeHtml(bay.bay_name)}')">
+                            <i class="fa-solid fa-right-to-bracket mr-1"></i> ${btnText}
                         </button>
+                    </div>
+                `;
+            } else {
+                let rightMeta = '';
+                if (isMixed) {
+                    rightMeta = `
+                        <div class="timer-box">
+                            <div class="done-badge"><i class="fa-solid fa-flag-checkered"></i> Done</div>
+                            <div class="timer-sub">Handover ready</div>
+                        </div>
                     `;
                 } else {
-                    cardContentHtml = `
-                        <div class="bay-empty-state">
-                            <i class="fa-solid fa-circle-check" style="color: var(--success); font-size: 1.5rem; margin-bottom: 2px;"></i>
-                            <span style="font-weight: 700; color: var(--text-main);">${I18nManager.t('free') || 'Free'}</span>
-                            <span style="font-size: 0.76rem; color: var(--text-muted);">${I18nManager.t('noCarsWaiting') || 'No cars waiting'}</span>
+                    rightMeta = `
+                        <div class="timer-box">
+                            <div class="timer-clock mono">${duration}m</div>
+                            <div class="timer-sub">of 25 min target</div>
                         </div>
                     `;
                 }
-            } else {
-                // Requirement 3: A busy bay cannot be chosen! Shows Finished button when done.
-                const plate = bay.plate_number || '--';
-                const service = bay.service_names ? this.stripHtml(bay.service_names) : 'Car Wash';
-                const duration = bay.in_bay_minutes ?? 0;
-                const isMixed = (bay.is_mixed == 1 || (bay.current_car && bay.current_car.is_mixed == 1));
 
-                const actionBtn = isMixed
-                    ? `<button type="button" class="btn btn-sm btn-send-tech" style="width: 100%; margin-top: 0.5rem; padding: 0.5rem 0.75rem; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;" onclick="PosApp.openWasherFinishPrompt(${bay.id}, ${bay.current_order_id || 0}, '${this.escapeHtml(plate)}', '${this.escapeHtml(bay.bay_name)}', 1)">
-                        <i class="fa-solid fa-paper-plane"></i> Send to Tech
-                       </button>`
-                    : `<button type="button" class="btn-washer-finish" style="width: 100%; margin-top: 0.5rem;" onclick="PosApp.openWasherFinishPrompt(${bay.id}, ${bay.current_order_id || 0}, '${this.escapeHtml(plate)}', '${this.escapeHtml(bay.bay_name)}', 0)">
-                        <i class="fa-solid fa-circle-check"></i> Finish
-                       </button>`;
-
-                cardContentHtml = `
-                    <div class="bay-occupied-info">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span class="bay-plate-badge">${this.escapeHtml(plate)}</span>
-                            <span style="font-size: 0.78rem; font-weight: 700; color: #1d4ed8; background: #eff6ff; padding: 2px 7px; border-radius: 4px;">
-                                <i class="fa-regular fa-clock"></i> ${duration}m in bay
-                            </span>
+                bodyHtml = `
+                    <div class="bay-occupied-body">
+                        <div class="plate-meta-group">
+                            <div class="plate-badge-dark mono">${this.escapeHtml(plate)}</div>
+                            <div class="vehicle-info">
+                                <div class="vehicle-car">${this.escapeHtml(vehicleCar)}</div>
+                                <div class="vehicle-service" title="${this.escapeHtml(service)}">${this.escapeHtml(service)}</div>
+                            </div>
                         </div>
-                        <div class="bay-service-text" title="${this.escapeHtml(service)}">${this.escapeHtml(service)}</div>
+                        ${rightMeta}
                     </div>
-                    ${actionBtn}
                 `;
+
+                // Calculate stage progress
+                const targetMins = 25;
+                const pct = isMixed ? 100 : Math.min(99, Math.round((duration / targetMins) * 100));
+                const curStep = isMixed ? 5 : Math.min(4, Math.floor(pct / 20));
+
+                let stagesCols = '';
+                stagesList.forEach((stg, i) => {
+                    let sBarClass = '';
+                    let sLblClass = '';
+                    if (isMixed) {
+                        sBarClass = 'finished-all';
+                        sLblClass = 'label-finished';
+                    } else {
+                        sBarClass = i < curStep ? 'completed' : i === curStep ? 'active blink' : '';
+                        sLblClass = i < curStep ? 'label-done' : i === curStep ? 'label-active' : '';
+                    }
+                    stagesCols += `
+                        <div class="stage-col">
+                            <div class="stage-bar ${sBarClass}"></div>
+                            <div class="stage-label ${sLblClass}">${stg}</div>
+                        </div>
+                    `;
+                });
+                stageHtml = `<div class="stage-tracker">${stagesCols}</div>`;
+
+                if (isMixed) {
+                    actionHtml = `
+                        <div class="bay-actions-row">
+                            <button type="button" class="btn-handover-purple" onclick="PosApp.openWasherFinishPrompt(${bay.id}, ${bay.current_order_id || 0}, '${this.escapeHtml(plate)}', '${this.escapeHtml(bay.bay_name)}', 1)">
+                                <i class="fa-solid fa-paper-plane mr-1"></i> HANDOVER TO TECH BAY 4
+                            </button>
+                            <button type="button" class="btn-crew-sub" title="Wash Notes">
+                                <i class="fa-solid fa-clipboard"></i>
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    actionHtml = `
+                        <div class="bay-actions-row">
+                            <button type="button" class="btn-complete-green" onclick="PosApp.openWasherFinishPrompt(${bay.id}, ${bay.current_order_id || 0}, '${this.escapeHtml(plate)}', '${this.escapeHtml(bay.bay_name)}', 0)">
+                                <i class="fa-solid fa-circle-check mr-1"></i> COMPLETE WASH &amp; QC
+                            </button>
+                            <button type="button" class="btn-crew-sub" title="Crew Assigned">
+                                <i class="fa-solid fa-user-group mr-1"></i> 2
+                            </button>
+                        </div>
+                    `;
+                }
             }
 
             html += `
-                <div class="bay-card ${isFree ? 'bay-free' : 'bay-busy'}" id="washerBayCard-${bay.id}">
-                    <div class="bay-card-top">
-                        <div class="bay-name-title">
-                            <i class="fa-solid fa-warehouse" style="color: ${isFree ? 'var(--success)' : '#2563eb'};"></i>
-                            <span>${this.escapeHtml(bay.bay_name)}</span>
+                <article class="bay-article card ${borderClass}" id="washerBayCard-${bay.id}">
+                    <span class="bay-accent-stripe ${accentClass}"></span>
+                    
+                    <div class="bay-top-row">
+                        <div class="bay-id-group">
+                            <div class="bay-tile ${tileClass}">${this.escapeHtml(String(bay.id))}</div>
+                            <div class="bay-title-box">
+                                <div class="title">${this.escapeHtml(bay.bay_name || ('Bay ' + bay.id))}</div>
+                                <div class="subtitle">Wash Lane ${this.escapeHtml(String(bay.id))}</div>
+                            </div>
                         </div>
-                        <span class="bay-status-badge ${isFree ? 'free' : 'busy'}">
-                            <i class="fa-solid ${isFree ? 'fa-circle-check' : 'fa-circle live-pulse-dot'}"></i>
-                            ${statusLabel}
+                        <span class="bay-chip ${chipClass}">
+                            <i class="fa-solid ${chipIcon}"></i> <span>${chipLabel}</span>
                         </span>
                     </div>
-                    ${cardContentHtml}
-                </div>
+
+                    ${bodyHtml}
+                    ${stageHtml}
+                    ${actionHtml}
+                </article>
             `;
         });
 
@@ -8997,38 +9102,46 @@ class PosApp {
         const grid = document.getElementById('washerJobsGrid');
         if (!grid) return;
 
-        const user = PosStorage.getUser();
-        if (!user) return;
+        const user = this.currentUser || PosStorage.getUser();
 
         // Requirement 3: Fetch bays and queue to populate the 3 bays board & waiting list
         await this.fetchBaysAndQueue(true);
 
-        try {
-            const res = await PosApi.getQueue('washer', user.id);
-            if (res && res.success) {
-                const earned = parseFloat(res.summary?.total_earned || 0);
-                const count = parseInt(res.summary?.jobs_count || 0);
+        if (user && user.id) {
+            try {
+                const res = await PosApi.getQueue('washer', user.id);
+                if (res && res.success) {
+                    const earned = parseFloat(res.summary?.total_earned || 0);
+                    const count = parseInt(res.summary?.jobs_count || 0);
 
-                const earnedEl = document.getElementById('washerEarnedToday');
-                if (earnedEl) earnedEl.textContent = `$${earned.toFixed(2)}`;
+                    const earnedEl = document.getElementById('washerEarnedToday');
+                    if (earnedEl) earnedEl.textContent = `$${earned.toFixed(2)}`;
 
-                const subEl = document.getElementById('washerProfileSubtitle');
-                if (subEl) subEl.textContent = `${user.full_name} • ${count} completed jobs today`;
+                    const subEl = document.getElementById('washerProfileSubtitle');
+                    if (subEl) subEl.textContent = `${user.full_name} • ${count} completed jobs today`;
+                }
+            } catch (e) {
+                console.warn('Could not load washer commission data', e);
             }
-        } catch (e) {
-            console.warn('Could not load washer commission data', e);
         }
 
         // Render Washer Waiting List
         const washQueue = this.currentBaysData?.wash_queue || [];
         const wBadge = document.getElementById('washerWaitingBadge');
-        if (wBadge) wBadge.textContent = washQueue.length;
+        if (wBadge) wBadge.textContent = `${washQueue.length} vehicles`;
+
+        // Calculate Average Wait
+        const avgWaitBadge = document.getElementById('washerAvgWaitBadge');
+        if (avgWaitBadge) {
+            const avgWait = washQueue.length ? Math.round(washQueue.reduce((s, q) => s + (parseInt(q.wait_minutes) || 0), 0) / washQueue.length) : 0;
+            avgWaitBadge.textContent = `Avg wait: ${avgWait} min`;
+        }
 
         if (washQueue.length === 0) {
             grid.innerHTML = `
-                <div style="grid-column: 1/-1; text-align: center; padding: 2.5rem; background: white; border-radius: var(--radius-lg); border: 1.5px dashed var(--border);">
-                    <i class="fa-solid fa-hands-bubbles fa-2x" style="color: var(--primary); margin-bottom: 0.5rem;"></i>
-                    <p style="font-weight: 700; margin: 0; color: var(--text-muted);">${I18nManager.t('noCarsWaiting') || 'No cars waiting in queue.'}</p>
+                <div style="display:flex; height:100%; min-height:180px; flex-direction:column; align-items:center; justify-content:center; color:#94a3b8; padding: 2.5rem 0;">
+                    <i class="fa-solid fa-car-side" style="font-size:2.2rem; margin-bottom:0.5rem; color:#cbd5e1;"></i>
+                    <span style="font-size:0.875rem; font-weight:700;">${I18nManager.t('noCarsWaiting') || 'Queue is empty'}</span>
                 </div>
             `;
             return;
@@ -9039,37 +9152,57 @@ class PosApp {
         const firstFreeBay = freeWashBays.length > 0 ? freeWashBays[0] : null;
 
         let html = '';
-        washQueue.forEach(item => {
-            const isNext = (item.position === 1 || item.is_next);
-            const posBadge = isNext
-                ? `<span class="queue-pos-badge next"><i class="fa-solid fa-bolt"></i> 1st (${I18nManager.t('nextInLine') || 'Next'})</span>`
-                : `<span class="queue-pos-badge pos-sub">${item.position_label || (item.position + 'th')}</span>`;
+        washQueue.forEach((item, i) => {
+            const isNext = (i === 0 || item.position === 1 || item.is_next);
+            const cardClass = isNext ? 'is-first' : '';
+            const posClass = isNext ? 'pos-first' : 'pos-subsequent';
+            const waitMin = parseInt(item.wait_minutes) || 0;
+            const waitClass = waitMin >= 18 ? 'wait-danger' : waitMin >= 12 ? 'wait-warn' : 'wait-normal';
+
+            // Service tags split
+            const srvText = item.service_names ? this.stripHtml(item.service_names) : 'Car Wash Service';
+            const srvList = srvText.split(/[+,•]/).map(s => s.trim()).filter(Boolean);
+            let servicesPills = '';
+            srvList.forEach(s => {
+                servicesPills += `<span class="service-tag">${this.escapeHtml(s)}</span>`;
+            });
+            if (!servicesPills) {
+                servicesPills = `<span class="service-tag">${this.escapeHtml(srvText)}</span>`;
+            }
 
             let actionBtn = '';
             if (firstFreeBay) {
+                const btnClass = isNext ? 'btn-first' : 'btn-sub';
                 actionBtn = `
-                    <button type="button" class="btn btn-primary btn-sm btn-washer-assign" ${!this.isOnline ? 'disabled title="Offline"' : ''} onclick="PosApp.handleWasherAssignBay(${firstFreeBay.id}, ${item.order_id}, '${this.escapeHtml(item.plate_number)}', '${this.escapeHtml(firstFreeBay.bay_name)}')">
-                        <i class="fa-solid fa-play"></i> ${I18nManager.t('putInBay') || 'Put in'} ${this.escapeHtml(firstFreeBay.bay_name)}
+                    <button type="button" class="btn-queue-pull ${btnClass}" ${!this.isOnline ? 'disabled title="Offline"' : ''} onclick="PosApp.handleWasherAssignBay(${firstFreeBay.id}, ${item.order_id}, '${this.escapeHtml(item.plate_number)}', '${this.escapeHtml(firstFreeBay.bay_name)}')">
+                        <i class="fa-solid fa-arrow-left mr-1"></i> Pull into Free ${this.escapeHtml(firstFreeBay.bay_name)}
                     </button>
                 `;
             }
 
+            const vehicleCar = item.vehicle_type ? (item.vehicle_type.toUpperCase() + (item.customer_name ? ' • ' + item.customer_name : '')) : (item.customer_name || 'Walk-in Customer');
+
             html += `
-                <div class="queue-card" style="${isNext ? 'border: 2px solid #60a5fa; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.12);' : ''}">
-                    <div class="queue-card-header">
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <span class="queue-card-plate">${this.escapeHtml(item.plate_number)}</span>
-                            ${posBadge}
+                <div class="queue-item-card ${cardClass}">
+                    <div class="queue-item-top">
+                        <div class="queue-id-plate-group">
+                            <div class="queue-pos-circle ${posClass}">${i + 1}</div>
+                            <div>
+                                <div class="queue-plate-text mono">${this.escapeHtml(item.plate_number)}</div>
+                                <div class="queue-car-text">${this.escapeHtml(vehicleCar)}</div>
+                            </div>
                         </div>
-                        <span class="queue-badge waiting"><i class="fa-solid fa-hourglass-half"></i> ${item.wait_minutes || 0}m wait</span>
+                        <div class="queue-tags-col">
+                            ${isNext ? '<span class="star-next-pill"><i class="fa-solid fa-star"></i> Next in line</span>' : ''}
+                            <span class="wait-time-pill ${waitClass}">
+                                <i class="fa-regular fa-clock"></i> <span>${waitMin}m wait</span>
+                            </span>
+                        </div>
                     </div>
-                    <div style="font-size: 0.92rem; margin-top: 0.35rem; font-weight: 700;">
-                        ${this.escapeHtml(item.service_names || 'Car Wash Service')}
+                    <div class="queue-service-pills-row">
+                        ${servicesPills}
                     </div>
-                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">
-                        #${this.escapeHtml(item.order_number)} • Customer: ${this.escapeHtml(item.customer_name || 'Walk-in')} • ${this.escapeHtml(item.vehicle_type || 'Car')}
-                    </div>
-                    ${actionBtn ? `<div style="margin-top: 0.75rem;">${actionBtn}</div>` : ''}
+                    ${actionBtn}
                 </div>
             `;
         });

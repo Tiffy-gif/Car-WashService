@@ -1153,62 +1153,44 @@
             </div>
         </section>
 
-        <!-- 6. Washer Screen (Requirement 3: show 3 bays and waiting list) -->
+        <!-- 6. Washer Screen (Requirement 3: Split 2-Column Command: Live Bays Left, Waiting Queue Right) -->
         <section class="view-section" id="viewWasher">
-            <div style="max-width: 1000px; margin: 0 auto; padding: 1.5rem; width: 100%;">
-                <div
-                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
-                    <div>
-                        <h2 data-i18n="navWasher"
-                            style="font-size: 1.5rem; font-weight: 700; color: var(--text-main); margin: 0; line-height: 1.4;">
-                            ការងារលាងរបស់ខ្ញុំ
-                        </h2>
-                        <span style="color: var(--text-muted); font-size: 0.9rem;" id="washerProfileSubtitle">Washer Duty Screen</span>
-                    </div>
-                    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-                        <span id="washerSyncIndicator" class="live-sync-pill"><i class="fa-solid fa-circle live-pulse-dot"></i> <span data-i18n="liveUpdates">Live</span></span>
-                        <div
-                            style="background: white; border: 1.5px solid var(--border); border-radius: var(--radius-md); padding: 0.6rem 1rem; text-align: right;">
-                            <span
-                                style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;"
-                                data-i18n="todayCommission">Today's Commission</span>
-                            <div style="font-size: 1.35rem; font-weight: 900; color: var(--success);"
-                                id="washerEarnedToday">$0.00</div>
-                        </div>
-                        <button type="button" class="btn btn-outline" id="btnRefreshWasherJobs">
-                            <i class="fa-solid fa-rotate"></i>
-                            <span data-i18n="refreshBtn">Refresh</span>
-                        </button>
-                    </div>
-                </div>
-
+            <div class="washer-screen-container">
                 <!-- Washer Offline Alert Banner -->
-                <div id="washerOfflineBanner" class="alert alert-warning" style="display: none; margin-bottom: 1rem; align-items: center; gap: 0.5rem;">
+                <div id="washerOfflineBanner" class="alert alert-warning" style="display: none; margin-bottom: 0.75rem; align-items: center; gap: 0.5rem;">
                     <i class="fa-solid fa-wifi"></i> <span data-i18n="offlineAssignDisabled">ក្រៅបណ្តាញ៖ មិនអាចចាត់ចែងបន្ទប់លាងបានទេ រហូតដល់ភ្ជាប់ឡើងវិញ</span>
                 </div>
 
-                <!-- Wash Bays Grid (Requirement 3: show 3 bays, washer taps free bay to put next car in, taps Finished when done. Busy bay cannot be chosen) -->
-                <div id="washerBaysSection" style="margin-bottom: 2rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                        <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; margin: 0;">
-                            <i class="fa-solid fa-warehouse text-primary"></i>
-                            <span data-i18n="baysBoardTitle">បន្ទប់លាងរថយន្ត (Wash Bays)</span>
-                        </h3>
+                <!-- Split 2-Column Main Workspace Grid -->
+                <div class="washer-workspace-grid">
+                    <!-- LEFT COLUMN: LIVE BAYS STATUS -->
+                    <div class="washer-bays-column">
+                        <div class="washer-bays-grid-stack" id="washerBaysGrid">
+                            <!-- Populated dynamically by PosApp.renderWasherBays -->
+                        </div>
                     </div>
-                    <div class="bays-grid" id="washerBaysGrid">
-                        <!-- Bays rendered dynamically -->
-                    </div>
-                </div>
 
-                <!-- Washer Waiting Line (Requirement 3) -->
-                <div style="margin-bottom: 1.5rem;">
-                    <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-                        <i class="fa-solid fa-list-ol text-primary"></i>
-                        <span data-i18n="waitingQueueTitle">ជួររង់ចាំ (Waiting Queue)</span>
-                        <span class="badge" id="washerWaitingBadge" style="background: var(--primary); color: white; font-size: 0.8rem; border-radius: 999px; padding: 2px 8px; margin-left: 4px;">0</span>
-                    </h3>
-                    <div class="queue-grid" id="washerJobsGrid">
-                        <!-- Washer jobs rendered dynamically -->
+                    <!-- RIGHT COLUMN: WAITING QUEUE -->
+                    <div class="washer-queue-column card">
+                        <div class="washer-queue-header">
+                            <h3 class="washer-col-title">
+                                <i class="fa-solid fa-list-ol" style="color: #f59e0b;"></i>
+                                <span data-i18n="waitingQueueTitle">ជួររង់ចាំ (Waiting Queue)</span>
+                            </h3>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span class="queue-count-chip" id="washerWaitingBadge">0</span>
+                                <button type="button" class="btn btn-outline btn-sm" id="btnRefreshWasherJobs" style="padding: 0.2rem 0.55rem; font-size: 0.75rem; height: 28px; border-radius: 6px;" title="Refresh">
+                                    <i class="fa-solid fa-rotate"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="washer-queue-scroll-area scroll-thin" id="washerJobsGrid">
+                            <!-- Populated dynamically by PosApp.renderWasherScreen -->
+                        </div>
+                        <div class="washer-queue-footer">
+                            <span class="washer-queue-note"><i class="fa-solid fa-clock"></i> FIFO Queue Order</span>
+                            <span class="washer-queue-avg" id="washerAvgWaitBadge">Avg wait: -- min</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1228,14 +1210,6 @@
                             Duty Screen</span>
                     </div>
                     <div style="display: flex; gap: 1rem; align-items: center;">
-                        <div
-                            style="background: white; border: 1.5px solid var(--border); border-radius: var(--radius-md); padding: 0.6rem 1rem; text-align: right;">
-                            <span
-                                style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;"
-                                data-i18n="todayCommission">Today's Commission</span>
-                            <div style="font-size: 1.35rem; font-weight: 900; color: var(--success);"
-                                id="mechanicEarnedToday">$0.00</div>
-                        </div>
                         <button type="button" class="btn btn-outline" id="btnRefreshMechanicJobs">
                             <i class="fa-solid fa-rotate"></i>
                         </button>

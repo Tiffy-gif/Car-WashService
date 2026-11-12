@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Idea 2: Interactive Workflow & Stage Checklist | Car Wash POS</title>
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/font-awesome.min.css">
+    <style>
+        :root {
+            --primary: #0284c7;
+            --primary-hover: #0369a1;
+            --success: #16a34a;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.08);
+        }
+
+        body {
+            font-family: 'Inter', 'Kantumruy Pro', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .preview-top-nav {
+            background: #ffffff;
+            border-bottom: 1.5px solid var(--border);
+            padding: 0.85rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .preview-badge {
+            background: #fdf4ff;
+            color: #a21caf;
+            font-size: 0.75rem;
+            font-weight: 800;
+            padding: 0.3rem 0.75rem;
+            border-radius: 9999px;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            text-transform: uppercase;
+        }
+
+        .main-container {
+            max-width: 1480px;
+            margin: 0 auto;
+            padding: 1.25rem 1.5rem;
+        }
+
+        /* 58% / 42% Two-Column Split */
+        .kanban-stage-grid {
+            display: grid;
+            grid-template-columns: 1.35fr 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        @media (max-width: 1100px) {
+            .kanban-stage-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Stage Bay Card */
+        .bay-workflow-card {
+            background: #ffffff;
+            border: 1.5px solid var(--border);
+            border-radius: 16px;
+            padding: 1.35rem;
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 1.15rem;
+            position: relative;
+            transition: all 0.2s ease;
+        }
+
+        .bay-workflow-card:hover {
+            box-shadow: var(--shadow-md);
+            border-color: #cbd5e1;
+        }
+
+        .bay-workflow-card.active-bay {
+            border-left: 5px solid #0284c7;
+        }
+
+        .bay-workflow-card.ready-bay {
+            border-left: 5px solid #16a34a;
+            background: #fafdfb;
+        }
+
+        /* Header Row */
+        .wf-header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.85rem;
+        }
+
+        .wf-bay-title {
+            font-size: 1.1rem;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .radial-progress-pill {
+            background: #f0fdf4;
+            color: #15803d;
+            border: 1px solid #bbf7d0;
+            font-size: 0.78rem;
+            font-weight: 800;
+            padding: 0.25rem 0.65rem;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        /* Vehicle Identity Bar */
+        .wf-veh-box {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .plate-box-styled {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .plate-num {
+            background: #0f172a;
+            color: white;
+            font-family: monospace;
+            font-weight: 900;
+            font-size: 1.2rem;
+            padding: 0.3rem 0.75rem;
+            border-radius: 6px;
+            letter-spacing: 0.05em;
+        }
+
+        /* INTERACTIVE CHECKLIST STAGES */
+        .wash-stages-checklist {
+            display: flex;
+            flex-direction: column;
+            gap: 0.45rem;
+            margin-bottom: 1.15rem;
+            background: #fcfdfe;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.75rem 1rem;
+        }
+
+        .stage-check-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-main);
+            padding: 0.35rem 0;
+            cursor: pointer;
+            user-select: none;
+            border-bottom: 1px dashed #f1f5f9;
+        }
+
+        .stage-check-item:last-child {
+            border-bottom: none;
+        }
+
+        .stage-check-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--primary);
+            cursor: pointer;
+        }
+
+        .stage-check-item.done {
+            color: #15803d;
+            text-decoration: line-through;
+            opacity: 0.75;
+        }
+
+        /* Action Buttons */
+        .wf-actions-row {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .btn-wf-action {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            border: none;
+            font-size: 0.92rem;
+            font-weight: 800;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            transition: all 0.15s ease;
+        }
+
+        /* RIGHT COLUMN: KANBAN WAITING PIPELINE */
+        .pipeline-card {
+            background: #ffffff;
+            border: 1.5px solid var(--border);
+            border-radius: 16px;
+            padding: 1.25rem;
+            box-shadow: var(--shadow-sm);
+            position: sticky;
+            top: 5rem;
+        }
+
+        .pipeline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1.5px solid var(--border);
+        }
+
+        .queue-pipeline-card {
+            background: #ffffff;
+            border: 1.5px solid var(--border);
+            border-radius: 12px;
+            padding: 0.95rem 1rem;
+            margin-bottom: 0.85rem;
+            transition: all 0.2s ease;
+        }
+
+        .queue-pipeline-card.urgent {
+            border: 2px solid #38bdf8;
+            background: #f0f9ff;
+        }
+
+        .drag-handle-hint {
+            color: #94a3b8;
+            font-size: 0.85rem;
+            cursor: grab;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Preview Top Nav -->
+    <header class="preview-top-nav">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <a href="preview_washer_showcase.html" style="text-decoration: none; color: var(--text-muted); font-size: 0.9rem; font-weight: 700;">
+                <i class="fa-solid fa-arrow-left"></i> All Ideas
+            </a>
+            <span style="color: var(--border);">|</span>
+            <span class="preview-badge"><i class="fa-solid fa-tasks"></i> Idea 2: Interactive Workflow & Stage Checklist</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span style="font-size: 0.82rem; color: var(--text-muted);"><i class="fa-solid fa-check-double"></i> Live Step Checklists</span>
+            <a href="index.html#washer" class="btn btn-sm btn-outline" style="text-decoration: none; font-size: 0.82rem; font-weight: 700; padding: 0.35rem 0.85rem;">
+                Back to POS
+            </a>
+        </div>
+    </header>
+
+    <div class="main-container">
+        
+        <!-- Header Info -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+            <div>
+                <h1 style="font-size: 1.35rem; font-weight: 800; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fa-solid fa-list-check" style="color: #a21caf;"></i>
+                    <span>Wash Execution & Quality Gates</span>
+                </h1>
+                <p style="margin: 0.2rem 0 0 0; font-size: 0.85rem; color: var(--text-muted);">
+                    Attendants check off stages directly on tablet. Live completion rate syncs to front desk.
+                </p>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <button type="button" class="btn btn-sm btn-outline" onclick="location.reload()">
+                    <i class="fa-solid fa-rotate"></i> Reset Demo
+                </button>
+            </div>
+        </div>
+
+        <div class="kanban-stage-grid">
+            
+            <!-- LEFT COLUMN: LIVE BAYS WITH INTERACTIVE STAGES -->
+            <div>
+                
+                <!-- BAY 1: IN PROGRESS (4/5 STAGES COMPLETED) -->
+                <div class="bay-workflow-card active-bay">
+                    <div class="wf-header-row">
+                        <div class="wf-bay-title">
+                            <i class="fa-solid fa-shower" style="color: #0284c7;"></i>
+                            <span>Bay 1 (Wash Lane 1)</span>
+                        </div>
+                        <span class="radial-progress-pill" id="b1_pill">
+                            <i class="fa-solid fa-circle-check"></i> 80% Complete (4/5 Stages)
+                        </span>
+                    </div>
+
+                    <div class="wf-veh-box">
+                        <div class="plate-box-styled">
+                            <div class="plate-num">2BQ-8899</div>
+                            <div>
+                                <div style="font-weight: 700; font-size: 0.92rem;">Toyota Highlander (SUV)</div>
+                                <div style="font-size: 0.78rem; color: #0284c7; font-weight: 600;">Full Wash & Clay Wax</div>
+                            </div>
+                        </div>
+                        <div style="text-align: right;">
+                            <span style="font-size: 0.9rem; font-weight: 800; color: #0284c7;"><i class="fa-regular fa-clock"></i> 18m</span>
+                            <div style="font-size: 0.72rem; color: var(--text-muted);">Target: 25m</div>
+                        </div>
+                    </div>
+
+                    <!-- Stage Checklist -->
+                    <div class="wash-stages-checklist">
+                        <label class="stage-check-item done">
+                            <span>1. Wheel Degreasing & Mud Arch Jetting</span>
+                            <input type="checkbox" checked onchange="toggleStage(this)">
+                        </label>
+                        <label class="stage-check-item done">
+                            <span>2. Snow Foam Cannon Soak & Sponge Mitt Wash</span>
+                            <input type="checkbox" checked onchange="toggleStage(this)">
+                        </label>
+                        <label class="stage-check-item done">
+                            <span>3. High-Pressure Spotless Water Rinse</span>
+                            <input type="checkbox" checked onchange="toggleStage(this)">
+                        </label>
+                        <label class="stage-check-item done">
+                            <span>4. Microfiber Waffle Towel Body Dry</span>
+                            <input type="checkbox" checked onchange="toggleStage(this)">
+                        </label>
+                        <label class="stage-check-item">
+                            <span>5. Interior Vacuum, Glass Wipe & Tire Dressing</span>
+                            <input type="checkbox" onchange="toggleStage(this)">
+                        </label>
+                    </div>
+
+                    <div class="wf-actions-row">
+                        <button type="button" class="btn-wf-action" style="background: #16a34a; color: white;" onclick="alert('Wash Completed! Vehicle passing to Exit inspection.')">
+                            <i class="fa-solid fa-circle-check"></i> Sign Off Wash Complete
+                        </button>
+                        <button type="button" class="btn-wf-action" style="background: #f1f5f9; color: var(--text-main); flex: 0.5;" onclick="alert('Supervisor alerted for Quality check!')">
+                            <i class="fa-solid fa-bell"></i> Call QC
+                        </button>
+                    </div>
+                </div>
+
+                <!-- BAY 2: FREE & READY -->
+                <div class="bay-workflow-card ready-bay">
+                    <div class="wf-header-row">
+                        <div class="wf-bay-title" style="color: #16a34a;">
+                            <i class="fa-solid fa-warehouse"></i>
+                            <span>Bay 2 (Wash Lane 2)</span>
+                        </div>
+                        <span style="background: #dcfce7; color: #15803d; font-size: 0.78rem; font-weight: 800; padding: 0.25rem 0.65rem; border-radius: 999px;">
+                            ● Empty & Sanitized
+                        </span>
+                    </div>
+
+                    <div style="text-align: center; padding: 1.5rem 1rem; background: #ffffff; border: 1.5px dashed #bbf7d0; border-radius: 12px; margin-bottom: 1rem;">
+                        <i class="fa-solid fa-car-side" style="font-size: 2.2rem; color: #22c55e; margin-bottom: 0.5rem;"></i>
+                        <div style="font-weight: 800; font-size: 1rem; color: #15803d;">Ready to Accept Vehicle</div>
+                        <div style="font-size: 0.82rem; color: #64748b; margin-top: 0.2rem;">Next in FIFO line: <strong>2AB-5566</strong> (Lexus RX350)</div>
+                    </div>
+
+                    <button type="button" class="btn-wf-action" style="width: 100%; background: #0284c7; color: white;" onclick="alert('Pulled 2AB-5566 into Bay 2!')">
+                        <i class="fa-solid fa-play"></i> Pull In <strong>2AB-5566</strong> to Bay 2
+                    </button>
+                </div>
+
+                <!-- BAY 3: IN SERVICE -->
+                <div class="bay-workflow-card active-bay">
+                    <div class="wf-header-row">
+                        <div class="wf-bay-title">
+                            <i class="fa-solid fa-shower" style="color: #0284c7;"></i>
+                            <span>Bay 3 (Wash Lane 3)</span>
+                        </div>
+                        <span class="radial-progress-pill" style="background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe;">
+                            <i class="fa-solid fa-spinner fa-spin"></i> 20% Complete (1/5 Stages)
+                        </span>
+                    </div>
+
+                    <div class="wf-veh-box">
+                        <div class="plate-box-styled">
+                            <div class="plate-num">2AF-1234</div>
+                            <div>
+                                <div style="font-weight: 700; font-size: 0.92rem;">Mazda 3 (Sedan)</div>
+                                <div style="font-size: 0.78rem; color: #7c3aed; font-weight: 600;">Wash + Tech Handoff</div>
+                            </div>
+                        </div>
+                        <div style="text-align: right;">
+                            <span style="font-size: 0.9rem; font-weight: 800; color: #0284c7;"><i class="fa-regular fa-clock"></i> 5m</span>
+                            <div style="font-size: 0.72rem; color: var(--text-muted);">Started 5m ago</div>
+                        </div>
+                    </div>
+
+                    <div class="wash-stages-checklist">
+                        <label class="stage-check-item done">
+                            <span>1. Wheel Degreasing & Mud Arch Jetting</span>
+                            <input type="checkbox" checked onchange="toggleStage(this)">
+                        </label>
+                        <label class="stage-check-item">
+                            <span>2. Snow Foam Cannon Soak & Sponge Mitt Wash</span>
+                            <input type="checkbox" onchange="toggleStage(this)">
+                        </label>
+                        <label class="stage-check-item">
+                            <span>3. High-Pressure Spotless Water Rinse</span>
+                            <input type="checkbox" onchange="toggleStage(this)">
+                        </label>
+                    </div>
+
+                    <div class="wf-actions-row">
+                        <button type="button" class="btn-wf-action" style="background: #8b5cf6; color: white;" onclick="alert('Preparing for technical handoff!')">
+                            <i class="fa-solid fa-arrow-right"></i> Send to Tech Lane After Wash
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- RIGHT COLUMN: INTERACTIVE QUEUE DISPATCH -->
+            <div>
+                <div class="pipeline-card">
+                    <div class="pipeline-header">
+                        <div>
+                            <h2 style="font-size: 1.05rem; font-weight: 800; margin: 0; display: flex; align-items: center; gap: 0.4rem;">
+                                <i class="fa-solid fa-arrow-down-short-wide" style="color: #0284c7;"></i>
+                                <span>FIFO Waiting Pipeline</span>
+                            </h2>
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">Drag or Tap to Assign</span>
+                        </div>
+                        <span style="background: #0284c7; color: white; font-size: 0.75rem; font-weight: 800; padding: 2px 8px; border-radius: 999px;">
+                            3 In Line
+                        </span>
+                    </div>
+
+                    <!-- QUEUE CARD 1 -->
+                    <div class="queue-pipeline-card urgent">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                            <span style="background: #fef3c7; color: #92400e; font-size: 0.72rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;">
+                                <i class="fa-solid fa-bolt"></i> NEXT IN LINE
+                            </span>
+                            <span style="font-size: 0.75rem; font-weight: 700; color: #0284c7;">
+                                Est. Pull-in: Immediate
+                            </span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-family: monospace; font-size: 1.15rem; font-weight: 900;">2AB-5566</span>
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">Lexus RX350</span>
+                        </div>
+                        <div style="font-size: 0.82rem; font-weight: 600; color: #0369a1; margin: 0.2rem 0;">
+                            Full Wash + Underbody Spray
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: var(--text-muted);">
+                            <span>Customer: Chan Sovann</span>
+                            <span style="color: #16a34a; font-weight: 700;">Paid</span>
+                        </div>
+                        <button type="button" style="width: 100%; margin-top: 0.65rem; background: #0284c7; color: white; border: none; padding: 0.5rem; border-radius: 6px; font-weight: 700; font-size: 0.82rem; cursor: pointer;" onclick="alert('Assigning to Bay 2!')">
+                            <i class="fa-solid fa-arrow-left"></i> Pull into Free Bay 2
+                        </button>
+                    </div>
+
+                    <!-- QUEUE CARD 2 -->
+                    <div class="queue-pipeline-card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                            <span style="background: #f1f5f9; color: #475569; font-size: 0.72rem; font-weight: 700; padding: 2px 6px; border-radius: 4px;">
+                                #2 in Line
+                            </span>
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">
+                                14m waiting
+                            </span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-family: monospace; font-size: 1.1rem; font-weight: 900;">2BC-7788</span>
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">Toyota Prius</span>
+                        </div>
+                        <div style="font-size: 0.82rem; font-weight: 600; margin: 0.2rem 0;">
+                            Exterior Foam Wash + Vacuum
+                        </div>
+                    </div>
+
+                    <!-- QUEUE CARD 3 -->
+                    <div class="queue-pipeline-card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                            <span style="background: #f1f5f9; color: #475569; font-size: 0.72rem; font-weight: 700; padding: 2px 6px; border-radius: 4px;">
+                                #3 in Line
+                            </span>
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">
+                                19m waiting
+                            </span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-family: monospace; font-size: 1.1rem; font-weight: 900;">2Z-9911</span>
+                            <span style="font-size: 0.75rem; color: var(--text-muted);">Ford Ranger</span>
+                        </div>
+                        <div style="font-size: 0.82rem; font-weight: 600; margin: 0.2rem 0;">
+                            Heavy Dirt Degreasing & Wax
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        function toggleStage(checkbox) {
+            const label = checkbox.closest('label');
+            if (checkbox.checked) {
+                label.classList.add('done');
+            } else {
+                label.classList.remove('done');
+            }
+        }
+    </script>
+
+</body>
+</html>
+

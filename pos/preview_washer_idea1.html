@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wash Station</title>
+<link rel="stylesheet" href="css/font-awesome.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #f4f6fa;
+    color: #1e293b;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+  .scroll-thin::-webkit-scrollbar { width: 6px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .blink { animation: blink 1.4s infinite; }
+  .card { box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.10); }
+
+  /* App Shell Grid */
+  .app-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  @media (min-width: 1024px) {
+    .app-container { height: 100vh; min-height: 820px; overflow: hidden; }
+  }
+
+  /* Header */
+  .app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #e2e8f0;
+    background: #ffffff;
+    padding: 0.75rem 1.5rem;
+    flex-shrink: 0;
+  }
+  .header-brand { display: flex; align-items: center; gap: 0.75rem; }
+  .brand-icon {
+    display: flex; height: 2.5rem; width: 2.5rem; align-items: center; justify-content: center;
+    border-radius: 0.75rem; background: linear-gradient(135deg, #0ea5e9, #2563eb);
+    color: #ffffff; box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+  }
+  .brand-text h1 { font-size: 1rem; font-weight: 800; line-height: 1.2; letter-spacing: 0.05em; color: #0f172a; }
+  .brand-text p { font-size: 0.75rem; font-weight: 500; color: #64748b; }
+
+  .header-actions { display: flex; align-items: center; gap: 0.75rem; }
+  .pill-status {
+    display: flex; align-items: center; gap: 0.5rem; border-radius: 9999px;
+    background: #ecfdf5; padding: 0.375rem 0.875rem; font-size: 0.75rem; font-weight: 700;
+    color: #047857; border: 1px solid #a7f3d0;
+  }
+  .pill-dot { height: 0.5rem; width: 0.5rem; border-radius: 50%; background: #10b981; }
+  .pill-clock {
+    border-radius: 9999px; background: #f1f5f9; padding: 0.375rem 0.875rem;
+    font-size: 0.75rem; font-weight: 700; color: #475569;
+  }
+  .btn-pos-back {
+    display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 0.5rem;
+    border: 1px solid #e2e8f0; background: #ffffff; padding: 0.5rem 1rem;
+    font-size: 0.75rem; font-weight: 700; color: #0f172a; text-decoration: none;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .btn-pos-back:hover { background: #f8fafc; }
+
+  /* Main Grid */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+    padding: 1.25rem;
+    flex: 1;
+    min-height: 0;
+  }
+  @media (min-width: 1024px) {
+    .main-grid {
+      grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+      overflow: hidden;
+    }
+  }
+
+  /* Left Column: Bays */
+  .bays-section { display: flex; flex-direction: column; gap: 0.75rem; min-height: 0; }
+  .section-headline {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 0.25rem; flex-shrink: 0;
+  }
+  .section-title {
+    display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem;
+    font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: #64748b;
+  }
+  .section-count-badge {
+    border-radius: 0.375rem; background: #e2e8f0; padding: 0.125rem 0.375rem;
+    font-size: 0.625rem; color: #475569;
+  }
+  .ready-hint { font-size: 0.75rem; font-weight: 700; color: #059669; }
+
+  .bays-grid-stack {
+    display: grid;
+    gap: 0.75rem;
+    flex: 1;
+    min-height: 0;
+  }
+  @media (min-width: 1024px) {
+    .bays-grid-stack {
+      grid-template-rows: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  /* Bay Card */
+  .bay-article {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+    border-radius: 1rem;
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    padding: 1rem 1.25rem 1rem 1.5rem;
+    min-height: 230px;
+    transition: all 0.15s ease;
+  }
+  @media (min-width: 1024px) {
+    .bay-article { min-height: 0; }
+  }
+
+  .bay-article.border-service { border-color: #e0f2fe; }
+  .bay-article.border-free { border-color: #d1fae5; }
+  .bay-article.border-finished { border-color: #ede9fe; }
+
+  .bay-accent-stripe {
+    position: absolute; inset-block: 0; left: 0; width: 0.375rem;
+  }
+  .accent-service { background: #0ea5e9; }
+  .accent-free { background: #10b981; }
+  .accent-finished { background: #8b5cf6; }
+
+  .bay-top-row { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .bay-id-group { display: flex; align-items: center; gap: 0.75rem; }
+  .bay-tile {
+    display: flex; height: 2.5rem; width: 2.5rem; align-items: center; justify-content: center;
+    border-radius: 0.75rem; font-size: 1.125rem; font-weight: 800;
+  }
+  .tile-service { background: #f0f9ff; color: #0284c7; }
+  .tile-free { background: #ecfdf5; color: #059669; }
+  .tile-finished { background: #f5f3ff; color: #7c3aed; }
+
+  .bay-title-box .title { font-size: 1rem; font-weight: 800; line-height: 1.2; color: #0f172a; }
+  .bay-title-box .subtitle { font-size: 0.75rem; font-weight: 500; color: #94a3b8; }
+
+  .bay-chip {
+    display: flex; align-items: center; gap: 0.375rem; border-radius: 9999px;
+    padding: 0.25rem 0.75rem; font-size: 0.6875rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid transparent;
+  }
+  .chip-service { background: #f0f9ff; color: #0369a1; border-color: #bae6fd; }
+  .chip-free { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+  .chip-finished { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
+
+  /* Bay Body Occupied */
+  .bay-occupied-body {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem; border-radius: 0.75rem; background: #f8fafc;
+    padding: 0.75rem 1rem; flex-shrink: 0;
+  }
+  .plate-meta-group { display: flex; min-width: 0; align-items: center; gap: 1rem; }
+  .plate-badge-dark {
+    border-radius: 0.5rem; background: #0f172a; padding: 0.5rem 1rem;
+    font-size: 1.5rem; font-weight: 700; letter-spacing: 0.15em; color: #ffffff;
+    line-height: 1; flex-shrink: 0;
+  }
+  .vehicle-info { min-width: 0; }
+  .vehicle-car { font-size: 1rem; font-weight: 700; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .vehicle-service { font-size: 0.75rem; font-weight: 500; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .timer-box { flex-shrink: 0; text-align: right; }
+  .timer-clock { font-size: 1.875rem; font-weight: 700; line-height: 1; color: #0284c7; }
+  .timer-sub { margin-top: 0.25rem; font-size: 0.6875rem; font-weight: 600; color: #94a3b8; }
+  .done-badge { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; font-size: 1.25rem; font-weight: 800; color: #7c3aed; }
+
+  /* Bay Body Free */
+  .bay-free-body {
+    display: flex; align-items: center; gap: 1rem; border-radius: 0.75rem;
+    border: 2px dashed #a7f3d0; background: rgba(236, 253, 245, 0.5);
+    padding: 0.85rem 1rem; flex-shrink: 0;
+  }
+  .free-check-circle {
+    display: flex; height: 3rem; width: 3rem; flex-shrink: 0; align-items: center;
+    justify-content: center; border-radius: 50%; background: #10b981; color: #ffffff; font-size: 1.25rem;
+  }
+  .free-title { font-size: 1rem; font-weight: 800; color: #047857; }
+  .free-subtitle { font-size: 0.875rem; color: #64748b; }
+
+  /* Stage Tracker */
+  .stage-tracker { display: flex; gap: 0.375rem; flex-shrink: 0; }
+  .stage-col { flex: 1; }
+  .stage-bar { height: 0.5rem; border-radius: 9999px; background: #e2e8f0; }
+  .stage-bar.completed { background: #0ea5e9; }
+  .stage-bar.active { background: #7dd3fc; }
+  .stage-bar.finished-all { background: #8b5cf6; }
+  .stage-label {
+    margin-top: 0.25rem; font-size: 0.625rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .stage-label.label-done { color: #64748b; }
+  .stage-label.label-active { color: #0369a1; font-weight: 800; }
+  .stage-label.label-finished { color: #8b5cf6; }
+
+  /* Bay Action Buttons */
+  .bay-actions-row { display: flex; gap: 0.5rem; flex-shrink: 0; }
+  .btn-complete-green {
+    flex: 1; border-radius: 0.75rem; background: #059669; padding: 0.75rem 1rem;
+    font-size: 0.875rem; font-weight: 800; letter-spacing: 0.025em; color: #ffffff;
+    border: none; cursor: pointer; transition: background 0.15s;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  }
+  .btn-complete-green:hover { background: #047857; }
+
+  .btn-crew-sub {
+    border-radius: 0.75rem; border: 1px solid #e2e8f0; background: #ffffff;
+    padding: 0 1.25rem; font-size: 0.875rem; font-weight: 700; color: #475569;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .btn-crew-sub:hover { background: #f8fafc; }
+
+  .btn-pullin-blue {
+    width: 100%; border-radius: 0.75rem; background: #0284c7; padding: 0.75rem 1rem;
+    font-size: 0.875rem; font-weight: 800; letter-spacing: 0.025em; color: #ffffff;
+    border: none; cursor: pointer; transition: background 0.15s;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  }
+  .btn-pullin-blue:hover { background: #0369a1; }
+  .btn-pullin-blue:disabled { cursor: not-allowed; opacity: 0.4; }
+
+  .btn-handover-purple {
+    flex: 1; border-radius: 0.75rem; background: #7c3aed; padding: 0.75rem 1rem;
+    font-size: 0.875rem; font-weight: 800; letter-spacing: 0.025em; color: #ffffff;
+    border: none; cursor: pointer; transition: background 0.15s;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  }
+  .btn-handover-purple:hover { background: #6d28d9; }
+
+  /* Right Column: Queue */
+  .queue-section {
+    display: flex; flex-direction: column; border-radius: 1rem;
+    border: 1px solid #e2e8f0; background: #ffffff; min-height: 400px;
+  }
+  @media (min-width: 1024px) {
+    .queue-section { min-height: 0; }
+  }
+
+  .queue-header {
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #f1f5f9; padding: 1rem 1.25rem; flex-shrink: 0;
+  }
+  .queue-header-title {
+    display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem;
+    font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: #64748b;
+  }
+  .queue-count-chip {
+    border-radius: 9999px; background: #f0f9ff; padding: 0.25rem 0.75rem;
+    font-size: 0.75rem; font-weight: 700; color: #0369a1; border: 1px solid #bae6fd;
+  }
+
+  .queue-items-container {
+    flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column;
+    gap: 0.75rem; min-height: 0;
+  }
+
+  .queue-item-card {
+    border-radius: 1rem; border: 1px solid #e2e8f0; background: #ffffff;
+    padding: 1rem; transition: all 0.15s ease;
+  }
+  .queue-item-card.is-first {
+    border-color: #7dd3fc; background: rgba(240, 249, 255, 0.6);
+    box-shadow: 0 0 0 1px #bae6fd;
+  }
+
+  .queue-item-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+  .queue-id-plate-group { display: flex; align-items: center; gap: 0.75rem; }
+  .queue-pos-circle {
+    display: flex; height: 2.25rem; width: 2.25rem; flex-shrink: 0; align-items: center;
+    justify-content: center; border-radius: 50%; font-size: 0.875rem; font-weight: 800;
+  }
+  .pos-first { background: #0284c7; color: #ffffff; }
+  .pos-subsequent { background: #f1f5f9; color: #64748b; }
+
+  .queue-plate-text { font-size: 1.25rem; font-weight: 700; letter-spacing: 0.05em; color: #0f172a; }
+  .queue-car-text { font-size: 0.875rem; font-weight: 700; color: #334155; }
+
+  .queue-tags-col { display: flex; flex-direction: column; align-items: flex-end; gap: 0.375rem; }
+  .star-next-pill {
+    display: inline-flex; align-items: center; gap: 0.25rem; border-radius: 0.375rem;
+    background: #0284c7; padding: 0.125rem 0.5rem; font-size: 0.625rem;
+    font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #ffffff;
+  }
+  .wait-time-pill {
+    display: flex; align-items: center; gap: 0.25rem; border-radius: 9999px;
+    padding: 0.125rem 0.625rem; font-size: 0.75rem; font-weight: 700;
+  }
+  .wait-normal { background: #f1f5f9; color: #64748b; }
+  .wait-warn { background: #fef3c7; color: #b45309; }
+  .wait-danger { background: #ffe4e6; color: #e11d48; }
+
+  .queue-service-pills-row {
+    margin-top: 0.625rem; display: flex; flex-wrap: wrap; gap: 0.375rem;
+  }
+  .service-tag {
+    border-radius: 0.375rem; background: #ffffff; padding: 0.125rem 0.5rem;
+    font-size: 0.75rem; font-weight: 600; color: #475569; border: 1px solid #e2e8f0;
+  }
+
+  .btn-queue-pull {
+    margin-top: 0.75rem; width: 100%; border-radius: 0.75rem; padding: 0.625rem;
+    font-size: 0.875rem; font-weight: 800; cursor: pointer; transition: all 0.15s;
+    border: none;
+  }
+  .btn-queue-pull.btn-first { background: #0284c7; color: #ffffff; }
+  .btn-queue-pull.btn-first:hover { background: #0369a1; }
+  .btn-queue-pull.btn-sub {
+    border: 1px solid #e2e8f0; background: #ffffff; color: #475569;
+  }
+  .btn-queue-pull.btn-sub:hover { background: #f8fafc; }
+
+  /* Queue Footer */
+  .queue-footer {
+    display: flex; align-items: center; gap: 0.75rem; border-top: 1px solid #f1f5f9;
+    padding: 1rem; flex-shrink: 0;
+  }
+  .btn-add-walkin {
+    flex: 1; border-radius: 0.75rem; border: 2px dashed #cbd5e1; background: transparent;
+    padding: 0.625rem; font-size: 0.875rem; font-weight: 700; color: #64748b;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .btn-add-walkin:hover { border-color: #38bdf8; color: #0284c7; }
+
+  .avg-wait-box {
+    border-radius: 0.75rem; background: #f8fafc; padding: 0.375rem 1rem; text-align: center;
+  }
+  .avg-wait-label { font-size: 0.625rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; }
+  .avg-wait-val { font-size: 0.875rem; font-weight: 800; color: #0f172a; }
+
+  /* Floating Toast Notification */
+  .toast-box {
+    position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+    border-radius: 9999px; background: #0f172a; padding: 0.75rem 1.25rem;
+    font-size: 0.875rem; font-weight: 700; color: #ffffff;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4); z-index: 100;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+</style>
+</head>
+
+<body>
+
+<div class="app-container" id="app">
+
+  <!-- HEADER -->
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="brand-icon">
+        <i class="fa-solid fa-droplet"></i>
+      </div>
+      <div class="brand-text">
+        <h1>WASH STATION</h1>
+        <p>Live bays &amp; queue monitoring</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <span class="pill-status">
+        <span class="pill-dot blink"></span>
+        <span id="txtInWash">2 in wash</span> &bull; <span id="txtAvailable">1 available</span>
+      </span>
+      <span class="pill-clock mono" id="clockDisplay">10:45:00</span>
+      <a href="index.html#washer" class="btn-pos-back">
+        <i class="fa-solid fa-arrow-left"></i> Back to POS
+      </a>
+    </div>
+  </header>
+
+  <!-- MAIN VIEWPORT -->
+  <main class="main-grid">
+
+    <!-- LEFT: BAYS -->
+    <section class="bays-section">
+      <div class="bays-grid-stack" id="baysContainer">
+        <!-- Rendered dynamically by JS -->
+      </div>
+    </section>
+
+    <!-- RIGHT: QUEUE -->
+    <section class="queue-section card">
+      <div class="queue-header">
+        <h2 class="queue-header-title">
+          <i class="fa-solid fa-list-ol" style="color: #f59e0b;"></i>
+          <span>Waiting Queue</span>
+        </h2>
+        <span class="queue-count-chip" id="queueCountChip">3 vehicles</span>
+      </div>
+
+      <div class="queue-items-container scroll-thin" id="queueContainer">
+        <!-- Rendered dynamically by JS -->
+      </div>
+
+      <div class="queue-footer">
+        <button class="btn-add-walkin" onclick="station.addWalkIn()">
+          <i class="fa-solid fa-plus mr-1"></i> Add Walk-in Vehicle
+        </button>
+        <div class="avg-wait-box">
+          <div class="avg-wait-label">Avg wait</div>
+          <div class="avg-wait-val" id="avgWaitDisplay">14 min</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Toast -->
+  <div class="toast-box" id="appToast" style="display: none;"></div>
+
+</div>
+
+<script>
+// Pure Vanilla State Engine (No CDNs, 100% CSP-Compliant & Offline-Ready)
+const station = {
+  stages: ['Pre-rinse', 'Foam', 'Scrub', 'Dry & Shine', 'QC'],
+  bays: [
+    { id: 1, status: 'service', plate: '2BQ-8899', car: 'Toyota Highlander (SUV)', service: 'Full Wash (Exterior + Interior) + Wax', elapsed: 16 * 60, target: 25, crew: 2, dual: false },
+    { id: 2, status: 'free', plate: null, car: null, service: null, elapsed: 0, target: 25, crew: 2, dual: false },
+    { id: 3, status: 'finished', plate: '2AF-1234', car: 'Mazda 3 (Sedan)', service: 'Wash finished • Needs Oil Change in Bay 4', note: 'Handoff pending', elapsed: 20 * 60, target: 20, crew: 2, dual: true },
+  ],
+  queue: [
+    { plate: '2AB-5566', car: 'Lexus RX350 (SUV)', services: ['Full Wash', 'Underbody Spray'], wait: 8 },
+    { plate: '2BC-7788', car: 'Toyota Prius (Sedan)', services: ['Exterior Foam Wash', 'Vacuum'], wait: 14 },
+    { plate: '2Z-9911', car: 'Ford Ranger (Pickup)', services: ['Heavy Dirt Degreasing', 'Wax'], wait: 19 },
+  ],
+  plateSeq: 9911,
+  _toastTimer: null,
+
+  init() {
+    this.render();
+    this.tick();
+    setInterval(() => {
+      this.tick();
+      this.bays.forEach(b => {
+        if (b.status === 'service') b.elapsed++;
+      });
+      this.updateTimersOnly();
+    }, 1000);
+  },
+
+  tick() {
+    const d = new Date();
+    const clockEl = document.getElementById('clockDisplay');
+    if (clockEl) {
+      clockEl.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    }
+  },
+
+  mmss(s) {
+    return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  },
+
+  pct(b) {
+    return b.status === 'finished' ? 100 : Math.min(99, Math.round((b.elapsed / (b.target * 60)) * 100));
+  },
+
+  step(b) {
+    return b.status === 'finished' ? 5 : Math.min(4, Math.floor(this.pct(b) / 20));
+  },
+
+  getFreeBay() {
+    return this.bays.find(b => b.status === 'free');
+  },
+
+  pullIn(bayId, queueIdx = 0) {
+    const bay = this.bays.find(b => b.id === bayId);
+    if (!bay || !this.queue.length) return;
+    const q = this.queue.splice(queueIdx, 1)[0];
+    Object.assign(bay, {
+      status: 'service',
+      plate: q.plate,
+      car: q.car,
+      service: q.services.join(' + '),
+      elapsed: 0,
+      target: 25,
+      crew: 2,
+      dual: false
+    });
+    this.say(q.plate + ' pulled into Bay ' + bay.id);
+    this.render();
+  },
+
+  complete(bayId) {
+    const bay = this.bays.find(b => b.id === bayId);
+    if (!bay) return;
+    if (bay.dual) {
+      bay.status = 'finished';
+      this.say('Wash complete, ready for handover');
+      this.render();
+      return;
+    }
+    this.free(bay, 'completed');
+  },
+
+  handover(bayId) {
+    const bay = this.bays.find(b => b.id === bayId);
+    if (!bay) return;
+    this.free(bay, 'handed over to Technical Bay 4');
+  },
+
+  free(bay, msg) {
+    this.say(bay.plate + ' ' + msg);
+    Object.assign(bay, { status: 'free', plate: null, car: null, service: null, elapsed: 0 });
+    this.render();
+  },
+
+  addWalkIn() {
+    const cars = ['Toyota Vios (Sedan)', 'Honda CR-V (SUV)', 'Isuzu D-Max (Pickup)', 'Suzuki Swift (Hatchback)', 'Ford Territory (SUV)'];
+    const svc = [['Exterior Wash'], ['Full Wash', 'Vacuum'], ['Foam Wash', 'Wax'], ['Wash', 'Tire Shine']];
+    this.plateSeq++;
+    this.queue.push({
+      plate: '2Z-' + this.plateSeq,
+      car: cars[Math.floor(Math.random() * cars.length)],
+      services: svc[Math.floor(Math.random() * svc.length)],
+      wait: 0
+    });
+    this.say('Walk-in vehicle added to queue');
+    this.render();
+  },
+
+  say(msg) {
+    const t = document.getElementById('appToast');
+    if (!t) return;
+    t.textContent = msg;
+    t.style.display = 'block';
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2400);
+  },
+
+  updateTimersOnly() {
+    this.bays.forEach(b => {
+      if (b.status === 'service') {
+        const el = document.getElementById('timer-val-' + b.id);
+        if (el) el.textContent = this.mmss(b.elapsed);
+
+        // Update stage track bars
+        const curStep = this.step(b);
+        for (let i = 0; i < 5; i++) {
+          const bar = document.getElementById(`sbar-${b.id}-${i}`);
+          const lbl = document.getElementById(`slbl-${b.id}-${i}`);
+          if (bar) {
+            bar.className = 'stage-bar ' + (i < curStep ? 'completed' : i === curStep ? 'active blink' : '');
+          }
+          if (lbl) {
+            lbl.className = 'stage-label ' + (i < curStep ? 'label-done' : i === curStep ? 'label-active' : '');
+          }
+        }
+      }
+    });
+  },
+
+  render() {
+    // 1. Header counts
+    const inWashCount = this.bays.filter(b => b.status !== 'free').length;
+    const availCount = this.bays.filter(b => b.status === 'free').length;
+    document.getElementById('txtInWash').textContent = `${inWashCount} in wash`;
+    document.getElementById('txtAvailable').textContent = `${availCount} available`;
+    const bc = document.getElementById('baysCount');
+    if (bc) bc.textContent = this.bays.length;
+
+    const freeBay = this.getFreeBay();
+    const readyHint = document.getElementById('readyBayHint');
+    if (readyHint) {
+      if (freeBay) {
+        readyHint.innerHTML = `<i class="fa-solid fa-circle-check"></i> Bay ${freeBay.id} ready to pull in`;
+        readyHint.style.display = 'inline';
+      } else {
+        readyHint.style.display = 'none';
+      }
+    }
+
+    // 2. Render Bays
+    const baysWrap = document.getElementById('baysContainer');
+    let baysHtml = '';
+    this.bays.forEach(b => {
+      const isFree = b.status === 'free';
+      const isFinished = b.status === 'finished';
+      const borderClass = isFinished ? 'border-finished' : isFree ? 'border-free' : 'border-service';
+      const accentClass = isFinished ? 'accent-finished' : isFree ? 'accent-free' : 'accent-service';
+      const tileClass = isFinished ? 'tile-finished' : isFree ? 'tile-free' : 'tile-service';
+      const chipClass = isFinished ? 'chip-finished' : isFree ? 'chip-free' : 'chip-service';
+      const chipIcon = isFinished ? 'fa-wrench' : isFree ? 'fa-circle-check' : 'fa-droplet';
+      const chipLabel = isFinished ? 'Ready for Tech' : isFree ? 'Available' : 'In Service';
+
+      // Middle content
+      let bodyHtml = '';
+      if (!isFree) {
+        let rightMeta = '';
+        if (b.status === 'service') {
+          rightMeta = `
+            <div class="timer-box">
+              <div class="timer-clock mono" id="timer-val-${b.id}">${this.mmss(b.elapsed)}</div>
+              <div class="timer-sub">of ${b.target} min target</div>
+            </div>
+          `;
+        } else {
+          rightMeta = `
+            <div class="timer-box">
+              <div class="done-badge"><i class="fa-solid fa-flag-checkered"></i> Done</div>
+              <div class="timer-sub">${b.note || 'Handoff ready'}</div>
+            </div>
+          `;
+        }
+
+        bodyHtml = `
+          <div class="bay-occupied-body">
+            <div class="plate-meta-group">
+              <div class="plate-badge-dark mono">${b.plate}</div>
+              <div class="vehicle-info">
+                <div class="vehicle-car">${b.car}</div>
+                <div class="vehicle-service">${b.service}</div>
+              </div>
+            </div>
+            ${rightMeta}
+          </div>
+        `;
+      } else {
+        const nextCar = this.queue.length ? this.queue[0] : null;
+        bodyHtml = `
+          <div class="bay-free-body">
+            <div class="free-check-circle"><i class="fa-solid fa-check"></i></div>
+            <div>
+              <div class="free-title">Bay is clean &amp; ready for vehicle</div>
+              <div class="free-subtitle">
+                ${nextCar ? `Next in line: <b class="mono" style="color: #0f172a;">${nextCar.plate}</b> &middot; ${nextCar.car}` : 'No vehicles waiting in queue'}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Stage tracker (only if not free)
+      let stageHtml = '';
+      if (!isFree) {
+        const curStep = this.step(b);
+        let stagesCol = '';
+        this.stages.forEach((stg, i) => {
+          let sBarClass = '';
+          let sLblClass = '';
+          if (isFinished) {
+            sBarClass = 'finished-all';
+            sLblClass = 'label-finished';
+          } else {
+            sBarClass = i < curStep ? 'completed' : i === curStep ? 'active blink' : '';
+            sLblClass = i < curStep ? 'label-done' : i === curStep ? 'label-active' : '';
+          }
+          stagesCol += `
+            <div class="stage-col">
+              <div class="stage-bar ${sBarClass}" id="sbar-${b.id}-${i}"></div>
+              <div class="stage-label ${sLblClass}" id="slbl-${b.id}-${i}">${stg}</div>
+            </div>
+          `;
+        });
+        stageHtml = `<div class="stage-tracker">${stagesCol}</div>`;
+      }
+
+      // Action buttons
+      let actionHtml = '';
+      if (b.status === 'service') {
+        actionHtml = `
+          <div class="bay-actions-row">
+            <button class="btn-complete-green" onclick="station.complete(${b.id})">
+              <i class="fa-solid fa-circle-check mr-1"></i> COMPLETE WASH &amp; QC
+            </button>
+            <button class="btn-crew-sub" onclick="station.say('Crew assigned: 2 washers')">
+              <i class="fa-solid fa-user-group mr-1"></i> ${b.crew}
+            </button>
+          </div>
+        `;
+      } else if (b.status === 'finished') {
+        actionHtml = `
+          <div class="bay-actions-row">
+            <button class="btn-handover-purple" onclick="station.handover(${b.id})">
+              <i class="fa-solid fa-paper-plane mr-1"></i> HANDOVER TO TECH BAY 4
+            </button>
+            <button class="btn-crew-sub" onclick="station.say('Wash report logged')">
+              <i class="fa-solid fa-clipboard"></i>
+            </button>
+          </div>
+        `;
+      } else {
+        const hasCars = this.queue.length > 0;
+        const btnText = hasCars ? `PULL IN NEXT: ${this.queue[0].plate}` : 'WAITING FOR VEHICLES';
+        actionHtml = `
+          <div class="bay-actions-row">
+            <button class="btn-pullin-blue" ${!hasCars ? 'disabled' : ''} onclick="station.pullIn(${b.id})">
+              <i class="fa-solid fa-right-to-bracket mr-1"></i> ${btnText}
+            </button>
+          </div>
+        `;
+      }
+
+      baysHtml += `
+        <article class="bay-article card ${borderClass}">
+          <span class="bay-accent-stripe ${accentClass}"></span>
+          
+          <div class="bay-top-row">
+            <div class="bay-id-group">
+              <div class="bay-tile ${tileClass}">${b.id}</div>
+              <div class="bay-title-box">
+                <div class="title">Bay ${b.id}</div>
+                <div class="subtitle">Wash Lane ${b.id}</div>
+              </div>
+            </div>
+            <span class="bay-chip ${chipClass}">
+              <i class="fa-solid ${chipIcon}"></i> <span>${chipLabel}</span>
+            </span>
+          </div>
+
+          ${bodyHtml}
+          ${stageHtml}
+          ${actionHtml}
+        </article>
+      `;
+    });
+    baysWrap.innerHTML = baysHtml;
+
+    // 3. Render Queue
+    document.getElementById('queueCountChip').textContent = `${this.queue.length} vehicles`;
+    const queueWrap = document.getElementById('queueContainer');
+    if (!this.queue.length) {
+      queueWrap.innerHTML = `
+        <div style="display:flex; height:100%; flex-direction:column; align-items:center; justify-content:center; color:#94a3b8; padding: 2rem 0;">
+          <i class="fa-solid fa-car-side" style="font-size:2rem; margin-bottom:0.5rem;"></i>
+          <span style="font-size:0.875rem; font-weight:600;">Queue is empty</span>
+        </div>
+      `;
+    } else {
+      let qHtml = '';
+      this.queue.forEach((q, i) => {
+        const isFirst = (i === 0);
+        const cardClass = isFirst ? 'is-first' : '';
+        const posClass = isFirst ? 'pos-first' : 'pos-subsequent';
+        const waitClass = q.wait >= 18 ? 'wait-danger' : q.wait >= 12 ? 'wait-warn' : 'wait-normal';
+
+        let servicesPills = '';
+        q.services.forEach(s => {
+          servicesPills += `<span class="service-tag">${s}</span>`;
+        });
+
+        let pullBtn = '';
+        if (freeBay) {
+          const btnClass = isFirst ? 'btn-first' : 'btn-sub';
+          pullBtn = `
+            <button class="btn-queue-pull ${btnClass}" onclick="station.pullIn(${freeBay.id}, ${i})">
+              <i class="fa-solid fa-arrow-left mr-1"></i> Pull into Free Bay ${freeBay.id}
+            </button>
+          `;
+        }
+
+        qHtml += `
+          <div class="queue-item-card ${cardClass}">
+            <div class="queue-item-top">
+              <div class="queue-id-plate-group">
+                <div class="queue-pos-circle ${posClass}">${i + 1}</div>
+                <div>
+                  <div class="queue-plate-text mono">${q.plate}</div>
+                  <div class="queue-car-text">${q.car}</div>
+                </div>
+              </div>
+              <div class="queue-tags-col">
+                ${isFirst ? '<span class="star-next-pill"><i class="fa-solid fa-star"></i> Next in line</span>' : ''}
+                <span class="wait-time-pill ${waitClass}">
+                  <i class="fa-regular fa-clock"></i> <span>${q.wait}m wait</span>
+                </span>
+              </div>
+            </div>
+            <div class="queue-service-pills-row">
+              ${servicesPills}
+            </div>
+            ${pullBtn}
+          </div>
+        `;
+      });
+      queueWrap.innerHTML = qHtml;
+    }
+
+    // 4. Avg Wait
+    const avgWait = this.queue.length ? Math.round(this.queue.reduce((s, q) => s + q.wait, 0) / this.queue.length) : 0;
+    document.getElementById('avgWaitDisplay').textContent = `${avgWait} min`;
+  }
+};
+
+window.addEventListener('DOMContentLoaded', () => {
+  station.init();
+});
+</script>
+
+</body>
+</html>

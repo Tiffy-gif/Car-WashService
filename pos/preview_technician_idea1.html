@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Technician Duty — Idea 1 (Split Command Center)</title>
+<link rel="stylesheet" href="css/font-awesome.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #f4f6fa;
+    color: #1e293b;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+  .scroll-thin::-webkit-scrollbar { width: 6px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; }
+  .card { box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.08); }
+
+  /* App Shell */
+  .app-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  @media (min-width: 1024px) {
+    .app-container { height: 100vh; overflow: hidden; }
+  }
+
+  /* Header */
+  .app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #e2e8f0;
+    background: #ffffff;
+    padding: 0.75rem 1.5rem;
+    flex-shrink: 0;
+  }
+  .header-brand { display: flex; align-items: center; gap: 0.75rem; }
+  .brand-icon {
+    display: flex; height: 2.5rem; width: 2.5rem; align-items: center; justify-content: center;
+    border-radius: 0.75rem; background: linear-gradient(135deg, #0ea5e9, #2563eb);
+    color: #ffffff; box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3); font-size: 1.15rem;
+  }
+  .brand-text h1 { font-size: 1rem; font-weight: 800; line-height: 1.2; letter-spacing: 0.04em; color: #0f172a; }
+  .brand-text p { font-size: 0.75rem; font-weight: 500; color: #64748b; }
+
+  .header-actions { display: flex; align-items: center; gap: 0.75rem; }
+  .pill-tech-status {
+    display: flex; align-items: center; gap: 0.5rem; border-radius: 9999px;
+    background: #ecfdf5; padding: 0.375rem 0.875rem; font-size: 0.75rem; font-weight: 700;
+    color: #047857; border: 1px solid #a7f3d0;
+  }
+  .pill-dot { height: 0.5rem; width: 0.5rem; border-radius: 50%; background: #10b981; }
+  .pill-clock {
+    border-radius: 9999px; background: #f1f5f9; padding: 0.375rem 0.875rem;
+    font-size: 0.75rem; font-weight: 700; color: #475569;
+  }
+  .btn-pos-back {
+    display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 0.5rem;
+    border: 1px solid #e2e8f0; background: #ffffff; padding: 0.5rem 1rem;
+    font-size: 0.75rem; font-weight: 700; color: #0f172a; text-decoration: none;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .btn-pos-back:hover { background: #f8fafc; }
+
+  /* Main Workspace 2-Column Grid */
+  .workspace-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    flex: 1;
+    min-height: 0;
+  }
+  @media (min-width: 1024px) {
+    .workspace-grid {
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.85fr);
+      overflow: hidden;
+    }
+  }
+
+  /* LEFT COLUMN: Bay 4 Lift + Waiting from Wash */
+  .left-column {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  /* Bay 4 Lift Status Card */
+  .bay4-card {
+    border-radius: 1rem;
+    border: 1.5px solid #fed7aa;
+    background: #ffffff;
+    padding: 1.1rem;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04);
+  }
+  .bay4-card.is-active { border-color: #fdba74; background: linear-gradient(180deg, #fffaf5 0%, #ffffff 100%); }
+  .bay4-accent-stripe {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: #ea580c;
+  }
+
+  .bay4-top {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;
+  }
+  .bay4-id-group { display: flex; align-items: center; gap: 0.65rem; }
+  .bay4-tile {
+    height: 2.25rem; width: 2.25rem; border-radius: 0.6rem; background: #ffedd5;
+    color: #c2410c; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 0.95rem;
+  }
+  .bay4-title { font-size: 0.95rem; font-weight: 800; color: #0f172a; }
+  .bay4-sub { font-size: 0.75rem; font-weight: 600; color: #ea580c; text-transform: uppercase; letter-spacing: 0.05em; }
+  .bay4-chip {
+    display: inline-flex; align-items: center; gap: 0.35rem; border-radius: 9999px;
+    padding: 0.25rem 0.65rem; font-size: 0.72rem; font-weight: 800;
+  }
+  .chip-lift-busy { background: #ffedd5; color: #c2410c; border: 1px solid #fed7aa; }
+  .chip-lift-free { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+
+  .bay4-car-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+    padding: 0.75rem 0; border-top: 1px solid #f1f5f9; border-bottom: 1px solid #f1f5f9;
+  }
+  .plate-box {
+    display: inline-block; background: #0f172a; color: #ffffff; font-weight: 800;
+    font-size: 1.15rem; padding: 0.35rem 0.85rem; border-radius: 0.5rem; letter-spacing: 0.05em;
+  }
+  .bay4-car-info .model { font-size: 0.875rem; font-weight: 700; color: #1e293b; }
+  .bay4-car-info .svc { font-size: 0.75rem; color: #64748b; }
+
+  .bay4-meta-row {
+    display: flex; align-items: center; justify-content: space-between; margin-top: 0.75rem;
+    font-size: 0.75rem; color: #64748b; font-weight: 600;
+  }
+  .timer-pill {
+    display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; font-weight: 800; color: #ea580c;
+  }
+
+  /* Handover Queue Section */
+  .handover-section {
+    border-radius: 1rem;
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 280px;
+  }
+  .handover-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.85rem 1.1rem; border-bottom: 1px solid #f1f5f9; flex-shrink: 0;
+  }
+  .handover-title {
+    display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem;
+    font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b;
+  }
+  .handover-badge {
+    border-radius: 9999px; background: #e0f2fe; color: #0284c7; padding: 0.2rem 0.65rem;
+    font-size: 0.75rem; font-weight: 800; border: 1px solid #bae6fd;
+  }
+
+  .handover-list {
+    flex: 1; overflow-y: auto; padding: 0.85rem; display: flex; flex-direction: column; gap: 0.65rem;
+  }
+  .handover-card {
+    border-radius: 0.75rem; border: 1px solid #e2e8f0; background: #ffffff; padding: 0.85rem;
+    transition: all 0.15s ease;
+  }
+  .handover-card:hover { border-color: #38bdf8; box-shadow: 0 4px 12px rgba(14, 165, 233, 0.08); }
+  .handover-card.is-urgent { border-left: 4px solid #f59e0b; }
+  .handover-card-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 0.4rem; }
+  .handover-plate { font-size: 1rem; font-weight: 800; color: #0f172a; }
+  .handover-tag {
+    font-size: 0.68rem; font-weight: 700; border-radius: 0.35rem; padding: 0.15rem 0.45rem;
+    background: #e0f2fe; color: #0369a1; text-transform: uppercase;
+  }
+  .handover-desc { font-size: 0.82rem; font-weight: 700; color: #334155; margin-bottom: 0.2rem; }
+  .handover-cust { font-size: 0.72rem; color: #94a3b8; }
+  .btn-receive-car {
+    width: 100%; margin-top: 0.65rem; border-radius: 0.6rem; background: #0284c7;
+    color: #ffffff; border: none; padding: 0.55rem; font-size: 0.78rem; font-weight: 800;
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+    transition: background 0.15s;
+  }
+  .btn-receive-car:hover { background: #0369a1; }
+
+  /* RIGHT COLUMN: Active Technical Workstation */
+  .right-column {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .workstation-card {
+    border-radius: 1rem;
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Workstation Top Action Bar */
+  .workstation-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid #f1f5f9;
+    background: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    flex-shrink: 0;
+  }
+  .workstation-vehicle { display: flex; align-items: center; gap: 0.85rem; }
+  .workstation-plate {
+    background: #0f172a; color: #ffffff; font-weight: 800; font-size: 1.35rem;
+    padding: 0.4rem 1rem; border-radius: 0.6rem; letter-spacing: 0.05em;
+  }
+  .workstation-titles h2 { font-size: 1.05rem; font-weight: 800; color: #0f172a; }
+  .workstation-titles p { font-size: 0.78rem; color: #64748b; font-weight: 500; }
+
+  .workstation-actions { display: flex; align-items: center; gap: 0.5rem; }
+  .btn-request-parts {
+    border-radius: 0.65rem; border: 1.5px solid #cbd5e1; background: #ffffff;
+    padding: 0.6rem 1rem; font-size: 0.82rem; font-weight: 700; color: #334155;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 0.4rem; transition: all 0.15s;
+  }
+  .btn-request-parts:hover { background: #f8fafc; border-color: #94a3b8; }
+  .btn-finish-tech {
+    border-radius: 0.65rem; background: #059669; border: none;
+    padding: 0.6rem 1.25rem; font-size: 0.82rem; font-weight: 800; color: #ffffff;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 0.4rem;
+    box-shadow: 0 2px 6px rgba(5, 150, 105, 0.25); transition: background 0.15s;
+  }
+  .btn-finish-tech:hover { background: #047857; }
+
+  /* Workstation Body Tabs / Sections */
+  .workstation-body {
+    flex: 1; overflow-y: auto; padding: 1.1rem; display: flex; flex-direction: column; gap: 1rem;
+  }
+
+  /* Section Box */
+  .section-box {
+    border-radius: 0.85rem; border: 1px solid #e2e8f0; background: #f8fafc; padding: 1rem;
+  }
+  .section-box-header {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;
+  }
+  .section-box-title {
+    display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem;
+    font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+
+  /* Task Steps */
+  .task-item-row {
+    display: flex; align-items: center; justify-content: space-between;
+    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 0.65rem;
+    padding: 0.75rem 1rem; margin-bottom: 0.5rem; transition: border 0.15s;
+  }
+  .task-item-row.is-done { background: #f0fdf4; border-color: #bbf7d0; }
+  .task-item-left { display: flex; align-items: center; gap: 0.65rem; }
+  .task-step-num {
+    height: 1.75rem; width: 1.75rem; border-radius: 50%; background: #e2e8f0;
+    display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 800;
+  }
+  .task-item-row.is-done .task-step-num { background: #10b981; color: #ffffff; }
+  .task-title-text { font-size: 0.875rem; font-weight: 700; color: #1e293b; }
+  .task-lane-text { font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; }
+
+  .btn-task-action {
+    border-radius: 0.5rem; padding: 0.4rem 0.85rem; font-size: 0.75rem; font-weight: 800;
+    cursor: pointer; border: none; display: inline-flex; align-items: center; gap: 0.35rem;
+  }
+  .btn-task-start { background: #0284c7; color: #ffffff; }
+  .btn-task-start:hover { background: #0369a1; }
+  .btn-task-finish { background: #059669; color: #ffffff; }
+  .btn-task-finish:hover { background: #047857; }
+  .task-completed-badge {
+    font-size: 0.75rem; font-weight: 800; color: #059669; display: inline-flex; align-items: center; gap: 0.3rem;
+  }
+
+  /* Guided Inspection Checklist Grid */
+  .btn-quick-pass {
+    border-radius: 0.5rem; border: 1.5px solid #86efac; background: #f0fdf4;
+    color: #166534; padding: 0.35rem 0.85rem; font-size: 0.75rem; font-weight: 800;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 0.35rem; transition: all 0.15s;
+  }
+  .btn-quick-pass:hover { background: #dcfce7; }
+
+  .checklist-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+  @media (min-width: 640px) {
+    .checklist-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  .chk-card {
+    border-radius: 0.75rem; border: 1.5px solid #e2e8f0; background: #ffffff;
+    padding: 0.85rem; transition: all 0.15s ease;
+  }
+  .chk-card.status-pass { border-color: #86efac; background: #f0fdf4; }
+  .chk-card.status-caution { border-color: #fde047; background: #fefce8; }
+  .chk-card.status-fail { border-color: #fca5a5; background: #fef2f2; }
+
+  .chk-card-top {
+    display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 0.6rem;
+  }
+  .chk-name { font-size: 0.875rem; font-weight: 800; color: #0f172a; }
+  .chk-sub { font-size: 0.72rem; color: #64748b; margin-top: 1px; }
+
+  /* 3 Status Buttons */
+  .chk-status-group { display: flex; gap: 3px; }
+  .btn-status-pill {
+    padding: 0.3rem 0.65rem; border-radius: 0.4rem; font-size: 0.72rem; font-weight: 800;
+    border: 1px solid #cbd5e1; background: #ffffff; color: #475569; cursor: pointer;
+    transition: all 0.1s;
+  }
+  .btn-status-pill:hover { background: #f1f5f9; }
+  .btn-status-pill.active-pass { background: #16a34a; border-color: #15803d; color: #ffffff; }
+  .btn-status-pill.active-caution { background: #f59e0b; border-color: #d97706; color: #ffffff; }
+  .btn-status-pill.active-fail { background: #ef4444; border-color: #dc2626; color: #ffffff; }
+
+  .chk-bottom-row {
+    display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;
+  }
+  .chk-input {
+    flex: 1; height: 32px; border-radius: 0.4rem; border: 1px solid #cbd5e1;
+    padding: 0 0.5rem; font-size: 0.78rem; font-weight: 600; background: #ffffff;
+  }
+  .chk-input:focus { outline: none; border-color: #0284c7; }
+  .btn-camera {
+    height: 32px; padding: 0 0.65rem; border-radius: 0.4rem; border: 1px solid #cbd5e1;
+    background: #ffffff; font-size: 0.75rem; font-weight: 700; color: #475569;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 0.3rem;
+  }
+  .btn-camera:hover { background: #f1f5f9; }
+
+  /* Toast Notification */
+  .toast {
+    position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+    background: #0f172a; color: #ffffff; padding: 0.65rem 1.25rem; border-radius: 9999px;
+    font-size: 0.82rem; font-weight: 700; z-index: 1000; box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="app-container">
+
+  <!-- HEADER -->
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="brand-icon">
+        <i class="fa-solid fa-wrench"></i>
+      </div>
+      <div class="brand-text">
+        <h1>TECHNICAL &amp; OIL SERVICE</h1>
+        <p>Bay 4 lift &amp; vehicle inspection cockpit</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <span class="pill-tech-status">
+        <span class="pill-dot"></span>
+        <span id="techLiftStatus">Bay 4 Occupied &bull; 1 in service</span>
+      </span>
+      <span class="pill-clock mono" id="clockDisplay">11:30:00</span>
+      <a href="index.html#mechanic" class="btn-pos-back">
+        <i class="fa-solid fa-arrow-left"></i> Back to POS
+      </a>
+    </div>
+  </header>
+
+  <!-- MAIN 2-COLUMN WORKSPACE -->
+  <main class="workspace-grid">
+
+    <!-- LEFT: BAY 4 LIFT + WAITING FROM WASH -->
+    <section class="left-column">
+
+      <!-- Bay 4 Lift Card -->
+      <div class="bay4-card is-active card" id="bay4StatusCard">
+        <span class="bay4-accent-stripe"></span>
+        <div class="bay4-top">
+          <div class="bay4-id-group">
+            <div class="bay4-tile">4</div>
+            <div>
+              <div class="bay4-title">Technical Service Bay</div>
+              <div class="bay4-sub">Vehicle Lift 1</div>
+            </div>
+          </div>
+          <span class="bay4-chip chip-lift-busy" id="liftChip">
+            <i class="fa-solid fa-gear fa-spin"></i> In Service
+          </span>
+        </div>
+
+        <div class="bay4-car-row">
+          <div class="plate-box mono" id="activeLiftPlate">W-4577</div>
+          <div class="bay4-car-info">
+            <div class="model" id="activeLiftModel">Lexus RX350 (SUV)</div>
+            <div class="svc" id="activeLiftSvc">Engine Oil 5W-30 + Tire Balance</div>
+          </div>
+        </div>
+
+        <div class="bay4-meta-row">
+          <span class="timer-pill mono" id="liftTimerVal">
+            <i class="fa-regular fa-clock"></i> 18:42 / 30m target
+          </span>
+          <span style="color: #64748b;">
+            Tech: <strong>Dona</strong> &bull; Oil: <strong>4.2L Synthetic</strong>
+          </span>
+        </div>
+      </div>
+
+      <!-- Waiting Handover List (From Wash) -->
+      <div class="handover-section card">
+        <div class="handover-header">
+          <h2 class="handover-title">
+            <i class="fa-solid fa-handshake" style="color: #0284c7;"></i>
+            <span>Waiting from Wash</span>
+          </h2>
+          <span class="handover-badge" id="handoverCountBadge">2 vehicles</span>
+        </div>
+
+        <div class="handover-list scroll-thin" id="handoverList">
+          <!-- Item 1 -->
+          <div class="handover-card is-urgent">
+            <div class="handover-card-top">
+              <span class="handover-plate mono">2AF-1234</span>
+              <span class="handover-tag">Wash Finished</span>
+            </div>
+            <div class="handover-desc">Mazda 3 (Sedan) &bull; Oil &amp; Filter Change</div>
+            <div class="handover-cust">Guest &bull; Waiting 8 mins after wash</div>
+            <button type="button" class="btn-receive-car" onclick="techApp.receiveCar('2AF-1234', 'Mazda 3', 'Oil & Filter Change')">
+              <i class="fa-solid fa-arrow-right"></i> Receive to Lift Bay 4
+            </button>
+          </div>
+
+          <!-- Item 2 -->
+          <div class="handover-card">
+            <div class="handover-card-top">
+              <span class="handover-plate mono">2Z-9911</span>
+              <span class="handover-tag">Wash Finished</span>
+            </div>
+            <div class="handover-desc">Ford Ranger (Pickup) &bull; Brake Fluid Check</div>
+            <div class="handover-cust">Guest &bull; Waiting 4 mins after wash</div>
+            <button type="button" class="btn-receive-car" onclick="techApp.receiveCar('2Z-9911', 'Ford Ranger', 'Brake Fluid Check')">
+              <i class="fa-solid fa-arrow-right"></i> Receive to Lift Bay 4
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- RIGHT: ACTIVE JOB EXECUTION WORKSTATION -->
+    <section class="right-column">
+      <div class="workstation-card card">
+
+        <!-- Top Header Action Bar -->
+        <div class="workstation-header">
+          <div class="workstation-vehicle">
+            <div class="workstation-plate mono" id="wsPlate">W-4577</div>
+            <div class="workstation-titles">
+              <h2 id="wsTitle">Lexus RX350 &bull; Full Synthetic Oil Service</h2>
+              <p id="wsSub">Order #ORD-261112-006 &bull; Bay 4 Lift &bull; Customer: Paid Token Test Guest</p>
+            </div>
+          </div>
+          <div class="workstation-actions">
+            <button type="button" class="btn-request-parts" onclick="techApp.requestParts()">
+              <i class="fa-solid fa-boxes-packing text-primary"></i> Request Parts
+            </button>
+            <button type="button" class="btn-finish-tech" onclick="techApp.finishJob()">
+              <i class="fa-solid fa-circle-check"></i> Complete &amp; Handover
+            </button>
+          </div>
+        </div>
+
+        <div class="workstation-body scroll-thin">
+
+          <!-- 1. Tasks in Progress -->
+          <div class="section-box">
+            <div class="section-box-header">
+              <h3 class="section-box-title">
+                <i class="fa-solid fa-list-check" style="color: #0284c7;"></i>
+                <span>Tasks in Progress</span>
+              </h3>
+              <span style="font-size: 0.75rem; font-weight: 700; color: #0284c7;" id="tasksProgressText">1 of 3 Completed</span>
+            </div>
+
+            <!-- Task 1 -->
+            <div class="task-item-row is-done" id="taskRow1">
+              <div class="task-item-left">
+                <div class="task-step-num"><i class="fa-solid fa-check"></i></div>
+                <div>
+                  <div class="task-title-text">Engine Oil Drain &amp; Filter Replacement</div>
+                  <div class="task-lane-text">Lane 1 &bull; 4.2L Synthetic 5W-30</div>
+                </div>
+              </div>
+              <span class="task-completed-badge"><i class="fa-solid fa-circle-check"></i> Done</span>
+            </div>
+
+            <!-- Task 2 -->
+            <div class="task-item-row" id="taskRow2">
+              <div class="task-item-left">
+                <div class="task-step-num">2</div>
+                <div>
+                  <div class="task-title-text">Tire Pressure &amp; Wheel Balance Check</div>
+                  <div class="task-lane-text">Lane 1 &bull; Target: 32 PSI all around</div>
+                </div>
+              </div>
+              <button type="button" class="btn-task-action btn-task-finish" id="btnTask2" onclick="techApp.toggleTask(2)">
+                <i class="fa-solid fa-check"></i> Mark Finish
+              </button>
+            </div>
+
+            <!-- Task 3 -->
+            <div class="task-item-row" id="taskRow3">
+              <div class="task-item-left">
+                <div class="task-step-num">3</div>
+                <div>
+                  <div class="task-title-text">Brake Fluid &amp; Coolant Inspection</div>
+                  <div class="task-lane-text">Lane 1 &bull; Fluid Reservoir Check</div>
+                </div>
+              </div>
+              <button type="button" class="btn-task-action btn-task-start" id="btnTask3" onclick="techApp.toggleTask(3)">
+                <i class="fa-solid fa-play"></i> Start Task
+              </button>
+            </div>
+          </div>
+
+          <!-- 2. Guided Safety Inspection Checklist -->
+          <div class="section-box">
+            <div class="section-box-header">
+              <div style="display: flex; align-items: center; gap: 0.6rem;">
+                <h3 class="section-box-title">
+                  <i class="fa-solid fa-clipboard-check" style="color: #059669;"></i>
+                  <span>Guided Safety Checklist</span>
+                </h3>
+                <span style="border-radius: 9999px; background: #ecfdf5; color: #047857; font-size: 0.72rem; font-weight: 800; padding: 2px 8px; border: 1px solid #a7f3d0;" id="chkSummaryBadge">
+                  6/8 Passed
+                </span>
+              </div>
+              <button type="button" class="btn-quick-pass" onclick="techApp.quickPassAll()">
+                <i class="fa-solid fa-check-double"></i> Quick Pass All
+              </button>
+            </div>
+
+            <div class="checklist-grid" id="chkGrid">
+              <!-- Item 1: Brake Pad -->
+              <div class="chk-card status-pass" id="chk-1">
+                <div class="chk-card-top">
+                  <div>
+                    <div class="chk-name">Brake Pad Thickness *</div>
+                    <div class="chk-sub">Minimum safe thickness 3.0mm</div>
+                  </div>
+                  <div class="chk-status-group">
+                    <button class="btn-status-pill active-pass" onclick="techApp.setChk(1, 'pass')">Pass</button>
+                    <button class="btn-status-pill" onclick="techApp.setChk(1, 'caution')">Warn</button>
+                    <button class="btn-status-pill" onclick="techApp.setChk(1, 'fail')">Fail</button>
+                  </div>
+                </div>
+                <div class="chk-bottom-row">
+                  <input type="text" class="chk-input" value="6.5 mm" placeholder="Measurement...">
+                  <button class="btn-camera" onclick="techApp.say('Photo attached')"><i class="fa-solid fa-camera"></i></button>
+                </div>
+              </div>
+
+              <!-- Item 2: Battery -->
+              <div class="chk-card status-pass" id="chk-2">
+                <div class="chk-card-top">
+                  <div>
+                    <div class="chk-name">Battery Health &amp; Voltage *</div>
+                    <div class="chk-sub">Standard 12.4V - 12.8V</div>
+                  </div>
+                  <div class="chk-status-group">
+                    <button class="btn-status-pill active-pass" onclick="techApp.setChk(2, 'pass')">Pass</button>
+                    <button class="btn-status-pill" onclick="techApp.setChk(2, 'caution')">Warn</button>
+                    <button class="btn-status-pill" onclick="techApp.setChk(2, 'fail')">Fail</button>
+                  </div>
+                </div>
+                <div class="chk-bottom-row">
+                  <input type="text" class="chk-input" value="12.6 V" placeholder="Measurement...">
+                  <button class="btn-camera" onclick="techApp.say('Photo attached')"><i class="fa-solid fa-camera"></i></button>
+                </div>
+              </div>
+
+              <!-- Item 3: Tire Tread Depth -->
+              <div class="chk-card status-pass" id="chk-3">
+                <div class="chk-card-top">
+                  <div>
+                    <div class="chk-name">Tire Tread Depth *</div>
+                    <div class="chk-sub">Minimum safe 2.5mm</div>
+                  </div>
+                  <div class="chk-status-group">
+                    <button class="btn-status-pill active-pass" onclick="techApp.setChk(3, 'pass')">Pass</button>
+                    <button class="btn-status-pill" onclick="techApp.setChk(3, 'caution')">Warn</button>
+                    <button class="btn-status-pill" onclick="techApp.setChk(3, 'fail')">Fail</button>
+                  </div>
+                </div>
+                <div class="chk-bottom-row">
+                  <input type="text" class="chk-input" value="5.2 mm" placeholder="Measurement...">
+                  <button class="btn-camera" onclick="techApp.say('Photo attached')"><i class="fa-solid fa-camera"></i></button>
+                </div>
+              </div>
+
+              <!-- Item 4: Oil Leak Check -->
+              <div class="chk-card status-pass" id="chk-4">
+                <div class="chk-card-top">
+                  <div>
+                    <div class="chk-name">Underbody Oil Leak Check *</div>
+                    <div class="chk-sub">Oil pan &amp; drain plug inspection</div>
+                  </div>
+                  <div class="chk-status-group">
+                    <button class="btn-status-pill active-pass" onclick="techApp.setChk(4, 'pass')">Pass</button>
+                    <button class="btn-status-pill" onclick="techApp.setChk(4, 'caution')">Warn</button>
+                    <button class="btn-status-pill" onclick="techApp.setChk(4, 'fail')">Fail</button>
+                  </div>
+                </div>
+                <div class="chk-bottom-row">
+                  <input type="text" class="chk-input" value="Clean / Dry" placeholder="Notes...">
+                  <button class="btn-camera" onclick="techApp.say('Photo attached')"><i class="fa-solid fa-camera"></i></button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="toast" id="appToast"></div>
+</div>
+
+<script>
+// Pure Vanilla Interactive Engine for Idea 1
+const techApp = {
+  toastTimer: null,
+  tasks: { 1: 'done', 2: 'working', 3: 'idle' },
+  checklists: { 1: 'pass', 2: 'pass', 3: 'pass', 4: 'pass' },
+
+  init() {
+    this.tick();
+    setInterval(() => this.tick(), 1000);
+  },
+
+  tick() {
+    const d = new Date();
+    const el = document.getElementById('clockDisplay');
+    if (el) el.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  },
+
+  say(msg) {
+    const t = document.getElementById('appToast');
+    if (!t) return;
+    t.textContent = msg;
+    t.style.display = 'block';
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2200);
+  },
+
+  toggleTask(id) {
+    const row = document.getElementById('taskRow' + id);
+    const btn = document.getElementById('btnTask' + id);
+    if (this.tasks[id] === 'idle') {
+      this.tasks[id] = 'working';
+      btn.className = 'btn-task-action btn-task-finish';
+      btn.innerHTML = '<i class="fa-solid fa-check"></i> Mark Finish';
+      this.say('Task started');
+    } else {
+      this.tasks[id] = 'done';
+      row.className = 'task-item-row is-done';
+      row.querySelector('.task-step-num').innerHTML = '<i class="fa-solid fa-check"></i>';
+      btn.outerHTML = '<span class="task-completed-badge"><i class="fa-solid fa-circle-check"></i> Done</span>';
+      this.say('Task completed');
+    }
+  },
+
+  setChk(id, status) {
+    this.checklists[id] = status;
+    const card = document.getElementById('chk-' + id);
+    if (!card) return;
+    card.className = 'chk-card status-' + status;
+    const pills = card.querySelectorAll('.btn-status-pill');
+    pills[0].className = 'btn-status-pill' + (status === 'pass' ? ' active-pass' : '');
+    pills[1].className = 'btn-status-pill' + (status === 'caution' ? ' active-caution' : '');
+    pills[2].className = 'btn-status-pill' + (status === 'fail' ? ' active-fail' : '');
+    this.say('Item ' + id + ' set to ' + status.toUpperCase());
+  },
+
+  quickPassAll() {
+    [1, 2, 3, 4].forEach(id => this.setChk(id, 'pass'));
+    this.say('All items marked PASS');
+  },
+
+  requestParts() {
+    this.say('Parts requisition modal opened: Oil Filter 90915-YZZD1');
+  },
+
+  finishJob() {
+    this.say('Technical Job Complete! Ready for QC Inspection');
+  },
+
+  receiveCar(plate, car, svc) {
+    document.getElementById('activeLiftPlate').textContent = plate;
+    document.getElementById('activeLiftModel').textContent = car;
+    document.getElementById('activeLiftSvc').textContent = svc;
+    document.getElementById('wsPlate').textContent = plate;
+    document.getElementById('wsTitle').textContent = car + ' • ' + svc;
+    this.say(plate + ' received to Lift Bay 4');
+  }
+};
+
+window.addEventListener('DOMContentLoaded', () => techApp.init());
+</script>
+
+</body>
+</html>
+

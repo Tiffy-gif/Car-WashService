@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Idea 3: Rugged High-Contrast Touch Cockpit | Car Wash POS</title>
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/font-awesome.min.css">
+    <style>
+        :root {
+            --primary: #0284c7;
+            --success: #15803d;
+            --warning: #b45309;
+            --danger: #b91c1c;
+            --bg-body: #0f172a; /* Dark tactical backdrop for outdoor glare */
+            --bg-card: #1e293b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+
+        body {
+            font-family: 'Inter', 'Kantumruy Pro', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .preview-top-nav {
+            background: #1e293b;
+            border-bottom: 2px solid var(--border);
+            padding: 0.85rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .preview-badge {
+            background: #fef08a;
+            color: #854d0e;
+            font-size: 0.75rem;
+            font-weight: 900;
+            padding: 0.3rem 0.75rem;
+            border-radius: 9999px;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            text-transform: uppercase;
+        }
+
+        .main-container {
+            max-width: 1480px;
+            margin: 0 auto;
+            padding: 1.25rem 1.5rem;
+        }
+
+        /* Tactical Header Bar */
+        .tactical-bar {
+            background: #1e293b;
+            border: 2px solid #334155;
+            border-radius: 14px;
+            padding: 1rem 1.5rem;
+            margin-bottom: 1.25rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        /* 65% / 35% Split */
+        .tactical-grid {
+            display: grid;
+            grid-template-columns: 1.5fr 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        @media (max-width: 1100px) {
+            .tactical-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* High-Contrast Bay Cards */
+        .bay-rugged-card {
+            background: #1e293b;
+            border: 2.5px solid #334155;
+            border-radius: 16px;
+            padding: 1.35rem;
+            margin-bottom: 1.15rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            position: relative;
+        }
+
+        .bay-rugged-card.active-wash {
+            border-color: #38bdf8;
+            background: linear-gradient(145deg, #1e293b, #0f172a);
+        }
+
+        .bay-rugged-card.free-ready {
+            border-color: #4ade80;
+            background: linear-gradient(145deg, #1e293b, #14532d20);
+        }
+
+        .bay-rugged-card.handoff {
+            border-color: #c084fc;
+            background: linear-gradient(145deg, #1e293b, #581c8720);
+        }
+
+        .rugged-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .rugged-bay-title {
+            font-size: 1.25rem;
+            font-weight: 900;
+            letter-spacing: -0.01em;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .rugged-plate-box {
+            background: #090d16;
+            border: 2px solid #475569;
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.15rem;
+        }
+
+        .rugged-plate-text {
+            font-family: monospace;
+            font-size: 2rem;
+            font-weight: 900;
+            color: #38bdf8;
+            letter-spacing: 0.08em;
+            text-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+        }
+
+        .big-timer-clock {
+            font-family: monospace;
+            font-size: 1.6rem;
+            font-weight: 900;
+            color: #f8fafc;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        /* Giant Touch Buttons */
+        .btn-giant-touch {
+            width: 100%;
+            height: 58px;
+            font-size: 1.05rem;
+            font-weight: 900;
+            border-radius: 12px;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            transition: transform 0.1s ease, filter 0.15s ease;
+        }
+
+        .btn-giant-touch:active {
+            transform: scale(0.98);
+        }
+
+        .btn-green-giant {
+            background: #22c55e;
+            color: #052e16;
+            box-shadow: 0 4px 14px rgba(34, 197, 94, 0.4);
+        }
+
+        .btn-blue-giant {
+            background: #0284c7;
+            color: #ffffff;
+            box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4);
+        }
+
+        .btn-purple-giant {
+            background: #a855f7;
+            color: #ffffff;
+            box-shadow: 0 4px 14px rgba(168, 85, 247, 0.4);
+        }
+
+        /* Right Column Queue */
+        .rugged-queue-panel {
+            background: #1e293b;
+            border: 2px solid #334155;
+            border-radius: 16px;
+            padding: 1.25rem;
+            position: sticky;
+            top: 5rem;
+        }
+
+        .rugged-queue-item {
+            background: #090d16;
+            border: 2px solid #334155;
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 0.85rem;
+            position: relative;
+        }
+
+        .rugged-queue-item.first-next {
+            border-color: #38bdf8;
+            box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);
+        }
+
+        .q-number-big {
+            font-size: 1.75rem;
+            font-weight: 900;
+            color: #64748b;
+            line-height: 1;
+            margin-right: 0.75rem;
+        }
+
+        .q-number-big.first {
+            color: #38bdf8;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Preview Top Nav -->
+    <header class="preview-top-nav">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <a href="preview_washer_showcase.html" style="text-decoration: none; color: #94a3b8; font-size: 0.9rem; font-weight: 700;">
+                <i class="fa-solid fa-arrow-left"></i> All Ideas
+            </a>
+            <span style="color: #475569;">|</span>
+            <span class="preview-badge"><i class="fa-solid fa-sun"></i> Idea 3: Rugged High-Contrast Cockpit</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span style="font-size: 0.82rem; color: #94a3b8;"><i class="fa-solid fa-tablet-screen-button"></i> 58px Glove Touch Targets</span>
+            <a href="index.html#washer" class="btn btn-sm btn-outline" style="text-decoration: none; font-size: 0.82rem; font-weight: 700; padding: 0.35rem 0.85rem; color: white; border-color: #475569;">
+                Back to POS
+            </a>
+        </div>
+    </header>
+
+    <div class="main-container">
+        
+        <!-- Tactical Header -->
+        <div class="tactical-bar">
+            <div>
+                <h1 style="font-size: 1.35rem; font-weight: 900; margin: 0; color: #f8fafc; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fa-solid fa-shield-halved" style="color: #38bdf8;"></i>
+                    <span>Apron Touch Cockpit • High Contrast Mode</span>
+                </h1>
+                <p style="margin: 0.25rem 0 0 0; font-size: 0.85rem; color: #94a3b8;">
+                    High readability under daylight glare with oversized 2rem license plates & glove-friendly buttons.
+                </p>
+            </div>
+            <div style="display: flex; gap: 0.75rem; align-items: center;">
+                <span style="background: #14532d; color: #4ade80; border: 1px solid #22c55e; padding: 0.4rem 0.85rem; border-radius: 8px; font-weight: 800; font-size: 0.82rem;">
+                    <i class="fa-solid fa-circle"></i> BAY 2 IS FREE
+                </span>
+                <span style="background: #0f172a; color: #94a3b8; border: 1px solid #334155; padding: 0.4rem 0.85rem; border-radius: 8px; font-weight: 800; font-size: 0.82rem;">
+                    3 QUEUED
+                </span>
+            </div>
+        </div>
+
+        <!-- 65/35 Tactical Grid -->
+        <div class="tactical-grid">
+            
+            <!-- LEFT: LIVE HIGH-CONTRAST BAYS -->
+            <div>
+                
+                <!-- BAY 1 -->
+                <div class="bay-rugged-card active-wash">
+                    <div class="rugged-header">
+                        <div class="rugged-bay-title" style="color: #38bdf8;">
+                            <i class="fa-solid fa-droplet"></i>
+                            <span>BAY 01 • IN SERVICE</span>
+                        </div>
+                        <span style="background: #0369a1; color: white; font-weight: 900; font-size: 0.78rem; padding: 3px 8px; border-radius: 6px;">
+                            WASHING
+                        </span>
+                    </div>
+
+                    <div class="rugged-plate-box">
+                        <div>
+                            <div class="rugged-plate-text">2BQ-8899</div>
+                            <div style="font-size: 0.85rem; color: #cbd5e1; font-weight: 700; margin-top: 0.2rem;">
+                                Toyota Highlander • Full Wash & Wax
+                            </div>
+                        </div>
+                        <div class="big-timer-clock">
+                            <i class="fa-regular fa-clock" style="color: #38bdf8;"></i>
+                            <span>16:40</span>
+                        </div>
+                    </div>
+
+                    <button type="button" class="btn-giant-touch btn-blue-giant" onclick="alert('Bay 1 Wash Completed!')">
+                        <i class="fa-solid fa-check-double"></i> Mark Wash Finished (Bay 1)
+                    </button>
+                </div>
+
+                <!-- BAY 2: READY -->
+                <div class="bay-rugged-card free-ready">
+                    <div class="rugged-header">
+                        <div class="rugged-bay-title" style="color: #4ade80;">
+                            <i class="fa-solid fa-square-parking"></i>
+                            <span>BAY 02 • FREE & READY</span>
+                        </div>
+                        <span style="background: #15803d; color: white; font-weight: 900; font-size: 0.78rem; padding: 3px 8px; border-radius: 6px;">
+                            VACANT
+                        </span>
+                    </div>
+
+                    <div class="rugged-plate-box" style="border-color: #22c55e;">
+                        <div>
+                            <div style="font-size: 0.85rem; color: #4ade80; font-weight: 800; text-transform: uppercase;">
+                                Next In Queue Ready to Pull In
+                            </div>
+                            <div class="rugged-plate-text" style="color: #4ade80;">2AB-5566</div>
+                            <div style="font-size: 0.85rem; color: #94a3b8; font-weight: 600;">
+                                Lexus RX350 (SUV) • Paid Upfront
+                            </div>
+                        </div>
+                        <i class="fa-solid fa-circle-arrow-down" style="font-size: 2.5rem; color: #22c55e;"></i>
+                    </div>
+
+                    <button type="button" class="btn-giant-touch btn-green-giant" onclick="alert('Pulling 2AB-5566 into Bay 2!')">
+                        <i class="fa-solid fa-play"></i> Pull In 2AB-5566 Now
+                    </button>
+                </div>
+
+                <!-- BAY 3: TECH HANDOVER -->
+                <div class="bay-rugged-card handoff">
+                    <div class="rugged-header">
+                        <div class="rugged-bay-title" style="color: #c084fc;">
+                            <i class="fa-solid fa-wrench"></i>
+                            <span>BAY 03 • READY FOR TECH</span>
+                        </div>
+                        <span style="background: #7e22ce; color: white; font-weight: 900; font-size: 0.78rem; padding: 3px 8px; border-radius: 6px;">
+                            HANDOVER
+                        </span>
+                    </div>
+
+                    <div class="rugged-plate-box" style="border-color: #a855f7;">
+                        <div>
+                            <div class="rugged-plate-text" style="color: #c084fc;">2AF-1234</div>
+                            <div style="font-size: 0.85rem; color: #cbd5e1; font-weight: 700; margin-top: 0.2rem;">
+                                Mazda 3 (Sedan) • Needs Oil Change & Filter
+                            </div>
+                        </div>
+                        <span style="background: #581c87; color: #e9d5ff; padding: 0.4rem 0.8rem; border-radius: 8px; font-weight: 800; font-size: 0.85rem;">
+                            BAY 4 READY
+                        </span>
+                    </div>
+
+                    <button type="button" class="btn-giant-touch btn-purple-giant" onclick="alert('Vehicle 2AF-1234 dispatched to Tech Bay 4!')">
+                        <i class="fa-solid fa-share-from-square"></i> Send to Tech Bay 4
+                    </button>
+                </div>
+
+            </div>
+
+            <!-- RIGHT: RUGGED QUEUE -->
+            <div>
+                <div class="rugged-queue-panel">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 2px solid #334155; padding-bottom: 0.75rem;">
+                        <h2 style="font-size: 1.1rem; font-weight: 900; margin: 0; color: #f8fafc; display: flex; align-items: center; gap: 0.5rem;">
+                            <i class="fa-solid fa-bars-staggered" style="color: #38bdf8;"></i>
+                            <span>WAITING APRON</span>
+                        </h2>
+                        <span style="background: #38bdf8; color: #082f49; font-weight: 900; font-size: 0.8rem; padding: 2px 8px; border-radius: 999px;">
+                            3 CARS
+                        </span>
+                    </div>
+
+                    <!-- QUEUE 1 -->
+                    <div class="rugged-queue-item first-next">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div style="display: flex; align-items: center;">
+                                <div class="q-number-big first">01</div>
+                                <div>
+                                    <div style="font-family: monospace; font-size: 1.3rem; font-weight: 900; color: #38bdf8;">2AB-5566</div>
+                                    <div style="font-size: 0.78rem; color: #94a3b8;">Lexus RX350 (SUV)</div>
+                                </div>
+                            </div>
+                            <span style="background: #fef08a; color: #854d0e; font-size: 0.72rem; font-weight: 900; padding: 2px 6px; border-radius: 4px;">
+                                NEXT
+                            </span>
+                        </div>
+                        <div style="margin-top: 0.5rem; font-size: 0.82rem; color: #cbd5e1; font-weight: 600;">
+                            Full Wash + Underbody Spray
+                        </div>
+                    </div>
+
+                    <!-- QUEUE 2 -->
+                    <div class="rugged-queue-item">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div style="display: flex; align-items: center;">
+                                <div class="q-number-big">02</div>
+                                <div>
+                                    <div style="font-family: monospace; font-size: 1.2rem; font-weight: 900; color: #f8fafc;">2BC-7788</div>
+                                    <div style="font-size: 0.78rem; color: #94a3b8;">Toyota Prius</div>
+                                </div>
+                            </div>
+                            <span style="font-size: 0.75rem; color: #64748b; font-weight: 700;">14m wait</span>
+                        </div>
+                        <div style="margin-top: 0.5rem; font-size: 0.82rem; color: #94a3b8;">
+                            Exterior Foam Wash
+                        </div>
+                    </div>
+
+                    <!-- QUEUE 3 -->
+                    <div class="rugged-queue-item">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div style="display: flex; align-items: center;">
+                                <div class="q-number-big">03</div>
+                                <div>
+                                    <div style="font-family: monospace; font-size: 1.2rem; font-weight: 900; color: #f8fafc;">2Z-9911</div>
+                                    <div style="font-size: 0.78rem; color: #94a3b8;">Ford Ranger</div>
+                                </div>
+                            </div>
+                            <span style="font-size: 0.75rem; color: #64748b; font-weight: 700;">19m wait</span>
+                        </div>
+                        <div style="margin-top: 0.5rem; font-size: 0.82rem; color: #94a3b8;">
+                            Heavy Degreasing
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+</body>
+</html>
+

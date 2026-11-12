@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Technician Duty — Idea 3 (Rugged Industrial Diagnostic Tablet)</title>
+<link rel="stylesheet" href="css/font-awesome.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0f172a;
+    color: #f8fafc;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+  .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #334155; border-radius: 6px; }
+
+  /* Full Screen Container */
+  .app-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  @media (min-width: 1024px) {
+    .app-container { height: 100vh; overflow: hidden; }
+  }
+
+  /* Top Ribbon Bar */
+  .hud-topbar {
+    background: #1e293b;
+    border-bottom: 2px solid #334155;
+    padding: 0.65rem 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .hud-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+  }
+  .hud-badge-terminal {
+    background: #0284c7;
+    color: #ffffff;
+    padding: 0.35rem 0.65rem;
+    border-radius: 0.4rem;
+    font-weight: 800;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .hud-title-text h1 {
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    color: #f8fafc;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .hud-title-text p {
+    font-size: 0.725rem;
+    color: #94a3b8;
+    font-weight: 500;
+  }
+
+  .hud-top-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .lift-status-chip {
+    background: #064e3b;
+    border: 1px solid #059669;
+    color: #34d399;
+    padding: 0.35rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+  .lift-dot-pulse {
+    width: 0.5rem; height: 0.5rem; border-radius: 50%; background: #34d399;
+    box-shadow: 0 0 0 3px rgba(52,211,153,0.3);
+  }
+  .btn-pos-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border-radius: 0.5rem;
+    border: 1px solid #475569;
+    background: #334155;
+    padding: 0.45rem 0.85rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #ffffff;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .btn-pos-back:hover { background: #475569; }
+
+  /* Vehicle Target Ribbon */
+  .vehicle-ribbon {
+    background: #111827;
+    border-bottom: 2px solid #1f2937;
+    padding: 0.85rem 1.25rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-shrink: 0;
+  }
+  .vehicle-id-group {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .jumbo-plate {
+    background: #f8fafc;
+    color: #0f172a;
+    border: 2px solid #ffffff;
+    padding: 0.45rem 0.9rem;
+    border-radius: 0.5rem;
+    font-weight: 900;
+    font-size: 1.25rem;
+    letter-spacing: 0.08em;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+  }
+  .vehicle-meta h2 {
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #f1f5f9;
+  }
+  .vehicle-meta p {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    margin-top: 0.15rem;
+  }
+
+  .vehicle-diagnostics-bar {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+  .diag-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+  }
+  .diag-label {
+    font-size: 0.675rem;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: #64748b;
+    letter-spacing: 0.05em;
+  }
+  .diag-value {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: #38bdf8;
+  }
+
+  /* Two Column Main Content Area */
+  .hud-body-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+    padding: 1.25rem;
+    flex: 1;
+    min-height: 0;
+  }
+  @media (min-width: 1024px) {
+    .hud-body-grid {
+      grid-template-columns: 1.1fr 1.35fr;
+      overflow: hidden;
+    }
+  }
+
+  /* Industrial Card Container */
+  .industrial-card {
+    background: #1e293b;
+    border: 1.5px solid #334155;
+    border-radius: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .card-bar {
+    background: #0f172a;
+    border-bottom: 1.5px solid #334155;
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .card-bar-title {
+    font-size: 0.85rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    color: #f8fafc;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .card-scrollable {
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  /* Big Touch Checklist Items */
+  .jumbo-task {
+    background: #0f172a;
+    border: 2px solid #334155;
+    border-radius: 0.65rem;
+    padding: 0.65rem 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .jumbo-task:active { transform: scale(0.99); }
+  .jumbo-task.completed {
+    border-color: #059669;
+    background: rgba(6, 78, 59, 0.25);
+  }
+  .jumbo-task-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .jumbo-task-name {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #f8fafc;
+  }
+  .jumbo-task-sub {
+    font-size: 0.7rem;
+    color: #94a3b8;
+  }
+  .jumbo-task-btn {
+    min-width: 80px;
+    height: 38px;
+    border-radius: 0.45rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    border: 2px solid #475569;
+    background: #1e293b;
+    color: #cbd5e1;
+    pointer-events: none;
+  }
+  .jumbo-task.completed .jumbo-task-btn {
+    border-color: #10b981;
+    background: #10b981;
+    color: #ffffff;
+  }
+
+  /* Fluid Dispense Industrial Controller */
+  .industrial-meter-box {
+    background: #0f172a;
+    border: 2px solid #334155;
+    border-radius: 0.65rem;
+    padding: 0.9rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .meter-details h4 {
+    font-size: 0.85rem;
+    font-weight: 800;
+    color: #fb923c;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .meter-details p {
+    font-size: 0.725rem;
+    color: #94a3b8;
+    margin-top: 0.2rem;
+  }
+  .meter-dial {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+  }
+  .btn-dial {
+    width: 44px;
+    height: 44px;
+    border-radius: 0.5rem;
+    border: 2px solid #f97316;
+    background: #1e293b;
+    color: #f97316;
+    font-size: 1.2rem;
+    font-weight: 900;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-dial:hover { background: #f97316; color: #ffffff; }
+  .btn-dial:active { transform: scale(0.95); }
+  .meter-reading {
+    font-size: 1.4rem;
+    font-weight: 900;
+    color: #f8fafc;
+    min-width: 75px;
+    text-align: center;
+  }
+
+  /* Inspection 3-State Toggle Rows */
+  .inspection-row {
+    background: #0f172a;
+    border: 2px solid #334155;
+    border-radius: 0.65rem;
+    padding: 0.65rem 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .inspect-header-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .inspect-item-title {
+    font-size: 0.825rem;
+    font-weight: 800;
+    color: #f1f5f9;
+  }
+  .inspect-reading-input {
+    background: #1e293b;
+    border: 1.5px solid #475569;
+    border-radius: 0.4rem;
+    padding: 0.25rem 0.5rem;
+    color: #f8fafc;
+    font-size: 0.75rem;
+    font-weight: 700;
+    width: 85px;
+    text-align: right;
+  }
+
+  /* 3-Way Tri-State Segmented Control */
+  .tri-state-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.4rem;
+  }
+  .btn-tri {
+    height: 38px;
+    border-radius: 0.45rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    border: 2px solid #334155;
+    background: #1e293b;
+    color: #94a3b8;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    transition: all 0.1s ease;
+  }
+  .btn-tri:hover { border-color: #64748b; color: #ffffff; }
+  .btn-tri:active { transform: scale(0.97); }
+
+  .btn-tri.active-pass {
+    border-color: #10b981;
+    background: #064e3b;
+    color: #34d399;
+  }
+  .btn-tri.active-warn {
+    border-color: #f59e0b;
+    background: #78350f;
+    color: #fcd34d;
+  }
+  .btn-tri.active-fail {
+    border-color: #ef4444;
+    background: #7f1d1d;
+    color: #fca5a5;
+  }
+
+  /* Bottom Industrial Action Bar */
+  .hud-bottom-actions {
+    background: #1e293b;
+    border-top: 2px solid #334155;
+    padding: 0.85rem 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-shrink: 0;
+  }
+  .btn-bottom-secondary {
+    height: 52px;
+    padding: 0 1.25rem;
+    border-radius: 0.65rem;
+    background: #334155;
+    border: 2px solid #475569;
+    color: #f8fafc;
+    font-size: 0.85rem;
+    font-weight: 800;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .btn-bottom-secondary:hover { background: #475569; }
+
+  .btn-bottom-primary {
+    height: 52px;
+    padding: 0 2rem;
+    border-radius: 0.65rem;
+    background: #059669;
+    border: 2px solid #10b981;
+    color: #ffffff;
+    font-size: 0.95rem;
+    font-weight: 900;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.65rem;
+    flex: 1;
+    max-width: 500px;
+    box-shadow: 0 4px 14px rgba(16,185,129,0.35);
+    transition: transform 0.05s, background 0.15s;
+  }
+  .btn-bottom-primary:hover { background: #047857; }
+  .btn-bottom-primary:active { transform: scale(0.98); }
+</style>
+</head>
+<body>
+
+<div class="app-container">
+
+  <!-- HUD Top Bar -->
+  <header class="hud-topbar">
+    <div class="hud-brand">
+      <span class="hud-badge-terminal mono">
+        <i class="fa fa-terminal"></i> BAY 4 TERMINAL
+      </span>
+      <div class="hud-title-text">
+        <h1>MECHANIC DIAGNOSTIC TABLET</h1>
+        <p>Heavy-duty glove-friendly interface &bull; Multi-point Inspection</p>
+      </div>
+    </div>
+
+    <div class="hud-top-actions">
+      <div class="lift-status-chip">
+        <div class="lift-dot-pulse"></div>
+        <span>HOIST: RAISED (1.85m)</span>
+      </div>
+      <a href="index.html#mechanic" class="btn-pos-back">
+        <i class="fa fa-arrow-left"></i> POS Exit
+      </a>
+    </div>
+  </header>
+
+  <!-- Active Vehicle Identity Ribbon -->
+  <div class="vehicle-ribbon">
+    <div class="vehicle-id-group">
+      <div class="jumbo-plate mono">
+        <i class="fa fa-car"></i> 2AZ-4577
+      </div>
+      <div class="vehicle-meta">
+        <h2>Lexus RX350 Luxury &bull; 3.5L V6 (2020)</h2>
+        <p>Job Order #W-4577 &bull; Customer: Sokha Mean &bull; Technician: Dom (Bay 4)</p>
+      </div>
+    </div>
+
+    <div class="vehicle-diagnostics-bar">
+      <div class="diag-item">
+        <span class="diag-label">Elapsed On Lift</span>
+        <span class="diag-value mono" id="timerDisplay">24:18</span>
+      </div>
+      <div class="diag-item">
+        <span class="diag-label">Target Oil Cap</span>
+        <span class="diag-value mono" style="color:#fb923c;">6.1 L</span>
+      </div>
+      <div class="diag-item">
+        <span class="diag-label">Checklist State</span>
+        <span class="diag-value mono" id="checklistCounter" style="color:#34d399;">2/4 DONE</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Body 2-Column Split Area -->
+  <main class="hud-body-grid">
+
+    <!-- LEFT COLUMN: Procedural Steps & Fluid Meter -->
+    <section class="industrial-card">
+      <div class="card-bar">
+        <div class="card-bar-title">
+          <i class="fa fa-wrench" style="color:#38bdf8;"></i>
+          <span>1. Procedural Execution Steps</span>
+        </div>
+        <span style="font-size:0.75rem; color:#94a3b8; font-weight:700;">TAP ROW TO COMPLETE</span>
+      </div>
+
+      <div class="card-scrollable scroll-thin">
+        
+        <!-- Jumbo Task 1 -->
+        <div class="jumbo-task completed" onclick="toggleJumboTask(this)">
+          <div class="jumbo-task-info">
+            <span class="jumbo-task-name">1. Drain Engine Oil &amp; Sump Inspection</span>
+            <span class="jumbo-task-sub">Torque drain bolt to 38 Nm with new copper washer</span>
+          </div>
+          <button class="jumbo-task-btn"><i class="fa fa-check"></i> DONE</button>
+        </div>
+
+        <!-- Jumbo Task 2 -->
+        <div class="jumbo-task completed" onclick="toggleJumboTask(this)">
+          <div class="jumbo-task-info">
+            <span class="jumbo-task-name">2. Oil Filter Cartridge Replacement</span>
+            <span class="jumbo-task-sub">OEM #04152-YZZA1 + new O-ring lubricated</span>
+          </div>
+          <button class="jumbo-task-btn"><i class="fa fa-check"></i> DONE</button>
+        </div>
+
+        <!-- Jumbo Task 3 -->
+        <div class="jumbo-task" onclick="toggleJumboTask(this)">
+          <div class="jumbo-task-info">
+            <span class="jumbo-task-name">3. Dispense &amp; Fill Synthetic 5W-30</span>
+            <span class="jumbo-task-sub">Fill target 6.1L. Verify dipstick after 3-min settle</span>
+          </div>
+          <button class="jumbo-task-btn">PENDING</button>
+        </div>
+
+        <!-- Jumbo Task 4 -->
+        <div class="jumbo-task" onclick="toggleJumboTask(this)">
+          <div class="jumbo-task-info">
+            <span class="jumbo-task-name">4. Front &amp; Rear Brake Pad Caliper Check</span>
+            <span class="jumbo-task-sub">Inspect caliper slide pins &amp; pad thickness</span>
+          </div>
+          <button class="jumbo-task-btn">PENDING</button>
+        </div>
+
+        <!-- Fluid Dispenser Meter -->
+        <div class="industrial-meter-box">
+          <div class="meter-details">
+            <h4><i class="fa fa-tint"></i> Oil Dispense Meter</h4>
+            <p>Liqui Moly Special Tec 5W-30 Full Synthetic</p>
+          </div>
+          <div class="meter-dial">
+            <button class="btn-dial" onclick="dialOil(-0.5)">-</button>
+            <div class="meter-reading mono" id="hudOilVal">4.5 L</div>
+            <button class="btn-dial" onclick="dialOil(+0.5)">+</button>
+          </div>
+        </div>
+
+        <!-- Quick Parts Drawer Bar -->
+        <div style="background:#0f172a; border:2px dashed #334155; border-radius:0.65rem; padding:0.75rem 1rem; display:flex; align-items:center; justify-content:space-between;">
+          <div style="display:flex; align-items:center; gap:0.5rem; font-size:0.8rem; font-weight:700;">
+            <i class="fa fa-cube" style="color:#fb923c;"></i>
+            <span>Requisitioned Parts: Filter Cartridge, Sump Washer</span>
+          </div>
+          <button onclick="alert('Warehouse Inventory Requisition requested!')" style="background:#334155; border:1px solid #475569; color:#f8fafc; font-size:0.75rem; font-weight:800; padding:0.4rem 0.75rem; border-radius:0.4rem; cursor:pointer;">
+            + Request More
+          </button>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- RIGHT COLUMN: Safety Multi-Point Inspection -->
+    <section class="industrial-card">
+      <div class="card-bar">
+        <div class="card-bar-title">
+          <i class="fa fa-shield" style="color:#34d399;"></i>
+          <span>2. Multi-Point Safety Inspection</span>
+        </div>
+        <button onclick="takeInspectionPhoto()" style="background:#334155; border:1px solid #475569; color:#ffffff; font-size:0.725rem; font-weight:800; padding:0.35rem 0.65rem; border-radius:0.4rem; cursor:pointer;">
+          <i class="fa fa-camera"></i> Photo Note
+        </button>
+      </div>
+
+      <div class="card-scrollable scroll-thin">
+        
+        <!-- Inspection Item 1: Battery -->
+        <div class="inspection-row">
+          <div class="inspect-header-line">
+            <span class="inspect-item-title">1. 12V Battery Health &amp; Terminals</span>
+            <input type="text" class="inspect-reading-input mono" value="12.6 V">
+          </div>
+          <div class="tri-state-group">
+            <button class="btn-tri active-pass" onclick="setTri(this, 'pass')"><i class="fa fa-check"></i> PASS</button>
+            <button class="btn-tri" onclick="setTri(this, 'warn')"><i class="fa fa-exclamation-triangle"></i> WARN</button>
+            <button class="btn-tri" onclick="setTri(this, 'fail')"><i class="fa fa-times"></i> FAIL</button>
+          </div>
+        </div>
+
+        <!-- Inspection Item 2: Brake Pad Thickness -->
+        <div class="inspection-row">
+          <div class="inspect-header-line">
+            <span class="inspect-item-title">2. Front Brake Pad Thickness</span>
+            <input type="text" class="inspect-reading-input mono" value="7.5 mm">
+          </div>
+          <div class="tri-state-group">
+            <button class="btn-tri active-pass" onclick="setTri(this, 'pass')"><i class="fa fa-check"></i> PASS (>5mm)</button>
+            <button class="btn-tri" onclick="setTri(this, 'warn')"><i class="fa fa-exclamation-triangle"></i> WARN (3-5mm)</button>
+            <button class="btn-tri" onclick="setTri(this, 'fail')"><i class="fa fa-times"></i> FAIL (<3mm)</button>
+          </div>
+        </div>
+
+        <!-- Inspection Item 3: Tire Tread Depth -->
+        <div class="inspection-row">
+          <div class="inspect-header-line">
+            <span class="inspect-item-title">3. Tire Tread Depth &amp; Pressure (34 PSI)</span>
+            <input type="text" class="inspect-reading-input mono" value="5.8 mm">
+          </div>
+          <div class="tri-state-group">
+            <button class="btn-tri active-pass" onclick="setTri(this, 'pass')"><i class="fa fa-check"></i> PASS</button>
+            <button class="btn-tri" onclick="setTri(this, 'warn')"><i class="fa fa-exclamation-triangle"></i> WARN</button>
+            <button class="btn-tri" onclick="setTri(this, 'fail')"><i class="fa fa-times"></i> FAIL</button>
+          </div>
+        </div>
+
+        <!-- Inspection Item 4: Underbody Leak Check -->
+        <div class="inspection-row">
+          <div class="inspect-header-line">
+            <span class="inspect-item-title">4. Fluid Leaks (Engine / Trans / Steering)</span>
+            <input type="text" class="inspect-reading-input mono" value="DRY">
+          </div>
+          <div class="tri-state-group">
+            <button class="btn-tri active-pass" onclick="setTri(this, 'pass')"><i class="fa fa-check"></i> CLEAN DRY</button>
+            <button class="btn-tri" onclick="setTri(this, 'warn')"><i class="fa fa-exclamation-triangle"></i> SEEPAGE</button>
+            <button class="btn-tri" onclick="setTri(this, 'fail')"><i class="fa fa-times"></i> ACTIVE LEAK</button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Industrial Action Drawer -->
+  <footer class="hud-bottom-actions">
+    <button class="btn-bottom-secondary" onclick="alert('Calling Shop Foreman to Bay 4...')">
+      <i class="fa fa-phone"></i> Call Foreman
+    </button>
+    
+    <button class="btn-bottom-primary" onclick="signOffComplete(this)">
+      <i class="fa fa-check-circle"></i>
+      <span>COMPLETE SERVICE &amp; SIGN OFF HANDOVER</span>
+    </button>
+  </footer>
+
+</div>
+
+<script>
+  let hudOil = 4.5;
+  function dialOil(delta) {
+    hudOil = Math.max(0, Math.round((hudOil + delta) * 10) / 10);
+    document.getElementById('hudOilVal').textContent = hudOil.toFixed(1) + ' L';
+  }
+
+  function toggleJumboTask(el) {
+    el.classList.toggle('completed');
+    const btn = el.querySelector('.jumbo-task-btn');
+    if (el.classList.contains('completed')) {
+      btn.innerHTML = '<i class="fa fa-check"></i> DONE';
+    } else {
+      btn.innerHTML = 'PENDING';
+    }
+    updateHudCounter();
+  }
+
+  function updateHudCounter() {
+    const total = document.querySelectorAll('.jumbo-task').length;
+    const done = document.querySelectorAll('.jumbo-task.completed').length;
+    document.getElementById('checklistCounter').textContent = `${done}/${total} DONE`;
+  }
+
+  function setTri(btn, state) {
+    const parent = btn.parentElement;
+    parent.querySelectorAll('.btn-tri').forEach(b => {
+      b.className = 'btn-tri';
+    });
+    if (state === 'pass') btn.className = 'btn-tri active-pass';
+    if (state === 'warn') btn.className = 'btn-tri active-warn';
+    if (state === 'fail') btn.className = 'btn-tri active-fail';
+  }
+
+  function takeInspectionPhoto() {
+    alert("Camera interface activated: Capturing high-resolution photo for customer digital report.");
+  }
+
+  function signOffComplete(btn) {
+    if (confirm("Confirm sign-off for Lexus RX350 (2AZ-4577)? Vehicle will be lowered and transferred to Delivery / Wash.")) {
+      btn.innerHTML = '<i class="fa fa-check-circle"></i> SIGN-OFF COMPLETE — RELEASED';
+      btn.style.background = '#047857';
+      btn.disabled = true;
+    }
+  }
+
+  // Live timer tick
+  let sec = 1458;
+  setInterval(() => {
+    sec++;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    const disp = document.getElementById('timerDisplay');
+    if (disp) disp.textContent = `${m}:${s < 10 ? '0' : ''}${s}`;
+  }, 1000);
+</script>
+
+</body>
+</html>
