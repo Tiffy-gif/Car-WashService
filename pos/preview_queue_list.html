@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waiting Queue List View Preview</title>
+<link rel="stylesheet" href="css/font-awesome.min.css">
+<link rel="stylesheet" href="css/app.css">
+<style>
+  body {
+    background: #f8fafc;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 1.5rem;
+    color: #0f172a;
+  }
+  .preview-wrap {
+    max-width: 1360px;
+    margin: 0 auto;
+  }
+
+  /* List Table Card */
+  .queue-list-card {
+    background: #ffffff;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+  }
+
+  .queue-list-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+  }
+
+  .queue-list-table thead {
+    background: #f8fafc;
+    border-bottom: 2px solid #e2e8f0;
+  }
+
+  .queue-list-table th {
+    padding: 0.85rem 1rem;
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+    white-space: nowrap;
+  }
+
+  .queue-list-table tbody tr {
+    border-bottom: 1px solid #f1f5f9;
+    transition: background 0.15s ease;
+  }
+
+  .queue-list-table tbody tr:hover {
+    background: #f8fafc;
+  }
+
+  .queue-list-table tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .queue-list-table td {
+    padding: 0.95rem 1rem;
+    vertical-align: middle;
+    font-size: 0.88rem;
+  }
+
+  /* Specific column styles */
+  .col-pos { width: 90px; }
+  .col-plate { width: 140px; }
+  .col-info { min-width: 200px; }
+  .col-services { min-width: 220px; }
+  .col-status { width: 160px; }
+  .col-financial { width: 140px; text-align: right; }
+  .col-actions { width: 220px; text-align: right; }
+
+  /* Plate badge in list */
+  .queue-list-plate {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: #0f172a;
+    color: #ffffff;
+    font-weight: 900;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 1.05rem;
+    letter-spacing: 0.05em;
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.12);
+    white-space: nowrap;
+  }
+
+  /* Position Badge */
+  .queue-pos-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-weight: 900;
+    font-size: 0.8rem;
+    padding: 0.3rem 0.65rem;
+    border-radius: 9999px;
+    white-space: nowrap;
+  }
+  .queue-pos-pill.pos-next {
+    background: #fef08a;
+    color: #854d0e;
+    border: 1.5px solid #facc15;
+    box-shadow: 0 2px 6px rgba(250, 204, 21, 0.25);
+  }
+  .queue-pos-pill.pos-sub {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+  }
+
+  /* Status badge */
+  .queue-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 800;
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .status-waiting { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+  .status-washing { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+  .status-qc { background: #e0e7ff; color: #4338ca; border: 1px solid #c7d2fe; }
+  .status-ready-pay { background: #dcfce7; color: #166534; border: 1.5px solid #86efac; }
+  .status-paid { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+
+  /* Service chip in list */
+  .queue-list-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .queue-list-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: #f1f5f9;
+    color: #334155;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    border: 1px solid #e2e8f0;
+  }
+
+  /* Actions group */
+  .queue-actions-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    justify-content: flex-end;
+  }
+
+  /* View switch toggle */
+  .queue-view-toggle {
+    display: inline-flex;
+    background: #f1f5f9;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 2px;
+    gap: 2px;
+  }
+  .btn-view-toggle {
+    border: none;
+    background: transparent;
+    padding: 0.4rem 0.85rem;
+    font-size: 0.825rem;
+    font-weight: 800;
+    color: #64748b;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    transition: all 0.15s;
+  }
+  .btn-view-toggle.active {
+    background: #ffffff;
+    color: #0284c7;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+</style>
+</head>
+<body>
+
+<div class="preview-wrap">
+
+  <!-- Header with View Toggle -->
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <div style="display: flex; align-items: center; gap: 0.65rem;">
+      <h3 style="font-size: 1.25rem; font-weight: 900; color: #0f172a; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i class="fa-solid fa-list-ol text-primary" style="color: #0284c7;"></i>
+        <span>Waiting Queue (ជួររថយន្តកំពុងរង់ចាំ)</span>
+      </h3>
+      <span class="badge" style="background: #0284c7; color: #ffffff; font-weight: 900; border-radius: 9999px; padding: 3px 9px; font-size: 0.825rem;">3 Waiting</span>
+    </div>
+
+    <div class="queue-view-toggle">
+      <button type="button" class="btn-view-toggle active" id="btnToggleList">
+        <i class="fa-solid fa-list"></i> List View
+      </button>
+      <button type="button" class="btn-view-toggle" id="btnToggleGrid">
+        <i class="fa-solid fa-grip"></i> Grid Cards
+      </button>
+    </div>
+  </div>
+
+  <!-- Modern List View Table -->
+  <div class="queue-list-card">
+    <table class="queue-list-table">
+      <thead>
+        <tr>
+          <th class="col-pos">Queue #</th>
+          <th class="col-plate">Vehicle Plate</th>
+          <th class="col-info">Customer &amp; Order</th>
+          <th class="col-services">Services &amp; Packages</th>
+          <th class="col-status">Status / Bay</th>
+          <th class="col-financial">Payment</th>
+          <th class="col-actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <!-- Row 1: Waiting / 1st in line -->
+        <tr>
+          <td class="col-pos">
+            <span class="queue-pos-pill pos-next"><i class="fa-solid fa-bolt"></i> 1st (Next)</span>
+          </td>
+          <td class="col-plate">
+            <span class="queue-list-plate"><i class="fa-solid fa-car"></i> W-4577</span>
+          </td>
+          <td class="col-info">
+            <div style="font-weight: 800; color: #0f172a;">Paid Token Test Guest</div>
+            <div style="font-size: 0.78rem; color: #64748b;">#ORD-261112-007 &bull; small_car</div>
+          </td>
+          <td class="col-services">
+            <div class="queue-list-chips">
+              <span class="queue-list-chip"><i class="fa-solid fa-check" style="color:#0284c7;"></i> Full Wash (Ext + Int)</span>
+              <span class="queue-list-chip"><i class="fa-solid fa-check" style="color:#0284c7;"></i> Mobil 1 ESP 5W-30 (4L)</span>
+            </div>
+          </td>
+          <td class="col-status">
+            <span class="queue-status-pill status-waiting"><i class="fa-solid fa-clock"></i> Waiting</span>
+          </td>
+          <td class="col-financial">
+            <div style="font-weight: 900; font-size: 1rem; color: #0f172a;">$48.00</div>
+            <span style="font-size: 0.75rem; color: #16a34a; font-weight: 800;"><i class="fa-solid fa-check-circle"></i> Paid</span>
+          </td>
+          <td class="col-actions">
+            <div class="queue-actions-group">
+              <button type="button" class="btn btn-primary btn-sm" style="font-weight: 800; background: #0284c7; border: none; padding: 0.5rem 0.95rem; border-radius: 6px;">
+                <i class="fa-solid fa-warehouse"></i> Assign Bay
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" style="padding: 0.5rem 0.65rem;" title="Reprint Receipt">
+                <i class="fa-solid fa-print"></i>
+              </button>
+              <button type="button" class="btn btn-outline btn-sm text-primary" style="padding: 0.5rem 0.65rem;" title="Print Ticket">
+                <i class="fa-solid fa-ticket"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+
+        <!-- Row 2: In Wash Bay 1 -->
+        <tr>
+          <td class="col-pos">
+            <span class="queue-pos-pill pos-sub">Bay 1</span>
+          </td>
+          <td class="col-plate">
+            <span class="queue-list-plate"><i class="fa-solid fa-car"></i> 2BB-2445</span>
+          </td>
+          <td class="col-info">
+            <div style="font-weight: 800; color: #0f172a;">Sokha Heng</div>
+            <div style="font-size: 0.78rem; color: #64748b;">#ORD-261112-005 &bull; SUV</div>
+          </td>
+          <td class="col-services">
+            <div class="queue-list-chips">
+              <span class="queue-list-chip"><i class="fa-solid fa-check" style="color:#0284c7;"></i> Exterior Wash</span>
+              <span class="queue-list-chip"><i class="fa-solid fa-check" style="color:#0284c7;"></i> Underbody Foam</span>
+            </div>
+          </td>
+          <td class="col-status">
+            <span class="queue-status-pill status-washing"><i class="fa-solid fa-spinner fa-spin"></i> Bay 1 Wash</span>
+          </td>
+          <td class="col-financial">
+            <div style="font-weight: 900; font-size: 1rem; color: #0f172a;">$8.50</div>
+            <span style="font-size: 0.75rem; color: #16a34a; font-weight: 800;"><i class="fa-solid fa-check-circle"></i> Paid</span>
+          </td>
+          <td class="col-actions">
+            <div class="queue-actions-group">
+              <button type="button" class="btn btn-outline btn-sm" style="font-weight: 800; border-color: #16a34a; color: #16a34a; padding: 0.5rem 0.95rem; border-radius: 6px;">
+                <i class="fa-solid fa-check"></i> Finish Wash
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" style="padding: 0.5rem 0.65rem;">
+                <i class="fa-solid fa-print"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+
+        <!-- Row 3: Ready to Pay / Unpaid -->
+        <tr style="background: #f0fdf4;">
+          <td class="col-pos">
+            <span class="queue-pos-pill pos-sub" style="background:#dcfce7; color:#15803d; border-color:#86efac;">Ready</span>
+          </td>
+          <td class="col-plate">
+            <span class="queue-list-plate" style="border: 2px solid #22c55e;"><i class="fa-solid fa-car"></i> 2Z-9911</span>
+          </td>
+          <td class="col-info">
+            <div style="font-weight: 800; color: #0f172a;">Rithy Samnang</div>
+            <div style="font-size: 0.78rem; color: #64748b;">#ORD-261112-004 &bull; Sedan</div>
+          </td>
+          <td class="col-services">
+            <div class="queue-list-chips">
+              <span class="queue-list-chip"><i class="fa-solid fa-check" style="color:#0284c7;"></i> Premium Hand Wax</span>
+            </div>
+          </td>
+          <td class="col-status">
+            <span class="queue-status-pill status-ready-pay"><i class="fa-solid fa-circle-check"></i> Ready to Pay</span>
+          </td>
+          <td class="col-financial">
+            <div style="font-weight: 900; font-size: 1rem; color: #ea580c;">$15.00</div>
+            <span style="font-size: 0.75rem; color: #ea580c; font-weight: 800;"><i class="fa-solid fa-circle-exclamation"></i> Unpaid</span>
+          </td>
+          <td class="col-actions">
+            <div class="queue-actions-group">
+              <button type="button" class="btn btn-sm" style="font-weight: 900; background: #16a34a; color: #ffffff; border: none; padding: 0.55rem 1.15rem; border-radius: 6px; box-shadow: 0 2px 6px rgba(22,163,74,0.3);">
+                <i class="fa-solid fa-dollar-sign"></i> Pay / Checkout
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" style="padding: 0.5rem 0.65rem;">
+                <i class="fa-solid fa-print"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+</body>
+</html>
+

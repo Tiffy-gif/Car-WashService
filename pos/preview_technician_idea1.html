@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Technician Duty — Idea 1 (Split Command Center)</title>
+<title>Technician Station — Big Touch Cards & Buttons</title>
 <link rel="stylesheet" href="css/font-awesome.min.css">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    background: #f4f6fa;
-    color: #1e293b;
+    background: #f1f5f9;
+    color: #0f172a;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
@@ -17,9 +17,11 @@
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
   .scroll-thin::-webkit-scrollbar { width: 6px; }
   .scroll-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; }
-  .card { box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.08); }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .blink { animation: blink 1.4s infinite; }
+  .card-shadow { box-shadow: 0 2px 4px rgba(15,23,42,.05), 0 10px 24px -8px rgba(15,23,42,.08); }
 
-  /* App Shell */
+  /* App Shell Grid */
   .app-container {
     display: flex;
     flex-direction: column;
@@ -34,328 +36,328 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 2px solid #e2e8f0;
     background: #ffffff;
     padding: 0.75rem 1.5rem;
     flex-shrink: 0;
   }
   .header-brand { display: flex; align-items: center; gap: 0.75rem; }
   .brand-icon {
-    display: flex; height: 2.5rem; width: 2.5rem; align-items: center; justify-content: center;
-    border-radius: 0.75rem; background: linear-gradient(135deg, #0ea5e9, #2563eb);
-    color: #ffffff; box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3); font-size: 1.15rem;
+    display: flex; height: 2.75rem; width: 2.75rem; align-items: center; justify-content: center;
+    border-radius: 0.75rem; background: linear-gradient(135deg, #f97316, #ea580c);
+    color: #ffffff; box-shadow: 0 4px 14px rgba(249, 115, 22, 0.35); font-size: 1.25rem; flex-shrink: 0;
   }
-  .brand-text h1 { font-size: 1rem; font-weight: 800; line-height: 1.2; letter-spacing: 0.04em; color: #0f172a; }
-  .brand-text p { font-size: 0.75rem; font-weight: 500; color: #64748b; }
+  .brand-text h1 { font-size: 1.1rem; font-weight: 900; line-height: 1.2; letter-spacing: 0.03em; color: #0f172a; white-space: nowrap; }
+  .brand-text p { font-size: 0.75rem; font-weight: 600; color: #64748b; margin-top: 1px; white-space: nowrap; }
 
   .header-actions { display: flex; align-items: center; gap: 0.75rem; }
-  .pill-tech-status {
-    display: flex; align-items: center; gap: 0.5rem; border-radius: 9999px;
-    background: #ecfdf5; padding: 0.375rem 0.875rem; font-size: 0.75rem; font-weight: 700;
-    color: #047857; border: 1px solid #a7f3d0;
+  .pill-status {
+    display: flex; align-items: center; gap: 0.45rem; border-radius: 9999px;
+    background: #ecfdf5; padding: 0.45rem 0.95rem; font-size: 0.8rem; font-weight: 800;
+    color: #047857; border: 1.5px solid #a7f3d0; white-space: nowrap;
   }
-  .pill-dot { height: 0.5rem; width: 0.5rem; border-radius: 50%; background: #10b981; }
+  .pill-dot { height: 0.55rem; width: 0.55rem; border-radius: 50%; background: #10b981; }
   .pill-clock {
-    border-radius: 9999px; background: #f1f5f9; padding: 0.375rem 0.875rem;
-    font-size: 0.75rem; font-weight: 700; color: #475569;
+    border-radius: 9999px; background: #f1f5f9; padding: 0.45rem 0.95rem;
+    font-size: 0.8rem; font-weight: 800; color: #334155; border: 1px solid #cbd5e1; white-space: nowrap;
   }
   .btn-pos-back {
-    display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 0.5rem;
-    border: 1px solid #e2e8f0; background: #ffffff; padding: 0.5rem 1rem;
-    font-size: 0.75rem; font-weight: 700; color: #0f172a; text-decoration: none;
-    cursor: pointer; transition: background 0.15s;
+    display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 0.55rem;
+    border: 1.5px solid #cbd5e1; background: #ffffff; padding: 0.45rem 0.95rem;
+    font-size: 0.8rem; font-weight: 800; color: #0f172a; text-decoration: none;
+    cursor: pointer; transition: all 0.15s; white-space: nowrap;
   }
-  .btn-pos-back:hover { background: #f8fafc; }
+  .btn-pos-back:hover { background: #f8fafc; border-color: #94a3b8; }
 
-  /* Main Workspace 2-Column Grid */
-  .workspace-grid {
+  /* Main 2-Column Grid */
+  .main-grid {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 1rem;
-    padding: 1rem 1.25rem;
+    gap: 1.25rem;
+    padding: 1.25rem 1.5rem;
     flex: 1;
     min-height: 0;
   }
   @media (min-width: 1024px) {
-    .workspace-grid {
-      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.85fr);
+    .main-grid {
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
       overflow: hidden;
     }
   }
 
-  /* LEFT COLUMN: Bay 4 Lift + Waiting from Wash */
-  .left-column {
-    display: flex;
-    flex-direction: column;
-    gap: 0.85rem;
-    min-height: 0;
-    overflow-y: auto;
-  }
-
-  /* Bay 4 Lift Status Card */
-  .bay4-card {
-    border-radius: 1rem;
-    border: 1.5px solid #fed7aa;
-    background: #ffffff;
-    padding: 1.1rem;
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 1px 2px rgba(15,23,42,.04);
-  }
-  .bay4-card.is-active { border-color: #fdba74; background: linear-gradient(180deg, #fffaf5 0%, #ffffff 100%); }
-  .bay4-accent-stripe {
-    position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: #ea580c;
-  }
-
-  .bay4-top {
-    display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;
-  }
-  .bay4-id-group { display: flex; align-items: center; gap: 0.65rem; }
-  .bay4-tile {
-    height: 2.25rem; width: 2.25rem; border-radius: 0.6rem; background: #ffedd5;
-    color: #c2410c; display: flex; align-items: center; justify-content: center;
-    font-weight: 800; font-size: 0.95rem;
-  }
-  .bay4-title { font-size: 0.95rem; font-weight: 800; color: #0f172a; }
-  .bay4-sub { font-size: 0.75rem; font-weight: 600; color: #ea580c; text-transform: uppercase; letter-spacing: 0.05em; }
-  .bay4-chip {
-    display: inline-flex; align-items: center; gap: 0.35rem; border-radius: 9999px;
-    padding: 0.25rem 0.65rem; font-size: 0.72rem; font-weight: 800;
-  }
-  .chip-lift-busy { background: #ffedd5; color: #c2410c; border: 1px solid #fed7aa; }
-  .chip-lift-free { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
-
-  .bay4-car-row {
-    display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
-    padding: 0.75rem 0; border-top: 1px solid #f1f5f9; border-bottom: 1px solid #f1f5f9;
-  }
-  .plate-box {
-    display: inline-block; background: #0f172a; color: #ffffff; font-weight: 800;
-    font-size: 1.15rem; padding: 0.35rem 0.85rem; border-radius: 0.5rem; letter-spacing: 0.05em;
-  }
-  .bay4-car-info .model { font-size: 0.875rem; font-weight: 700; color: #1e293b; }
-  .bay4-car-info .svc { font-size: 0.75rem; color: #64748b; }
-
-  .bay4-meta-row {
-    display: flex; align-items: center; justify-content: space-between; margin-top: 0.75rem;
-    font-size: 0.75rem; color: #64748b; font-weight: 600;
-  }
-  .timer-pill {
-    display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; font-weight: 800; color: #ea580c;
-  }
-
-  /* Handover Queue Section */
-  .handover-section {
-    border-radius: 1rem;
-    border: 1px solid #e2e8f0;
-    background: #ffffff;
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 280px;
-  }
-  .handover-header {
+  /* Section Title */
+  .section-headline {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 0.85rem 1.1rem; border-bottom: 1px solid #f1f5f9; flex-shrink: 0;
+    padding: 0 0.25rem; flex-shrink: 0; margin-bottom: 0.5rem;
   }
-  .handover-title {
-    display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem;
-    font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b;
+  .section-title {
+    display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem;
+    font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; color: #475569;
   }
-  .handover-badge {
-    border-radius: 9999px; background: #e0f2fe; color: #0284c7; padding: 0.2rem 0.65rem;
-    font-size: 0.75rem; font-weight: 800; border: 1px solid #bae6fd;
+  .section-count-badge {
+    border-radius: 0.4rem; background: #e2e8f0; padding: 0.2rem 0.6rem;
+    font-size: 0.75rem; color: #1e293b; font-weight: 800;
   }
 
-  .handover-list {
-    flex: 1; overflow-y: auto; padding: 0.85rem; display: flex; flex-direction: column; gap: 0.65rem;
+  /* ================= LEFT COLUMN: BIG HERO LIFT CARD ================= */
+  .left-hero-section {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
-  .handover-card {
-    border-radius: 0.75rem; border: 1px solid #e2e8f0; background: #ffffff; padding: 0.85rem;
+
+  .lift-hero-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+    border-radius: 1.25rem;
+    border: 2px solid #fed7aa;
+    background: #ffffff;
+    padding: 1.5rem;
+    flex: 1;
+    min-height: 0;
     transition: all 0.15s ease;
   }
-  .handover-card:hover { border-color: #38bdf8; box-shadow: 0 4px 12px rgba(14, 165, 233, 0.08); }
-  .handover-card.is-urgent { border-left: 4px solid #f59e0b; }
-  .handover-card-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 0.4rem; }
-  .handover-plate { font-size: 1rem; font-weight: 800; color: #0f172a; }
-  .handover-tag {
-    font-size: 0.68rem; font-weight: 700; border-radius: 0.35rem; padding: 0.15rem 0.45rem;
-    background: #e0f2fe; color: #0369a1; text-transform: uppercase;
-  }
-  .handover-desc { font-size: 0.82rem; font-weight: 700; color: #334155; margin-bottom: 0.2rem; }
-  .handover-cust { font-size: 0.72rem; color: #94a3b8; }
-  .btn-receive-car {
-    width: 100%; margin-top: 0.65rem; border-radius: 0.6rem; background: #0284c7;
-    color: #ffffff; border: none; padding: 0.55rem; font-size: 0.78rem; font-weight: 800;
-    cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
-    transition: background 0.15s;
-  }
-  .btn-receive-car:hover { background: #0369a1; }
 
-  /* RIGHT COLUMN: Active Technical Workstation */
-  .right-column {
+  .lift-accent-stripe {
+    position: absolute; inset-block: 0; left: 0; width: 0.5rem; background: #ea580c;
+  }
+
+  /* Top Row */
+  .lift-top-row {
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  }
+  .lift-id-group { display: flex; align-items: center; gap: 1rem; }
+  .lift-tile {
+    display: flex; height: 3.25rem; width: 3.25rem; align-items: center; justify-content: center;
+    border-radius: 0.85rem; font-size: 1.5rem; font-weight: 900;
+    background: #fff7ed; color: #c2410c; border: 2px solid #fed7aa;
+  }
+  .lift-title-box .title { font-size: 1.35rem; font-weight: 900; line-height: 1.2; color: #0f172a; }
+  .lift-title-box .subtitle { font-size: 0.8rem; font-weight: 700; color: #ea580c; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+
+  .lift-chip {
+    display: flex; align-items: center; gap: 0.5rem; border-radius: 9999px;
+    padding: 0.45rem 1.1rem; font-size: 0.85rem; font-weight: 900;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    background: #fff7ed; color: #c2410c; border: 1.5px solid #fed7aa;
+  }
+
+  /* Big Vehicle Block */
+  .vehicle-block {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1.25rem; border-radius: 1rem; background: #f8fafc;
+    padding: 1.1rem 1.25rem; flex-shrink: 0; border: 2px solid #e2e8f0;
+  }
+  .plate-meta-group { display: flex; min-width: 0; align-items: center; gap: 1.15rem; flex: 1; }
+  .plate-badge-dark {
+    border-radius: 0.6rem; background: #0f172a; padding: 0.65rem 1.15rem;
+    font-size: 1.65rem; font-weight: 900; letter-spacing: 0.1em; color: #ffffff;
+    line-height: 1; flex-shrink: 0; white-space: nowrap; box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+  }
+  .vehicle-info { min-width: 0; flex: 1; }
+  .vehicle-car { font-size: 1.2rem; font-weight: 900; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .vehicle-service { font-size: 0.85rem; font-weight: 700; color: #64748b; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .timer-box { flex-shrink: 0; text-align: right; }
+  .timer-clock { font-size: 2.35rem; font-weight: 900; line-height: 1; color: #ea580c; white-space: nowrap; }
+  .timer-sub { margin-top: 0.25rem; font-size: 0.75rem; font-weight: 700; color: #94a3b8; white-space: nowrap; }
+
+  /* Big Tactile 4-Stage Task Buttons */
+  .stage-buttons-box { flex-shrink: 0; }
+  .stage-buttons-header {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 0.8rem; font-weight: 800; color: #475569; margin-bottom: 0.5rem; text-transform: uppercase;
+  }
+  .stage-buttons-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.55rem;
+  }
+  .btn-stage-tile {
+    border-radius: 0.75rem; border: 2px solid #cbd5e1; background: #ffffff;
+    padding: 0.75rem 0.4rem; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 0.3rem; cursor: pointer; transition: all 0.15s ease;
+    text-align: center;
+  }
+  .btn-stage-tile:active { transform: scale(0.97); }
+  .btn-stage-tile.is-done {
+    background: #ecfdf5; border-color: #10b981; color: #065f46;
+  }
+  .btn-stage-tile.is-active {
+    background: #fff7ed; border-color: #f97316; color: #9a3412;
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.2);
+  }
+  .btn-stage-tile.is-pending {
+    background: #f8fafc; border-color: #e2e8f0; color: #94a3b8;
+  }
+  .stage-tile-icon { font-size: 1.1rem; font-weight: 900; }
+  .stage-tile-title { font-size: 0.78rem; font-weight: 800; white-space: nowrap; }
+
+  /* Big Quick Oil Dispenser & Parts Bar */
+  .quick-controls-row {
+    display: flex; align-items: center; justify-content: space-between;
+    background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 0.85rem;
+    padding: 0.75rem 1rem; flex-shrink: 0; gap: 0.85rem; flex-wrap: nowrap;
+  }
+  .fluid-pill {
+    display: flex; align-items: center; gap: 0.65rem; font-size: 0.9rem; font-weight: 800; color: #1e293b;
+    white-space: nowrap;
+  }
+  .fluid-adjuster {
+    display: flex; align-items: center; gap: 0.4rem; background: #ffffff;
+    border: 1.5px solid #cbd5e1; border-radius: 0.55rem; padding: 0.2rem 0.4rem;
+  }
+  .btn-big-step {
+    width: 2rem; height: 2rem; border-radius: 0.45rem; border: none;
+    background: #ffedd5; color: #c2410c; font-weight: 900; font-size: 1.15rem;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.1s;
+  }
+  .btn-big-step:hover { background: #fed7aa; }
+  .btn-big-step:active { transform: scale(0.95); }
+
+  .btn-parts-pill {
+    display: inline-flex; align-items: center; gap: 0.5rem; border-radius: 0.65rem;
+    border: 1.5px solid #cbd5e1; background: #ffffff; padding: 0.55rem 0.95rem;
+    font-size: 0.825rem; font-weight: 800; color: #1e293b; cursor: pointer;
+    transition: all 0.15s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .btn-parts-pill:hover { background: #f8fafc; border-color: #94a3b8; }
+
+  /* Giant Hero Action Buttons (Bottom) */
+  .lift-actions-row { display: flex; gap: 0.85rem; flex-shrink: 0; }
+  .btn-complete-green {
+    flex: 1; border-radius: 0.85rem; background: #059669; padding: 1.15rem 1.5rem;
+    font-size: 1.1rem; font-weight: 900; letter-spacing: 0.04em; color: #ffffff;
+    border: none; cursor: pointer; transition: background 0.15s, transform 0.05s;
+    box-shadow: 0 4px 14px rgba(5, 150, 105, 0.35); display: flex; align-items: center; justify-content: center; gap: 0.65rem;
+  }
+  .btn-complete-green:hover { background: #047857; }
+  .btn-complete-green:active { transform: scale(0.99); }
+
+  .btn-hoist-sub {
+    border-radius: 0.85rem; border: 2px solid #e2e8f0; background: #ffffff;
+    padding: 0 1.5rem; font-size: 0.95rem; font-weight: 800; color: #475569;
+    cursor: pointer; transition: background 0.15s; display: flex; align-items: center; gap: 0.5rem;
+  }
+  .btn-hoist-sub:hover { background: #f8fafc; border-color: #cbd5e1; }
+
+  /* ================= RIGHT COLUMN: BIG TOUCH TABS ================= */
+  .right-section {
     display: flex;
     flex-direction: column;
-    gap: 0.85rem;
-    min-height: 0;
-    overflow-y: auto;
-  }
-
-  .workstation-card {
-    border-radius: 1rem;
-    border: 1px solid #e2e8f0;
+    border-radius: 1.25rem;
+    border: 2px solid #e2e8f0;
     background: #ffffff;
-    display: flex;
-    flex-direction: column;
-    flex: 1;
     min-height: 0;
     overflow: hidden;
   }
 
-  /* Workstation Top Action Bar */
-  .workstation-header {
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid #f1f5f9;
-    background: #ffffff;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    flex-shrink: 0;
+  /* Big Clean Tab Switcher */
+  .right-tab-header {
+    display: flex; align-items: center; border-bottom: 2px solid #e2e8f0;
+    background: #f8fafc; padding: 0.45rem 0.65rem 0 0.65rem; gap: 0.5rem; flex-shrink: 0;
   }
-  .workstation-vehicle { display: flex; align-items: center; gap: 0.85rem; }
-  .workstation-plate {
-    background: #0f172a; color: #ffffff; font-weight: 800; font-size: 1.35rem;
-    padding: 0.4rem 1rem; border-radius: 0.6rem; letter-spacing: 0.05em;
+  .tab-btn {
+    border: none; background: transparent; padding: 0.85rem 1.25rem;
+    font-size: 0.95rem; font-weight: 900; color: #64748b; cursor: pointer;
+    border-top-left-radius: 0.75rem; border-top-right-radius: 0.75rem;
+    display: flex; align-items: center; gap: 0.6rem; transition: all 0.15s;
+    border-bottom: 3px solid transparent;
   }
-  .workstation-titles h2 { font-size: 1.05rem; font-weight: 800; color: #0f172a; }
-  .workstation-titles p { font-size: 0.78rem; color: #64748b; font-weight: 500; }
-
-  .workstation-actions { display: flex; align-items: center; gap: 0.5rem; }
-  .btn-request-parts {
-    border-radius: 0.65rem; border: 1.5px solid #cbd5e1; background: #ffffff;
-    padding: 0.6rem 1rem; font-size: 0.82rem; font-weight: 700; color: #334155;
-    cursor: pointer; display: inline-flex; align-items: center; gap: 0.4rem; transition: all 0.15s;
+  .tab-btn:hover { color: #0f172a; }
+  .tab-btn.active {
+    background: #ffffff; color: #0284c7; border-bottom: 3px solid #0284c7;
   }
-  .btn-request-parts:hover { background: #f8fafc; border-color: #94a3b8; }
-  .btn-finish-tech {
-    border-radius: 0.65rem; background: #059669; border: none;
-    padding: 0.6rem 1.25rem; font-size: 0.82rem; font-weight: 800; color: #ffffff;
-    cursor: pointer; display: inline-flex; align-items: center; gap: 0.4rem;
-    box-shadow: 0 2px 6px rgba(5, 150, 105, 0.25); transition: background 0.15s;
+  .tab-badge {
+    background: #e2e8f0; color: #475569; padding: 0.2rem 0.6rem;
+    border-radius: 9999px; font-size: 0.75rem; font-weight: 900;
   }
-  .btn-finish-tech:hover { background: #047857; }
-
-  /* Workstation Body Tabs / Sections */
-  .workstation-body {
-    flex: 1; overflow-y: auto; padding: 1.1rem; display: flex; flex-direction: column; gap: 1rem;
+  .tab-btn.active .tab-badge {
+    background: #e0f2fe; color: #0284c7;
   }
 
-  /* Section Box */
-  .section-box {
-    border-radius: 0.85rem; border: 1px solid #e2e8f0; background: #f8fafc; padding: 1rem;
-  }
-  .section-box-header {
-    display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;
-  }
-  .section-box-title {
-    display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem;
-    font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.05em;
+  /* Tab Content Panes */
+  .tab-pane {
+    flex: 1; min-height: 0; overflow-y: auto; padding: 1.25rem;
+    display: flex; flex-direction: column; gap: 1rem;
   }
 
-  /* Task Steps */
-  .task-item-row {
+  /* Big Queue Cards */
+  .queue-card {
+    border-radius: 1rem; border: 2px solid #e2e8f0; background: #ffffff;
+    padding: 1.25rem 1.35rem; display: flex; flex-direction: column; gap: 1rem;
+    transition: all 0.15s ease;
+  }
+  .queue-card:hover { border-color: #38bdf8; box-shadow: 0 6px 18px rgba(14,165,233,0.1); }
+  .queue-card-top {
     display: flex; align-items: center; justify-content: space-between;
-    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 0.65rem;
-    padding: 0.75rem 1rem; margin-bottom: 0.5rem; transition: border 0.15s;
   }
-  .task-item-row.is-done { background: #f0fdf4; border-color: #bbf7d0; }
-  .task-item-left { display: flex; align-items: center; gap: 0.65rem; }
-  .task-step-num {
-    height: 1.75rem; width: 1.75rem; border-radius: 50%; background: #e2e8f0;
-    display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 800;
+  .queue-plate-dark {
+    background: #0f172a; color: #ffffff; padding: 0.5rem 1rem;
+    border-radius: 0.5rem; font-size: 1.35rem; font-weight: 900; letter-spacing: 0.1em;
   }
-  .task-item-row.is-done .task-step-num { background: #10b981; color: #ffffff; }
-  .task-title-text { font-size: 0.875rem; font-weight: 700; color: #1e293b; }
-  .task-lane-text { font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; }
+  .queue-origin-badge {
+    font-size: 0.75rem; font-weight: 800; color: #0369a1; background: #e0f2fe;
+    padding: 0.35rem 0.75rem; border-radius: 0.45rem; display: flex; align-items: center; gap: 0.4rem;
+  }
+  .queue-car-title { font-size: 1.15rem; font-weight: 900; color: #0f172a; }
+  .queue-car-svc { font-size: 0.85rem; color: #64748b; font-weight: 600; margin-top: 2px; }
 
-  .btn-task-action {
-    border-radius: 0.5rem; padding: 0.4rem 0.85rem; font-size: 0.75rem; font-weight: 800;
-    cursor: pointer; border: none; display: inline-flex; align-items: center; gap: 0.35rem;
+  .btn-pullin-blue {
+    width: 100%; border-radius: 0.75rem; background: #0284c7; padding: 0.95rem 1.25rem;
+    font-size: 0.95rem; font-weight: 900; letter-spacing: 0.04em; color: #ffffff;
+    border: none; cursor: pointer; transition: background 0.15s, transform 0.05s;
+    display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    box-shadow: 0 4px 10px rgba(2, 132, 199, 0.25);
   }
-  .btn-task-start { background: #0284c7; color: #ffffff; }
-  .btn-task-start:hover { background: #0369a1; }
-  .btn-task-finish { background: #059669; color: #ffffff; }
-  .btn-task-finish:hover { background: #047857; }
-  .task-completed-badge {
-    font-size: 0.75rem; font-weight: 800; color: #059669; display: inline-flex; align-items: center; gap: 0.3rem;
-  }
+  .btn-pullin-blue:hover { background: #0369a1; }
+  .btn-pullin-blue:active { transform: scale(0.99); }
 
-  /* Guided Inspection Checklist Grid */
-  .btn-quick-pass {
-    border-radius: 0.5rem; border: 1.5px solid #86efac; background: #f0fdf4;
-    color: #166534; padding: 0.35rem 0.85rem; font-size: 0.75rem; font-weight: 800;
-    cursor: pointer; display: inline-flex; align-items: center; gap: 0.35rem; transition: all 0.15s;
+  /* Big Touch Inspection Items */
+  .inspect-item-card {
+    display: flex; align-items: center; justify-content: space-between;
+    background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 0.85rem;
+    padding: 1rem 1.25rem; gap: 1rem; transition: all 0.15s ease;
   }
-  .btn-quick-pass:hover { background: #dcfce7; }
+  .inspect-item-card.is-passed {
+    background: #f0fdf4; border-color: #86efac;
+  }
+  .inspect-item-card.is-warn {
+    background: #fffbeb; border-color: #fde047;
+  }
+  .inspect-item-info { display: flex; flex-direction: column; gap: 0.3rem; }
+  .inspect-item-name { font-size: 1rem; font-weight: 900; color: #0f172a; }
+  .inspect-item-spec { font-size: 0.8rem; color: #64748b; font-weight: 700; }
 
-  .checklist-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.75rem;
+  .inspect-toggle-btn {
+    min-width: 115px; height: 46px; border-radius: 0.65rem; font-size: 0.9rem;
+    font-weight: 900; border: none; cursor: pointer; display: flex; align-items: center;
+    justify-content: center; gap: 0.4rem; transition: all 0.15s;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
   }
-  @media (min-width: 640px) {
-    .checklist-grid { grid-template-columns: repeat(2, 1fr); }
-  }
+  .toggle-pass { background: #10b981; color: #ffffff; }
+  .toggle-pass:hover { background: #059669; }
+  .toggle-warn { background: #f59e0b; color: #ffffff; }
+  .toggle-warn:hover { background: #d97706; }
 
-  .chk-card {
-    border-radius: 0.75rem; border: 1.5px solid #e2e8f0; background: #ffffff;
-    padding: 0.85rem; transition: all 0.15s ease;
+  .btn-pass-all {
+    width: 100%; border-radius: 0.75rem; background: #ecfdf5; border: 2px solid #a7f3d0;
+    color: #047857; padding: 0.85rem; font-size: 0.95rem; font-weight: 900;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    transition: all 0.15s; margin-top: 0.5rem;
   }
-  .chk-card.status-pass { border-color: #86efac; background: #f0fdf4; }
-  .chk-card.status-caution { border-color: #fde047; background: #fefce8; }
-  .chk-card.status-fail { border-color: #fca5a5; background: #fef2f2; }
-
-  .chk-card-top {
-    display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 0.6rem;
-  }
-  .chk-name { font-size: 0.875rem; font-weight: 800; color: #0f172a; }
-  .chk-sub { font-size: 0.72rem; color: #64748b; margin-top: 1px; }
-
-  /* 3 Status Buttons */
-  .chk-status-group { display: flex; gap: 3px; }
-  .btn-status-pill {
-    padding: 0.3rem 0.65rem; border-radius: 0.4rem; font-size: 0.72rem; font-weight: 800;
-    border: 1px solid #cbd5e1; background: #ffffff; color: #475569; cursor: pointer;
-    transition: all 0.1s;
-  }
-  .btn-status-pill:hover { background: #f1f5f9; }
-  .btn-status-pill.active-pass { background: #16a34a; border-color: #15803d; color: #ffffff; }
-  .btn-status-pill.active-caution { background: #f59e0b; border-color: #d97706; color: #ffffff; }
-  .btn-status-pill.active-fail { background: #ef4444; border-color: #dc2626; color: #ffffff; }
-
-  .chk-bottom-row {
-    display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;
-  }
-  .chk-input {
-    flex: 1; height: 32px; border-radius: 0.4rem; border: 1px solid #cbd5e1;
-    padding: 0 0.5rem; font-size: 0.78rem; font-weight: 600; background: #ffffff;
-  }
-  .chk-input:focus { outline: none; border-color: #0284c7; }
-  .btn-camera {
-    height: 32px; padding: 0 0.65rem; border-radius: 0.4rem; border: 1px solid #cbd5e1;
-    background: #ffffff; font-size: 0.75rem; font-weight: 700; color: #475569;
-    cursor: pointer; display: inline-flex; align-items: center; gap: 0.3rem;
-  }
-  .btn-camera:hover { background: #f1f5f9; }
+  .btn-pass-all:hover { background: #d1fae5; }
 
   /* Toast Notification */
   .toast {
-    position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
-    background: #0f172a; color: #ffffff; padding: 0.65rem 1.25rem; border-radius: 9999px;
-    font-size: 0.82rem; font-weight: 700; z-index: 1000; box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-    display: none;
+    position: fixed; bottom: 1.75rem; left: 50%; transform: translateX(-50%);
+    background: #0f172a; color: #ffffff; padding: 0.85rem 1.75rem; border-radius: 9999px;
+    font-size: 0.95rem; font-weight: 800; z-index: 2000; box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    display: none; align-items: center; gap: 0.6rem;
   }
 </style>
 </head>
@@ -363,299 +365,256 @@
 
 <div class="app-container">
 
-  <!-- HEADER -->
+  <!-- ================= APP HEADER ================= -->
   <header class="app-header">
     <div class="header-brand">
       <div class="brand-icon">
-        <i class="fa-solid fa-wrench"></i>
+        <i class="fa fa-wrench"></i>
       </div>
-      <div class="brand-text">
-        <h1>TECHNICAL &amp; OIL SERVICE</h1>
-        <p>Bay 4 lift &amp; vehicle inspection cockpit</p>
+      <div>
+        <h1 class="brand-text">TECHNICIAN DUTY STATION</h1>
+        <p class="brand-text">Bay 4 Hydraulic Lift &bull; Big Touch Control Center</p>
       </div>
     </div>
 
     <div class="header-actions">
-      <span class="pill-tech-status">
-        <span class="pill-dot"></span>
-        <span id="techLiftStatus">Bay 4 Occupied &bull; 1 in service</span>
+      <span class="pill-status">
+        <span class="pill-dot blink"></span>
+        <span id="headerStatus">Bay 4 Active &bull; 2 Waiting</span>
       </span>
-      <span class="pill-clock mono" id="clockDisplay">11:30:00</span>
+      <span class="pill-clock mono" id="clockDisplay">13:40:00</span>
       <a href="index.html#mechanic" class="btn-pos-back">
-        <i class="fa-solid fa-arrow-left"></i> Back to POS
+        <i class="fa fa-arrow-left"></i> POS System
       </a>
     </div>
   </header>
 
-  <!-- MAIN 2-COLUMN WORKSPACE -->
-  <main class="workspace-grid">
+  <!-- ================= MAIN 2-COLUMN WORKSPACE ================= -->
+  <main class="main-grid">
 
-    <!-- LEFT: BAY 4 LIFT + WAITING FROM WASH -->
-    <section class="left-column">
+    <!-- ================= LEFT COLUMN: BIG HERO LIFT CARD ================= -->
+    <section class="left-hero-section">
+      <!-- Big Lift Card -->
+      <article class="lift-hero-card card-shadow">
+        <span class="lift-accent-stripe"></span>
 
-      <!-- Bay 4 Lift Card -->
-      <div class="bay4-card is-active card" id="bay4StatusCard">
-        <span class="bay4-accent-stripe"></span>
-        <div class="bay4-top">
-          <div class="bay4-id-group">
-            <div class="bay4-tile">4</div>
-            <div>
-              <div class="bay4-title">Technical Service Bay</div>
-              <div class="bay4-sub">Vehicle Lift 1</div>
+        <!-- Card Header -->
+        <div class="lift-top-row">
+          <div class="lift-id-group">
+            <div class="lift-tile">4</div>
+            <div class="lift-title-box">
+              <div class="title">Technical Service Bay</div>
+              <div class="subtitle"><i class="fa fa-shield"></i> Vehicle Hoist 1 &bull; Elevated 1.85m</div>
             </div>
           </div>
-          <span class="bay4-chip chip-lift-busy" id="liftChip">
-            <i class="fa-solid fa-gear fa-spin"></i> In Service
+          <span class="lift-chip" id="liftChip">
+            <i class="fa fa-cog fa-spin"></i> In Service
           </span>
         </div>
 
-        <div class="bay4-car-row">
-          <div class="plate-box mono" id="activeLiftPlate">W-4577</div>
-          <div class="bay4-car-info">
-            <div class="model" id="activeLiftModel">Lexus RX350 (SUV)</div>
-            <div class="svc" id="activeLiftSvc">Engine Oil 5W-30 + Tire Balance</div>
+        <!-- Big Bold Vehicle Block -->
+        <div class="vehicle-block">
+          <div class="plate-meta-group">
+            <div class="plate-badge-dark mono" id="liftPlate">W-4577</div>
+            <div class="vehicle-info">
+              <div class="vehicle-car" id="liftCar">Lexus RX350 Luxury (SUV)</div>
+              <div class="vehicle-service" id="liftSvc">Full Synthetic 5W-30 + Tire Rotation &bull; Customer: Sokha Mean</div>
+            </div>
+          </div>
+          <div class="timer-box">
+            <div class="timer-clock mono" id="liftTimer">18:42</div>
+            <div class="timer-sub">of 30m target</div>
           </div>
         </div>
 
-        <div class="bay4-meta-row">
-          <span class="timer-pill mono" id="liftTimerVal">
-            <i class="fa-regular fa-clock"></i> 18:42 / 30m target
-          </span>
-          <span style="color: #64748b;">
-            Tech: <strong>Dona</strong> &bull; Oil: <strong>4.2L Synthetic</strong>
-          </span>
-        </div>
-      </div>
-
-      <!-- Waiting Handover List (From Wash) -->
-      <div class="handover-section card">
-        <div class="handover-header">
-          <h2 class="handover-title">
-            <i class="fa-solid fa-handshake" style="color: #0284c7;"></i>
-            <span>Waiting from Wash</span>
-          </h2>
-          <span class="handover-badge" id="handoverCountBadge">2 vehicles</span>
-        </div>
-
-        <div class="handover-list scroll-thin" id="handoverList">
-          <!-- Item 1 -->
-          <div class="handover-card is-urgent">
-            <div class="handover-card-top">
-              <span class="handover-plate mono">2AF-1234</span>
-              <span class="handover-tag">Wash Finished</span>
-            </div>
-            <div class="handover-desc">Mazda 3 (Sedan) &bull; Oil &amp; Filter Change</div>
-            <div class="handover-cust">Guest &bull; Waiting 8 mins after wash</div>
-            <button type="button" class="btn-receive-car" onclick="techApp.receiveCar('2AF-1234', 'Mazda 3', 'Oil & Filter Change')">
-              <i class="fa-solid fa-arrow-right"></i> Receive to Lift Bay 4
+        <!-- Big Tactile 4-Stage Task Buttons -->
+        <div class="stage-buttons-box">
+          <div class="stage-buttons-header">
+            <span>Procedural Execution Stages (Tap to Toggle)</span>
+            <span id="stageProgressTxt" style="color:#0284c7; font-weight:900;">2 of 4 Completed (50%)</span>
+          </div>
+          <div class="stage-buttons-grid">
+            
+            <button type="button" class="btn-stage-tile is-done" id="sbtn-0" onclick="techApp.toggleStage(0)">
+              <div class="stage-tile-icon"><i class="fa fa-check"></i></div>
+              <div class="stage-tile-title">1. Drain Oil</div>
             </button>
-          </div>
 
-          <!-- Item 2 -->
-          <div class="handover-card">
-            <div class="handover-card-top">
-              <span class="handover-plate mono">2Z-9911</span>
-              <span class="handover-tag">Wash Finished</span>
-            </div>
-            <div class="handover-desc">Ford Ranger (Pickup) &bull; Brake Fluid Check</div>
-            <div class="handover-cust">Guest &bull; Waiting 4 mins after wash</div>
-            <button type="button" class="btn-receive-car" onclick="techApp.receiveCar('2Z-9911', 'Ford Ranger', 'Brake Fluid Check')">
-              <i class="fa-solid fa-arrow-right"></i> Receive to Lift Bay 4
+            <button type="button" class="btn-stage-tile is-done" id="sbtn-1" onclick="techApp.toggleStage(1)">
+              <div class="stage-tile-icon"><i class="fa fa-check"></i></div>
+              <div class="stage-tile-title">2. Filter Swap</div>
             </button>
+
+            <button type="button" class="btn-stage-tile is-active" id="sbtn-2" onclick="techApp.toggleStage(2)">
+              <div class="stage-tile-icon"><i class="fa fa-play"></i></div>
+              <div class="stage-tile-title">3. Refill Oil</div>
+            </button>
+
+            <button type="button" class="btn-stage-tile is-pending" id="sbtn-3" onclick="techApp.toggleStage(3)">
+              <div class="stage-tile-icon"><i class="fa fa-circle-o"></i></div>
+              <div class="stage-tile-title">4. Safety Check</div>
+            </button>
+
           </div>
         </div>
-      </div>
 
+        <!-- Big Quick Oil Dispenser & Parts Bar -->
+        <div class="quick-controls-row">
+          <div class="fluid-pill">
+            <i class="fa fa-filter" style="color:#ea580c; font-size:1.25rem;"></i>
+            <span>Liqui Moly 5W-30:</span>
+            <div class="fluid-adjuster">
+              <button type="button" class="btn-big-step" onclick="techApp.adjOil(-0.1)">-</button>
+              <strong class="mono" id="oilVolDisplay" style="color:#c2410c; min-width:4rem; text-align:center; font-size:1.15rem;">4.2 L</strong>
+              <button type="button" class="btn-big-step" onclick="techApp.adjOil(+0.1)">+</button>
+            </div>
+          </div>
+
+          <button type="button" class="btn-parts-pill" onclick="techApp.openPartsPrompt()">
+            <i class="fa fa-cube" style="color:#0284c7; font-size:1.1rem;"></i>
+            <span id="partsCountText">Warehouse Parts: Filter (#04152) &bull; Washer</span>
+          </button>
+        </div>
+
+        <!-- Giant Bottom Action Buttons -->
+        <div class="lift-actions-row">
+          <button type="button" class="btn-complete-green" onclick="techApp.completeService()">
+            <i class="fa fa-check-circle" style="font-size:1.35rem;"></i>
+            <span>COMPLETE SERVICE &amp; HANDOVER TO QC</span>
+          </button>
+          <button type="button" class="btn-hoist-sub" onclick="techApp.toggleHoist()">
+            <i class="fa fa-arrows-v"></i> Hoist
+          </button>
+        </div>
+
+      </article>
     </section>
 
-    <!-- RIGHT: ACTIVE JOB EXECUTION WORKSTATION -->
-    <section class="right-column">
-      <div class="workstation-card card">
-
-        <!-- Top Header Action Bar -->
-        <div class="workstation-header">
-          <div class="workstation-vehicle">
-            <div class="workstation-plate mono" id="wsPlate">W-4577</div>
-            <div class="workstation-titles">
-              <h2 id="wsTitle">Lexus RX350 &bull; Full Synthetic Oil Service</h2>
-              <p id="wsSub">Order #ORD-261112-006 &bull; Bay 4 Lift &bull; Customer: Paid Token Test Guest</p>
-            </div>
-          </div>
-          <div class="workstation-actions">
-            <button type="button" class="btn-request-parts" onclick="techApp.requestParts()">
-              <i class="fa-solid fa-boxes-packing text-primary"></i> Request Parts
-            </button>
-            <button type="button" class="btn-finish-tech" onclick="techApp.finishJob()">
-              <i class="fa-solid fa-circle-check"></i> Complete &amp; Handover
-            </button>
-          </div>
-        </div>
-
-        <div class="workstation-body scroll-thin">
-
-          <!-- 1. Tasks in Progress -->
-          <div class="section-box">
-            <div class="section-box-header">
-              <h3 class="section-box-title">
-                <i class="fa-solid fa-list-check" style="color: #0284c7;"></i>
-                <span>Tasks in Progress</span>
-              </h3>
-              <span style="font-size: 0.75rem; font-weight: 700; color: #0284c7;" id="tasksProgressText">1 of 3 Completed</span>
-            </div>
-
-            <!-- Task 1 -->
-            <div class="task-item-row is-done" id="taskRow1">
-              <div class="task-item-left">
-                <div class="task-step-num"><i class="fa-solid fa-check"></i></div>
-                <div>
-                  <div class="task-title-text">Engine Oil Drain &amp; Filter Replacement</div>
-                  <div class="task-lane-text">Lane 1 &bull; 4.2L Synthetic 5W-30</div>
-                </div>
-              </div>
-              <span class="task-completed-badge"><i class="fa-solid fa-circle-check"></i> Done</span>
-            </div>
-
-            <!-- Task 2 -->
-            <div class="task-item-row" id="taskRow2">
-              <div class="task-item-left">
-                <div class="task-step-num">2</div>
-                <div>
-                  <div class="task-title-text">Tire Pressure &amp; Wheel Balance Check</div>
-                  <div class="task-lane-text">Lane 1 &bull; Target: 32 PSI all around</div>
-                </div>
-              </div>
-              <button type="button" class="btn-task-action btn-task-finish" id="btnTask2" onclick="techApp.toggleTask(2)">
-                <i class="fa-solid fa-check"></i> Mark Finish
-              </button>
-            </div>
-
-            <!-- Task 3 -->
-            <div class="task-item-row" id="taskRow3">
-              <div class="task-item-left">
-                <div class="task-step-num">3</div>
-                <div>
-                  <div class="task-title-text">Brake Fluid &amp; Coolant Inspection</div>
-                  <div class="task-lane-text">Lane 1 &bull; Fluid Reservoir Check</div>
-                </div>
-              </div>
-              <button type="button" class="btn-task-action btn-task-start" id="btnTask3" onclick="techApp.toggleTask(3)">
-                <i class="fa-solid fa-play"></i> Start Task
-              </button>
-            </div>
-          </div>
-
-          <!-- 2. Guided Safety Inspection Checklist -->
-          <div class="section-box">
-            <div class="section-box-header">
-              <div style="display: flex; align-items: center; gap: 0.6rem;">
-                <h3 class="section-box-title">
-                  <i class="fa-solid fa-clipboard-check" style="color: #059669;"></i>
-                  <span>Guided Safety Checklist</span>
-                </h3>
-                <span style="border-radius: 9999px; background: #ecfdf5; color: #047857; font-size: 0.72rem; font-weight: 800; padding: 2px 8px; border: 1px solid #a7f3d0;" id="chkSummaryBadge">
-                  6/8 Passed
-                </span>
-              </div>
-              <button type="button" class="btn-quick-pass" onclick="techApp.quickPassAll()">
-                <i class="fa-solid fa-check-double"></i> Quick Pass All
-              </button>
-            </div>
-
-            <div class="checklist-grid" id="chkGrid">
-              <!-- Item 1: Brake Pad -->
-              <div class="chk-card status-pass" id="chk-1">
-                <div class="chk-card-top">
-                  <div>
-                    <div class="chk-name">Brake Pad Thickness *</div>
-                    <div class="chk-sub">Minimum safe thickness 3.0mm</div>
-                  </div>
-                  <div class="chk-status-group">
-                    <button class="btn-status-pill active-pass" onclick="techApp.setChk(1, 'pass')">Pass</button>
-                    <button class="btn-status-pill" onclick="techApp.setChk(1, 'caution')">Warn</button>
-                    <button class="btn-status-pill" onclick="techApp.setChk(1, 'fail')">Fail</button>
-                  </div>
-                </div>
-                <div class="chk-bottom-row">
-                  <input type="text" class="chk-input" value="6.5 mm" placeholder="Measurement...">
-                  <button class="btn-camera" onclick="techApp.say('Photo attached')"><i class="fa-solid fa-camera"></i></button>
-                </div>
-              </div>
-
-              <!-- Item 2: Battery -->
-              <div class="chk-card status-pass" id="chk-2">
-                <div class="chk-card-top">
-                  <div>
-                    <div class="chk-name">Battery Health &amp; Voltage *</div>
-                    <div class="chk-sub">Standard 12.4V - 12.8V</div>
-                  </div>
-                  <div class="chk-status-group">
-                    <button class="btn-status-pill active-pass" onclick="techApp.setChk(2, 'pass')">Pass</button>
-                    <button class="btn-status-pill" onclick="techApp.setChk(2, 'caution')">Warn</button>
-                    <button class="btn-status-pill" onclick="techApp.setChk(2, 'fail')">Fail</button>
-                  </div>
-                </div>
-                <div class="chk-bottom-row">
-                  <input type="text" class="chk-input" value="12.6 V" placeholder="Measurement...">
-                  <button class="btn-camera" onclick="techApp.say('Photo attached')"><i class="fa-solid fa-camera"></i></button>
-                </div>
-              </div>
-
-              <!-- Item 3: Tire Tread Depth -->
-              <div class="chk-card status-pass" id="chk-3">
-                <div class="chk-card-top">
-                  <div>
-                    <div class="chk-name">Tire Tread Depth *</div>
-                    <div class="chk-sub">Minimum safe 2.5mm</div>
-                  </div>
-                  <div class="chk-status-group">
-                    <button class="btn-status-pill active-pass" onclick="techApp.setChk(3, 'pass')">Pass</button>
-                    <button class="btn-status-pill" onclick="techApp.setChk(3, 'caution')">Warn</button>
-                    <button class="btn-status-pill" onclick="techApp.setChk(3, 'fail')">Fail</button>
-                  </div>
-                </div>
-                <div class="chk-bottom-row">
-                  <input type="text" class="chk-input" value="5.2 mm" placeholder="Measurement...">
-                  <button class="btn-camera" onclick="techApp.say('Photo attached')"><i class="fa-solid fa-camera"></i></button>
-                </div>
-              </div>
-
-              <!-- Item 4: Oil Leak Check -->
-              <div class="chk-card status-pass" id="chk-4">
-                <div class="chk-card-top">
-                  <div>
-                    <div class="chk-name">Underbody Oil Leak Check *</div>
-                    <div class="chk-sub">Oil pan &amp; drain plug inspection</div>
-                  </div>
-                  <div class="chk-status-group">
-                    <button class="btn-status-pill active-pass" onclick="techApp.setChk(4, 'pass')">Pass</button>
-                    <button class="btn-status-pill" onclick="techApp.setChk(4, 'caution')">Warn</button>
-                    <button class="btn-status-pill" onclick="techApp.setChk(4, 'fail')">Fail</button>
-                  </div>
-                </div>
-                <div class="chk-bottom-row">
-                  <input type="text" class="chk-input" value="Clean / Dry" placeholder="Notes...">
-                  <button class="btn-camera" onclick="techApp.say('Photo attached')"><i class="fa-solid fa-camera"></i></button>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-        </div>
+    <!-- ================= RIGHT COLUMN: BIG TOUCH TABS ================= -->
+    <section class="right-section card-shadow">
+      
+      <!-- Big Clean Tab Switcher -->
+      <div class="right-tab-header">
+        <button type="button" class="tab-btn active" id="tabBtnQueue" onclick="techApp.switchTab('queue')">
+          <i class="fa fa-list-ol"></i>
+          <span>Waiting from Wash</span>
+          <span class="tab-badge" id="queueBadge">2</span>
+        </button>
+        <button type="button" class="tab-btn" id="tabBtnInspection" onclick="techApp.switchTab('inspection')">
+          <i class="fa fa-shield"></i>
+          <span>Safety Inspection</span>
+          <span class="tab-badge" id="inspectBadge" style="background:#dcfce7; color:#15803d;">4/4 Pass</span>
+        </button>
       </div>
+
+      <!-- TAB 1: WAITING QUEUE PANE (Big Cards & Big Buttons) -->
+      <div class="tab-pane scroll-thin" id="paneQueue">
+        
+        <!-- Big Queue Card 1 -->
+        <article class="queue-card" id="qcard-1">
+          <div class="queue-card-top">
+            <span class="queue-plate-dark mono">2AF-1234</span>
+            <span class="queue-origin-badge">
+              <i class="fa fa-check-circle"></i> From Wash Bay 2
+            </span>
+          </div>
+          <div>
+            <div class="queue-car-title">Mazda 3 (Sedan)</div>
+            <div class="queue-car-svc">Oil &amp; Filter Change &bull; Waiting 8 mins after exterior dry</div>
+          </div>
+          <button type="button" class="btn-pullin-blue" onclick="techApp.pullIn('2AF-1234', 'Mazda 3 (Sedan)', 'Oil & Filter Change', 'qcard-1')">
+            <i class="fa fa-arrow-right"></i> PULL ONTO BAY 4 LIFT
+          </button>
+        </article>
+
+        <!-- Big Queue Card 2 -->
+        <article class="queue-card" id="qcard-2">
+          <div class="queue-card-top">
+            <span class="queue-plate-dark mono">2Z-9911</span>
+            <span class="queue-origin-badge">
+              <i class="fa fa-check-circle"></i> From Wash Bay 1
+            </span>
+          </div>
+          <div>
+            <div class="queue-car-title">Ford Ranger (Pickup)</div>
+            <div class="queue-car-svc">Brake Fluid Flush &bull; Waiting 4 mins after exterior dry</div>
+          </div>
+          <button type="button" class="btn-pullin-blue" onclick="techApp.pullIn('2Z-9911', 'Ford Ranger (Pickup)', 'Brake Fluid Flush', 'qcard-2')">
+            <i class="fa fa-arrow-right"></i> PULL ONTO BAY 4 LIFT
+          </button>
+        </article>
+
+      </div>
+
+      <!-- TAB 2: SAFETY INSPECTION PANE (Big Touch Items) -->
+      <div class="tab-pane scroll-thin" id="paneInspection" style="display:none;">
+        
+        <!-- Big Item 1: Brake Pads -->
+        <div class="inspect-item-card is-passed" id="irow-1">
+          <div class="inspect-item-info">
+            <span class="inspect-item-name">1. Brake Pad Thickness</span>
+            <span class="inspect-item-spec">Measured: <strong>6.5 mm</strong> (Safe &gt; 3.0mm)</span>
+          </div>
+          <button type="button" class="inspect-toggle-btn toggle-pass" onclick="techApp.toggleInspect(1)">
+            <i class="fa fa-check"></i> PASS
+          </button>
+        </div>
+
+        <!-- Big Item 2: Battery -->
+        <div class="inspect-item-card is-passed" id="irow-2">
+          <div class="inspect-item-info">
+            <span class="inspect-item-name">2. 12V Battery Health</span>
+            <span class="inspect-item-spec">Resting: <strong>12.6 V</strong> (Standard 12.4 - 12.8V)</span>
+          </div>
+          <button type="button" class="inspect-toggle-btn toggle-pass" onclick="techApp.toggleInspect(2)">
+            <i class="fa fa-check"></i> PASS
+          </button>
+        </div>
+
+        <!-- Big Item 3: Tire Tread -->
+        <div class="inspect-item-card is-passed" id="irow-3">
+          <div class="inspect-item-info">
+            <span class="inspect-item-name">3. Tire Tread Depth &amp; Pressure</span>
+            <span class="inspect-item-spec">Depth: <strong>5.2 mm</strong> &bull; 34 PSI</span>
+          </div>
+          <button type="button" class="inspect-toggle-btn toggle-pass" onclick="techApp.toggleInspect(3)">
+            <i class="fa fa-check"></i> PASS
+          </button>
+        </div>
+
+        <!-- Big Item 4: Fluid Leaks -->
+        <div class="inspect-item-card is-passed" id="irow-4">
+          <div class="inspect-item-info">
+            <span class="inspect-item-name">4. Underbody Fluid Leaks</span>
+            <span class="inspect-item-spec">Condition: <strong>Clean &amp; Dry</strong></span>
+          </div>
+          <button type="button" class="inspect-toggle-btn toggle-pass" onclick="techApp.toggleInspect(4)">
+            <i class="fa fa-check"></i> PASS
+          </button>
+        </div>
+
+        <button type="button" class="btn-pass-all" onclick="techApp.passAll()">
+          <i class="fa fa-check-double"></i> PASS ALL INSPECTION POINTS
+        </button>
+
+      </div>
+
     </section>
 
   </main>
 
-  <div class="toast" id="appToast"></div>
+  <div class="toast" id="appToast">
+    <i class="fa fa-info-circle"></i>
+    <span id="toastMsg"></span>
+  </div>
+
 </div>
 
 <script>
-// Pure Vanilla Interactive Engine for Idea 1
 const techApp = {
-  toastTimer: null,
-  tasks: { 1: 'done', 2: 'working', 3: 'idle' },
-  checklists: { 1: 'pass', 2: 'pass', 3: 'pass', 4: 'pass' },
+  oil: 4.2,
+  stages: [1, 1, 0, -1], // 1: done, 0: active, -1: pending
+  inspect: { 1: true, 2: true, 3: true, 4: true },
 
   init() {
     this.tick();
@@ -670,62 +629,144 @@ const techApp = {
 
   say(msg) {
     const t = document.getElementById('appToast');
-    if (!t) return;
-    t.textContent = msg;
-    t.style.display = 'block';
-    clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2200);
+    const m = document.getElementById('toastMsg');
+    if (!t || !m) return;
+    m.textContent = msg;
+    t.style.display = 'flex';
+    clearTimeout(this._timer);
+    this._timer = setTimeout(() => { t.style.display = 'none'; }, 2200);
   },
 
-  toggleTask(id) {
-    const row = document.getElementById('taskRow' + id);
-    const btn = document.getElementById('btnTask' + id);
-    if (this.tasks[id] === 'idle') {
-      this.tasks[id] = 'working';
-      btn.className = 'btn-task-action btn-task-finish';
-      btn.innerHTML = '<i class="fa-solid fa-check"></i> Mark Finish';
-      this.say('Task started');
+  switchTab(tab) {
+    const btnQ = document.getElementById('tabBtnQueue');
+    const btnI = document.getElementById('tabBtnInspection');
+    const paneQ = document.getElementById('paneQueue');
+    const paneI = document.getElementById('paneInspection');
+
+    if (tab === 'queue') {
+      btnQ.className = 'tab-btn active';
+      btnI.className = 'tab-btn';
+      paneQ.style.display = 'flex';
+      paneI.style.display = 'none';
     } else {
-      this.tasks[id] = 'done';
-      row.className = 'task-item-row is-done';
-      row.querySelector('.task-step-num').innerHTML = '<i class="fa-solid fa-check"></i>';
-      btn.outerHTML = '<span class="task-completed-badge"><i class="fa-solid fa-circle-check"></i> Done</span>';
-      this.say('Task completed');
+      btnQ.className = 'tab-btn';
+      btnI.className = 'tab-btn active';
+      paneQ.style.display = 'none';
+      paneI.style.display = 'flex';
     }
   },
 
-  setChk(id, status) {
-    this.checklists[id] = status;
-    const card = document.getElementById('chk-' + id);
-    if (!card) return;
-    card.className = 'chk-card status-' + status;
-    const pills = card.querySelectorAll('.btn-status-pill');
-    pills[0].className = 'btn-status-pill' + (status === 'pass' ? ' active-pass' : '');
-    pills[1].className = 'btn-status-pill' + (status === 'caution' ? ' active-caution' : '');
-    pills[2].className = 'btn-status-pill' + (status === 'fail' ? ' active-fail' : '');
-    this.say('Item ' + id + ' set to ' + status.toUpperCase());
+  adjOil(delta) {
+    this.oil = Math.max(0, Math.round((this.oil + delta) * 10) / 10);
+    document.getElementById('oilVolDisplay').textContent = this.oil.toFixed(1) + ' L';
+    this.say(`Oil volume: ${this.oil.toFixed(1)} L`);
   },
 
-  quickPassAll() {
-    [1, 2, 3, 4].forEach(id => this.setChk(id, 'pass'));
-    this.say('All items marked PASS');
+  toggleStage(idx) {
+    if (this.stages[idx] === 1) {
+      this.stages[idx] = 0;
+    } else if (this.stages[idx] === 0) {
+      this.stages[idx] = 1;
+    } else {
+      this.stages[idx] = 0;
+    }
+    this.renderStages();
   },
 
-  requestParts() {
-    this.say('Parts requisition modal opened: Oil Filter 90915-YZZD1');
+  renderStages() {
+    let done = 0;
+    for (let i = 0; i < 4; i++) {
+      const btn = document.getElementById('sbtn-' + i);
+      const icon = btn.querySelector('.stage-tile-icon');
+      if (this.stages[i] === 1) {
+        btn.className = 'btn-stage-tile is-done';
+        icon.innerHTML = '<i class="fa fa-check"></i>';
+        done++;
+      } else if (this.stages[i] === 0) {
+        btn.className = 'btn-stage-tile is-active';
+        icon.innerHTML = '<i class="fa fa-play"></i>';
+      } else {
+        btn.className = 'btn-stage-tile is-pending';
+        icon.innerHTML = '<i class="fa fa-circle-o"></i>';
+      }
+    }
+    const pct = Math.round((done / 4) * 100);
+    document.getElementById('stageProgressTxt').textContent = `${done} of 4 Completed (${pct}%)`;
   },
 
-  finishJob() {
-    this.say('Technical Job Complete! Ready for QC Inspection');
+  toggleInspect(id) {
+    this.inspect[id] = !this.inspect[id];
+    const row = document.getElementById('irow-' + id);
+    const btn = row.querySelector('.inspect-toggle-btn');
+    if (this.inspect[id]) {
+      row.className = 'inspect-item-card is-passed';
+      btn.className = 'inspect-toggle-btn toggle-pass';
+      btn.innerHTML = '<i class="fa fa-check"></i> PASS';
+      this.say(`Item #${id} marked PASS`);
+    } else {
+      row.className = 'inspect-item-card is-warn';
+      btn.className = 'inspect-toggle-btn toggle-warn';
+      btn.innerHTML = '<i class="fa fa-exclamation-triangle"></i> ATTENTION';
+      this.say(`Item #${id} flagged for Attention`);
+    }
+    this.updateInspectBadge();
   },
 
-  receiveCar(plate, car, svc) {
-    document.getElementById('activeLiftPlate').textContent = plate;
-    document.getElementById('activeLiftModel').textContent = car;
-    document.getElementById('activeLiftSvc').textContent = svc;
-    document.getElementById('wsPlate').textContent = plate;
-    document.getElementById('wsTitle').textContent = car + ' • ' + svc;
-    this.say(plate + ' received to Lift Bay 4');
+  passAll() {
+    [1, 2, 3, 4].forEach(id => {
+      this.inspect[id] = true;
+      const row = document.getElementById('irow-' + id);
+      const btn = row.querySelector('.inspect-toggle-btn');
+      row.className = 'inspect-item-card is-passed';
+      btn.className = 'inspect-toggle-btn toggle-pass';
+      btn.innerHTML = '<i class="fa fa-check"></i> PASS';
+    });
+    this.updateInspectBadge();
+    this.say('All inspection items set to PASS');
+  },
+
+  updateInspectBadge() {
+    const passed = Object.values(this.inspect).filter(Boolean).length;
+    const badge = document.getElementById('inspectBadge');
+    badge.textContent = `${passed}/4 Pass`;
+    badge.style.background = passed === 4 ? '#dcfce7' : '#fef3c7';
+    badge.style.color = passed === 4 ? '#15803d' : '#b45309';
+  },
+
+  pullIn(plate, car, svc, cardId) {
+    document.getElementById('liftPlate').textContent = plate;
+    document.getElementById('liftCar').textContent = car;
+    document.getElementById('liftSvc').textContent = svc + ' • Freshly received from Wash';
+    document.getElementById('liftTimer').textContent = '00:00';
+    
+    const c = document.getElementById(cardId);
+    if (c) c.remove();
+
+    const count = document.querySelectorAll('.queue-card').length;
+    document.getElementById('queueBadge').textContent = count;
+    document.getElementById('headerStatus').textContent = `Bay 4 Active • ${count} In Queue`;
+
+    this.stages = [0, -1, -1, -1];
+    this.renderStages();
+
+    this.say(`Vehicle ${plate} pulled onto Bay 4 Lift!`);
+  },
+
+  completeService() {
+    this.say('Service complete! Ready for QC & Handover.');
+    document.getElementById('liftChip').className = 'lift-chip';
+    document.getElementById('liftChip').style.background = '#ecfdf5';
+    document.getElementById('liftChip').style.color = '#059669';
+    document.getElementById('liftChip').style.borderColor = '#a7f3d0';
+    document.getElementById('liftChip').innerHTML = '<i class="fa fa-check"></i> Finished';
+  },
+
+  toggleHoist() {
+    this.say('Hydraulic Hoist control toggled: Lowering to 0.0m ground level');
+  },
+
+  openPartsPrompt() {
+    this.say('Parts Requisition: 1x Oil Filter (#04152), 1x Crush Washer added to invoice.');
   }
 };
 
@@ -734,4 +775,3 @@ window.addEventListener('DOMContentLoaded', () => techApp.init());
 
 </body>
 </html>
-

@@ -915,6 +915,8 @@ class PosApp {
             this.renderWasherScreen();
         } else if (current === 'mechanic') {
             this.renderMechanicScreen();
+        } else if (current === 'appointments') {
+            this.renderFilteredAppointments();
         }
 
         if (activeSection) {
@@ -2191,7 +2193,26 @@ class PosApp {
         document.getElementById('apptServiceSelect')?.addEventListener('change', () => this.loadAppointmentSlots());
         document.getElementById('formBookAppt')?.addEventListener('submit', (e) => this.handleSaveAppointment(e));
         document.getElementById('btnSaveAppt')?.addEventListener('click', (e) => this.handleSaveAppointment(e));
-        document.getElementById('apptViewDate')?.addEventListener('change', () => this.loadAppointmentsList());
+        document.getElementById('apptViewDate')?.addEventListener('change', async () => {
+            const val = document.getElementById('apptViewDate')?.value;
+            const todayStr = new Date().toISOString().split('T')[0];
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const tomorrowStr = tomorrow.toISOString().split('T')[0];
+            const btnToday = document.getElementById('btnApptQuickToday');
+            const btnTomorrow = document.getElementById('btnApptQuickTomorrow');
+            if (val === todayStr) {
+                btnToday?.classList.add('active');
+                btnTomorrow?.classList.remove('active');
+            } else if (val === tomorrowStr) {
+                btnTomorrow?.classList.add('active');
+                btnToday?.classList.remove('active');
+            } else {
+                btnToday?.classList.remove('active');
+                btnTomorrow?.classList.remove('active');
+            }
+            await this.loadAppointmentsList();
+        });
         document.getElementById('btnRefreshAppointments')?.addEventListener('click', async () => {
             await this.loadAppointmentsList();
             await this.loadAppointmentSlots();
@@ -3733,8 +3754,8 @@ class PosApp {
             const isKm = (I18nManager.getLang() === 'km');
             const isMech = this.isMechanicalService(svc);
             const svcBadgeHtml = isMech
-                ? `<span class="card-tag-type mechanical"><i class="fa-solid fa-sparkle">✦</i> MECHANICAL</span>`
-                : `<span class="card-tag-type wash"><i class="fa-solid fa-sparkle">✦</i> WASH</span>`;
+                ? `<span class="card-tag-type mechanical"><i class="fa-solid fa-wrench"></i> MECHANICAL</span>`
+                : `<span class="card-tag-type wash"><i class="fa-solid fa-shower"></i> WASH</span>`;
             const compactBadgeHtml = isMech
                 ? `<span class="item-badge mechanical" style="background:#fef3c7;color:#b45309;font-weight:700;"><i class="fa-solid fa-wrench"></i> Mech</span>`
                 : `<span class="item-badge wash" style="background:#e0f2fe;color:#0369a1;font-weight:700;"><i class="fa-solid fa-shower"></i> Wash</span>`;
@@ -3757,7 +3778,7 @@ class PosApp {
                          ontouchend="PosApp.handleCardPressEnd(event)"
                          ontouchmove="PosApp.handleCardPressMove(event)">
                         ${svcBadgeHtml}
-                        <span class="card-tag-status duration"><span class="badge-dot-green">●</span> ${svc.duration_min || 20}m</span>
+                        <span class="card-tag-status duration"><i class="fa-solid fa-circle text-success" style="font-size: 0.45rem;"></i> ${svc.duration_min || 20}m</span>
                         <span class="service-wait-time-badge" data-service-id="${svc.id}" style="display: ${waitDisplay};"><i class="fa-regular fa-clock"></i> ${svcWaitText || ''}</span>
                         <div class="item-card-media-box">
                             ${hasSvcImg ? `
@@ -5651,7 +5672,7 @@ class PosApp {
             alertBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
-        alert(`⛔ ${message}`);
+        alert(message);
     }
 
     static openPaymentModal() {
@@ -7474,11 +7495,75 @@ class PosApp {
         }
     }
 
+    static getQueueViewMode() {
+        return localStorage.getItem('pos_queue_view_mode') || 'list';
+    }
+
+    static setQueueViewMode(mode) {
+        const validMode = (mode === 'grid') ? 'grid' : 'list';
+        try {
+            localStorage.setItem('pos_queue_view_mode', validMode);
+        } catch (e) {
+            console.warn('Could not save queue view mode', e);
+        }
+        const btnList = document.getElementById('btnQueueViewList');
+        const btnGrid = document.getElementById('btnQueueViewGrid');
+        if (btnList && btnGrid) {
+            btnList.classList.toggle('active', validMode === 'list');
+            btnGrid.classList.toggle('active', validMode === 'grid');
+        }
+        const grid = document.getElementById('queueGrid');
+        if (grid) {
+            grid.classList.toggle('is-list-view', validMode === 'list');
+        }
+        this.renderJobQueue();
+    }
+
+    static getQueueFilterTab() {
+        return localStorage.getItem('pos_queue_filter_tab') || 'waiting';
+    }
+
+    static setQueueFilterTab(tab) {
+        const validTab = ['waiting', 'ready', 'all'].includes(tab) ? tab : 'waiting';
+        try {
+            localStorage.setItem('pos_queue_filter_tab', validTab);
+        } catch (e) {
+            console.warn('Could not save queue filter tab', e);
+        }
+        document.querySelectorAll('.btn-queue-tab').forEach(btn => {
+            btn.classList.toggle('active', btn.getAttribute('data-tab') === validTab);
+        });
+        this.renderJobQueue();
+    }
+
+    static async handleCompletePickup(orderNumber, plateNumber = '') {
+        try {
+            await this.updateJobStatus(orderNumber, 'paid');
+            const successMsg = plateNumber
+                ? `${plateNumber}: ${I18nManager.t('handoverSuccess') || 'Vehicle handed over to customer successfully!'}`
+                : (I18nManager.t('handoverSuccess') || 'Vehicle handed over to customer successfully!');
+            this.showToastNotice(successMsg, 'success');
+        } catch (e) {
+            console.error('Handover error:', e);
+            this.showAppAlert(e.data?.message || e.message || 'Failed to complete vehicle handover');
+        }
+    }
+
     // ========================================================
     // JOB QUEUE BOARD (Live updates from web and staff - Requirements 6, 7, 8, 9)
     static async renderJobQueue() {
         const grid = document.getElementById('queueGrid');
         if (!grid) return;
+
+        const viewMode = this.getQueueViewMode();
+        grid.classList.toggle('is-list-view', viewMode === 'list');
+
+        const btnList = document.getElementById('btnQueueViewList');
+        const btnGrid = document.getElementById('btnQueueViewGrid');
+        if (btnList && btnGrid) {
+            btnList.classList.toggle('active', viewMode === 'list');
+            btnGrid.classList.toggle('active', viewMode === 'grid');
+        }
 
         const errorBanner = document.getElementById('queueErrorBanner');
         const offlineBanner = document.getElementById('queueOfflineBanner');
@@ -7544,12 +7629,47 @@ class PosApp {
             this.currentQueueOrdersMap[ord.order_number] = ord;
         });
 
-        if (orders.length === 0) {
-            const emptyMsg = I18nManager.t('noActiveQueue') || 'No active wash or service jobs currently in queue.';
+        // Tab Counts & Separation:
+        // 'waiting': vehicles waiting to be assigned to bay or currently in service
+        // 'ready': vehicles where service/waiting is done and are ready for pickup
+        // 'all': all active non-cancelled jobs
+        const waitingOrders = orders.filter(o => ['waiting', 'washing'].includes(o.status || 'waiting'));
+        const readyOrders = orders.filter(o => o.status === 'finished');
+        const allOrders = orders.filter(o => o.status !== 'cancelled');
+
+        const countWaitingEl = document.getElementById('tabCountWaiting');
+        const countReadyEl = document.getElementById('tabCountReady');
+        const countAllEl = document.getElementById('tabCountAll');
+        const queueTotalBadge = document.getElementById('queueTotalWaitingBadge');
+
+        if (countWaitingEl) countWaitingEl.textContent = waitingOrders.length;
+        if (countReadyEl) countReadyEl.textContent = readyOrders.length;
+        if (countAllEl) countAllEl.textContent = allOrders.length;
+        if (queueTotalBadge) queueTotalBadge.textContent = waitingOrders.length;
+
+        const activeTab = this.getQueueFilterTab();
+        document.querySelectorAll('.btn-queue-tab').forEach(btn => {
+            btn.classList.toggle('active', btn.getAttribute('data-tab') === activeTab);
+        });
+
+        let ordersToRender = waitingOrders;
+        if (activeTab === 'ready') {
+            ordersToRender = readyOrders;
+        } else if (activeTab === 'all') {
+            ordersToRender = allOrders;
+        }
+
+        if (ordersToRender.length === 0) {
+            let emptyMsg = I18nManager.t('noActiveQueue') || 'No active wash or service jobs currently in queue.';
+            if (activeTab === 'waiting') {
+                emptyMsg = I18nManager.t('noWaitingCars') || 'No vehicles waiting or currently in service.';
+            } else if (activeTab === 'ready') {
+                emptyMsg = I18nManager.t('noReadyCars') || 'No vehicles currently ready for pickup.';
+            }
             grid.innerHTML = `
-                <div style="grid-column: 1 / -1; text-align: center; padding: 3rem; color: var(--text-muted);">
-                    <i class="fa-solid fa-car-wash" style="font-size: 2.5rem; opacity: 0.3; margin-bottom: 0.5rem;"></i>
-                    <p>${emptyMsg}</p>
+                <div style="grid-column: 1 / -1; text-align: center; padding: 3rem; color: var(--text-muted); background: #ffffff; border: 1.5px solid var(--border-color, #e2e8f0); border-radius: 12px;">
+                    <i class="fa-solid ${activeTab === 'ready' ? 'fa-car-side' : 'fa-car-wash'}" style="font-size: 2.5rem; opacity: 0.3; margin-bottom: 0.5rem; display: block;"></i>
+                    <p style="margin: 0; font-weight: 700;">${emptyMsg}</p>
                 </div>
             `;
             return;
@@ -7565,9 +7685,10 @@ class PosApp {
             if (q.order_id) queueMap[q.order_id] = q;
         });
 
-        let html = '';
+        let gridCardsHtml = '';
+        let listRowsHtml = '';
         const isCashier = (this.currentUser?.role || '').toLowerCase() === 'cashier';
-        orders.forEach(ord => {
+        ordersToRender.forEach((ord, idx) => {
             const status = ord.status || (ord.is_paid ? 'paid' : 'waiting');
             const isCancelled = (status === 'cancelled');
             const isPaidStatus = (ord.payment_status === 'paid' || status === 'paid') && !isCancelled;
@@ -7619,7 +7740,7 @@ class PosApp {
                 statusText = I18nManager.t('statusWaiting') || 'WAITING';
                 if (qItem) {
                     if (qItem.position === 1 || qItem.is_next) {
-                        positionBadgeHtml = `<span class="queue-pos-badge next"><i class="fa-solid fa-bolt"></i> 1st (${I18nManager.t('nextInLine') || 'Next'})</span>`;
+                        positionBadgeHtml = `<span class="queue-pos-badge next" style="white-space: nowrap;"><i class="fa-solid fa-bolt"></i> 1st (${I18nManager.t('nextInLine') || 'Next'})</span>`;
                     } else {
                         positionBadgeHtml = `<span class="queue-pos-badge pos-sub">${qItem.position_label || (qItem.position + 'th')}</span>`;
                     }
@@ -7668,8 +7789,16 @@ class PosApp {
                 nextActionBtn = `<button type="button" class="btn btn-outline btn-sm" style="border-color: var(--success); color: var(--success);" data-action="finish-job" data-order-number="${this.escapeHtml(ord.order_number)}"><i class="fa-solid fa-check"></i> ${I18nManager.t('finishWash') || 'Finish'}</button>`;
             } else if (status === 'finished') {
                 nextActionBtn = isPaidStatus
-                    ? `<span style="font-size: 0.82rem; font-weight: 800; color: var(--success); display: inline-flex; align-items: center; gap: 4px;"><i class="fa-solid fa-circle-check"></i> ${I18nManager.t('readyForPickup') || 'Ready for Pickup'}</span>`
-                    : `<span style="font-size: 0.82rem; font-weight: 800; color: var(--success); display: inline-flex; align-items: center; gap: 4px;"><i class="fa-solid fa-circle-check"></i> ${I18nManager.t('readyToPay') || 'Ready to pay'}</span>`;
+                    ? `
+                        <button type="button" class="btn btn-sm btn-handover-pickup" data-action="complete-pickup" data-order-number="${this.escapeHtml(ord.order_number)}" data-plate="${this.escapeHtml(ord.plate_number)}">
+                            <i class="fa-solid fa-car-side"></i> <span>${I18nManager.t('handoverCar') || 'Vehicle Picked Up'}</span>
+                        </button>
+                    `
+                    : `
+                        <button type="button" class="btn btn-sm btn-queue-pay is-ready-to-pay" data-action="pay-order" data-order-number="${this.escapeHtml(ord.order_number)}">
+                            <i class="fa-solid fa-dollar-sign"></i> <span>${I18nManager.t('payAndHandover') || 'Pay & Handover'}</span>
+                        </button>
+                    `;
             } else if (status === 'paid') {
                 nextActionBtn = `<span style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted);"><i class="fa-solid fa-receipt"></i> ${I18nManager.t('completedPaid') || 'Completed & Paid'}</span>`;
             } else if (status === 'cancelled') {
@@ -7688,7 +7817,89 @@ class PosApp {
                 ? rawServices.map(s => `<span class="queue-service-chip"><i class="fa-solid fa-check"></i> ${this.escapeHtml(s)}</span>`).join('')
                 : `<span class="queue-service-chip is-muted">${I18nManager.t('noServicesSelected') || 'Standard Wash & Service'}</span>`;
 
-            html += `
+            // Common action buttons markup
+            const actionButtonsHtml = `
+                ${nextActionBtn}
+
+                ${(!isCancelled && isUnpaid && status !== 'finished') ? `
+                    <button type="button" class="btn btn-sm btn-queue-pay ${isReadyToPay ? 'is-ready-to-pay' : ''}" data-action="pay-order" data-order-number="${this.escapeHtml(ord.order_number)}">
+                        <i class="fa-solid fa-dollar-sign"></i> <span>${I18nManager.t('payOrder') || (isReadyToPay ? 'Pay / Checkout' : 'Pay Order')}</span>
+                    </button>
+                ` : ''}
+
+                ${(!isCancelled && !isCashier) ? `
+                    <button type="button" class="btn btn-outline btn-sm btn-queue-action text-danger" style="color: #dc2626; border-color: #fecaca;" data-action="cancel-order" data-order-number="${this.escapeHtml(ord.order_number)}" title="Cancel Order">
+                        <i class="fa-solid fa-ban"></i> <span>${I18nManager.t('cancelBtn') || 'Cancel'}</span>
+                    </button>
+                ` : ''}
+
+                <button type="button" class="btn btn-outline btn-sm btn-queue-icon-action" data-action="reprint-receipt" data-order-number="${this.escapeHtml(ord.order_number)}" title="Reprint Receipt">
+                    <i class="fa-solid fa-print"></i>
+                </button>
+                <button type="button" class="btn btn-outline btn-sm btn-queue-icon-action text-primary" data-action="print-ticket" data-order-number="${this.escapeHtml(ord.order_number)}" title="Print Washer Ticket">
+                    <i class="fa-solid fa-ticket"></i>
+                </button>
+            `;
+
+            // Build List View Row HTML
+            let posCellHtml = positionBadgeHtml;
+            if (!posCellHtml) {
+                if (status === 'finished') {
+                    posCellHtml = `<span class="queue-pos-badge" style="background: #dcfce7; color: #166534; border: 1px solid #86efac; font-size: 0.78rem; padding: 0.25rem 0.6rem;"><i class="fa-solid fa-flag-checkered"></i> Done</span>`;
+                } else if (status === 'paid') {
+                    posCellHtml = `<span class="queue-pos-badge pos-sub"><i class="fa-solid fa-check"></i> Paid</span>`;
+                } else {
+                    posCellHtml = `<span class="queue-pos-badge pos-sub">#${idx + 1}</span>`;
+                }
+            }
+
+            listRowsHtml += `
+                <tr class="${isReadyToPay ? 'is-ready-to-pay' : ''} ${isCancelled ? 'is-cancelled' : ''}">
+                    <td class="col-pos">
+                        ${posCellHtml}
+                    </td>
+                    <td class="col-plate">
+                        <span class="queue-list-plate"><i class="fa-solid fa-car"></i> ${this.escapeHtml(ord.plate_number || 'N/A')}</span>
+                    </td>
+                    <td class="col-info">
+                        <div style="font-weight: 800; color: var(--text-main); font-size: 0.92rem;">${this.formatCustomerName(ord.customer_name)}</div>
+                        <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
+                            <span>#${this.escapeHtml(ord.order_number)}</span>
+                            ${ord.vehicle_type ? ` &bull; <span>${this.escapeHtml(ord.vehicle_type)}</span>` : ''}
+                        </div>
+                    </td>
+                    <td class="col-services">
+                        <div class="queue-list-chips">
+                            ${servicesChipsHtml}
+                        </div>
+                    </td>
+                    <td class="col-status">
+                        <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
+                            <span class="queue-badge ${badgeClass}"><i class="fa-solid ${badgeIcon}"></i> <span>${statusText}</span></span>
+                            ${pendingBadgeHtml}
+                            ${receiptPendingBadge}
+                        </div>
+                    </td>
+                    <td class="col-financial">
+                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
+                            <div style="font-weight: 900; font-size: 0.98rem; color: ${isUnpaid ? '#ea580c' : 'var(--text-main)'};">$${totalNum.toFixed(2)}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted);">${totalKhrVal.toLocaleString()} ៛</div>
+                            <span class="queue-payment-pill ${isPaidStatus ? 'is-paid' : 'is-unpaid'}" style="margin-top: 2px; font-size: 0.72rem; padding: 2px 7px;">
+                                <i class="fa-solid ${isPaidStatus ? 'fa-circle-check' : 'fa-circle-exclamation'}"></i>
+                                <span>${isPaidStatus ? (I18nManager.t('statusPaid') || 'Paid') : (I18nManager.t('statusUnpaid') || 'Unpaid')}</span>
+                            </span>
+                        </div>
+                    </td>
+                    <td class="col-actions">
+                        <div class="queue-actions-group">
+                            ${actionButtonsHtml}
+                        </div>
+                    </td>
+                </tr>
+            `;
+
+            // Build Legacy Grid Card HTML (for toggle switch)
+            gridCardsHtml += `
                 <div class="queue-card ${isCancelled ? 'is-cancelled' : ''} ${isReadyToPay ? 'is-ready-to-pay' : ''}">
                     <!-- Section 1: Vehicle Plate & Queue Position -->
                     <div class="queue-card-section queue-section-plate">
@@ -7746,32 +7957,38 @@ class PosApp {
 
                     <!-- Section 7: Action Buttons -->
                     <div class="queue-card-section queue-section-actions">
-                        ${nextActionBtn}
-
-                        ${(!isCancelled && isUnpaid) ? `
-                            <button type="button" class="btn btn-sm btn-queue-pay ${isReadyToPay ? 'is-ready-to-pay' : ''}" data-action="pay-order" data-order-number="${this.escapeHtml(ord.order_number)}">
-                                <i class="fa-solid fa-dollar-sign"></i> <span>${I18nManager.t('payOrder') || (isReadyToPay ? 'Pay / Checkout' : 'Pay Order')}</span>
-                            </button>
-                        ` : ''}
-
-                        ${(!isCancelled && !isCashier) ? `
-                            <button type="button" class="btn btn-outline btn-sm btn-queue-action text-danger" style="color: #dc2626; border-color: #fecaca;" data-action="cancel-order" data-order-number="${this.escapeHtml(ord.order_number)}" title="Cancel Order">
-                                <i class="fa-solid fa-ban"></i> <span>${I18nManager.t('cancelBtn') || 'Cancel'}</span>
-                            </button>
-                        ` : ''}
-
-                        <button type="button" class="btn btn-outline btn-sm btn-queue-icon-action" data-action="reprint-receipt" data-order-number="${this.escapeHtml(ord.order_number)}" title="Reprint Receipt">
-                            <i class="fa-solid fa-print"></i>
-                        </button>
-                        <button type="button" class="btn btn-outline btn-sm btn-queue-icon-action text-primary" data-action="print-ticket" data-order-number="${this.escapeHtml(ord.order_number)}" title="Print Washer Ticket">
-                            <i class="fa-solid fa-ticket"></i>
-                        </button>
+                        ${actionButtonsHtml}
                     </div>
                 </div>
             `;
         });
 
-        grid.innerHTML = html;
+        if (viewMode === 'list') {
+            grid.innerHTML = `
+                <div class="queue-list-card">
+                    <div class="queue-list-table-responsive">
+                        <table class="queue-list-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-pos">${I18nManager.t('queueColPosition') || 'Queue #'}</th>
+                                    <th class="col-plate">${I18nManager.t('queueColPlate') || 'Vehicle Plate'}</th>
+                                    <th class="col-info">${I18nManager.t('queueColCustomer') || 'Customer & Order'}</th>
+                                    <th class="col-services">${I18nManager.t('queueColServices') || 'Services'}</th>
+                                    <th class="col-status">${I18nManager.t('queueColStatus') || 'Status / Bay'}</th>
+                                    <th class="col-financial" style="text-align: right;">${I18nManager.t('queueColFinancial') || 'Payment'}</th>
+                                    <th class="col-actions" style="text-align: right;">${I18nManager.t('queueColActions') || 'Actions'}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${listRowsHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        } else {
+            grid.innerHTML = gridCardsHtml;
+        }
 
         // Requirement 8: Event delegation instead of inline onclick text
         grid.onclick = (e) => {
@@ -7813,6 +8030,9 @@ class PosApp {
                 } else {
                     this.updateJobStatus(num, 'finished');
                 }
+            } else if (action === 'complete-pickup') {
+                const plate = btn.getAttribute('data-plate') || ord?.plate_number || '';
+                this.handleCompletePickup(num, plate);
             } else if (action === 'pay-order' && ord) {
                 this.openPayOrderModal(ord);
             } else if (action === 'change-crew' && ord) {
@@ -9215,11 +9435,59 @@ class PosApp {
     // ========================================================
     static currentTechData = null;
     static checklistPhotos = {};
+    static currentMechanicTab = 'queue';
+    static activeOilLiters = 4.2;
+    static selectedActiveJobIndex = 0;
+    static techTimerInterval = null;
+
+    static switchMechanicTab(tabName) {
+        this.currentMechanicTab = tabName;
+        const qBtn = document.getElementById('tabBtnQueue');
+        const iBtn = document.getElementById('tabBtnInspection');
+        const cBtn = document.getElementById('tabBtnCompleted');
+        const qPane = document.getElementById('paneQueue');
+        const iPane = document.getElementById('paneInspection');
+        const cPane = document.getElementById('paneCompleted');
+
+        if (qBtn) qBtn.classList.toggle('active', tabName === 'queue');
+        if (iBtn) iBtn.classList.toggle('active', tabName === 'inspection');
+        if (cBtn) cBtn.classList.toggle('active', tabName === 'completed');
+
+        if (qPane) qPane.style.display = (tabName === 'queue') ? 'flex' : 'none';
+        if (iPane) iPane.style.display = (tabName === 'inspection') ? 'flex' : 'none';
+        if (cPane) cPane.style.display = (tabName === 'completed') ? 'flex' : 'none';
+    }
+
+    static handleAdjustOil(delta) {
+        if (!this.activeOilLiters) this.activeOilLiters = 4.2;
+        this.activeOilLiters = Math.max(0.5, Math.round((parseFloat(this.activeOilLiters) + delta) * 10) / 10);
+        const disp = document.getElementById('oilVolDisplay');
+        if (disp) disp.textContent = `${this.activeOilLiters.toFixed(1)} L`;
+    }
+
+    static updateLiftTimer(startTimeStr) {
+        const timerEl = document.getElementById('liftTimer');
+        if (!timerEl) return;
+        if (!startTimeStr) {
+            timerEl.textContent = '00:00';
+            return;
+        }
+        const startDt = new Date(startTimeStr.replace(' ', 'T')).getTime();
+        const now = Date.now();
+        const diffSec = Math.max(0, Math.floor((now - startDt) / 1000));
+        const mins = Math.floor(diffSec / 60);
+        const secs = diffSec % 60;
+        timerEl.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+
+    static selectActiveJob(idx) {
+        this.selectedActiveJobIndex = idx;
+        this.renderMechanicScreen();
+    }
 
     static async renderMechanicScreen() {
-        const handoverContainer = document.getElementById('techHandoverList');
-        const jobsContainer = document.getElementById('mechanicJobsGrid');
-        if (!jobsContainer) return;
+        const liftCol = document.getElementById('mechanicLiftColumn');
+        const rightCol = document.getElementById('mechanicRightColumn');
 
         const user = PosStorage.getUser();
         if (!user) return;
@@ -9229,273 +9497,401 @@ class PosApp {
             if (res && res.success) {
                 this.currentTechData = res;
 
-                // Update commission
-                const earnedEl = document.getElementById('mechanicEarnedToday');
-                if (earnedEl) earnedEl.textContent = `$${parseFloat(res.today_commission || 0).toFixed(2)}`;
-
-                const subEl = document.getElementById('mechanicProfileSubtitle');
-                if (subEl) subEl.textContent = `${user.full_name} (Technical & Service Screen)`;
-
-                // 1. Render Handover from Wash Section
                 const handoverCars = res.waiting_handover || [];
+                const activeJobs = res.active_jobs || [];
+                const completedJobs = res.completed_jobs || [];
+
+                // Update legacy badge elements if present
                 const handoverBadge = document.getElementById('techHandoverBadge');
                 if (handoverBadge) handoverBadge.textContent = handoverCars.length;
+                const activeBadge = document.getElementById('techActiveBadge');
+                if (activeBadge) activeBadge.textContent = activeJobs.length;
 
-                if (handoverContainer) {
+                // Auto-select tab if default
+                if (activeJobs.length > 0 && handoverCars.length === 0 && this.currentMechanicTab === 'queue') {
+                    this.currentMechanicTab = 'inspection';
+                } else if (handoverCars.length > 0 && activeJobs.length === 0) {
+                    this.currentMechanicTab = 'queue';
+                }
+
+                // If user selected an index out of bounds, reset
+                if (this.selectedActiveJobIndex >= activeJobs.length) {
+                    this.selectedActiveJobIndex = 0;
+                }
+                const primaryJob = activeJobs[this.selectedActiveJobIndex] || null;
+
+                // Stop any running timer interval
+                if (this.techTimerInterval) {
+                    clearInterval(this.techTimerInterval);
+                    this.techTimerInterval = null;
+                }
+
+                // ----------------------------------------------------
+                // 1. RENDER LEFT COLUMN (HERO LIFT WORKSTATION)
+                // ----------------------------------------------------
+                if (liftCol) {
+                    if (!primaryJob) {
+                        // Bay 4 Free / Ready State
+                        liftCol.innerHTML = `
+                            <article class="lift-hero-card border-free">
+                                <span class="lift-accent-stripe accent-free"></span>
+                                <div class="lift-top-row">
+                                    <div class="lift-id-group">
+                                        <div class="lift-tile tile-free">4</div>
+                                        <div class="lift-title-box">
+                                            <div class="title">Technical Service Bay</div>
+                                            <div class="subtitle sub-free"><i class="fa-solid fa-circle-check"></i> Hoist Ready &bull; Standby</div>
+                                        </div>
+                                    </div>
+                                    <span class="lift-chip chip-free">
+                                        <i class="fa-solid fa-check"></i> Bay Available
+                                    </span>
+                                </div>
+
+                                <div class="lift-free-box">
+                                    <div class="lift-free-circle"><i class="fa-solid fa-car-side"></i></div>
+                                    <div>
+                                        <div class="lift-free-title">No Active Vehicle on Hoist</div>
+                                        <div class="lift-free-subtitle">Bay is ready for vehicle servicing. Pull a car from the wash handover queue to start.</div>
+                                    </div>
+                                </div>
+
+                                <div style="background: #f8fafc; border-radius: 0.85rem; border: 1.5px solid var(--border); padding: 1.5rem; text-align: center; color: var(--text-muted); font-size: 0.95rem;">
+                                    ${handoverCars.length > 0 ? `
+                                        <div style="font-weight: 800; color: var(--text-main); font-size: 1.05rem; margin-bottom: 0.6rem;">
+                                            <i class="fa-solid fa-car-wash" style="color: #0284c7;"></i> ${handoverCars.length} vehicle(s) ready in wash handover
+                                        </div>
+                                        <button type="button" class="btn-pullin-blue" style="max-width: 340px; margin: 0 auto;" onclick="PosApp.switchMechanicTab('queue')">
+                                            <i class="fa-solid fa-arrow-right"></i> View Wash Handover Queue
+                                        </button>
+                                    ` : `
+                                        <div><i class="fa-solid fa-circle-check text-success mr-1"></i> Ready for next incoming vehicle.</div>
+                                    `}
+                                </div>
+
+                                <div class="lift-actions-row">
+                                    <button type="button" class="btn-hoist-sub" style="flex: 1; justify-content: center; padding: 1.1rem; font-size: 1rem;" onclick="PosApp.renderMechanicScreen()">
+                                        <i class="fa-solid fa-rotate"></i> Refresh Station
+                                    </button>
+                                </div>
+                            </article>
+                        `;
+                    } else {
+                        // Vehicle on Hoist
+                        const ord = primaryJob.order;
+                        const tasks = primaryJob.tasks || [];
+                        const checklists = primaryJob.checklists || [];
+                        const totalTasks = tasks.length;
+                        const doneTasks = tasks.filter(t => t.status === 'completed').length;
+                        const taskPercent = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+                        const bayNum = ord.bay_name?.match(/\d+/)?.[0] || '4';
+
+                        // Start timer ticker
+                        if (ord.started_at) {
+                            this.techTimerInterval = setInterval(() => PosApp.updateLiftTimer(ord.started_at), 1000);
+                        }
+
+                        // Vehicle switcher row if multiple active jobs
+                        let jobSwitcherHtml = '';
+                        if (activeJobs.length > 1) {
+                            jobSwitcherHtml = `
+                                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.65rem; overflow-x: auto; padding-bottom: 2px;">
+                                    ${activeJobs.map((j, i) => `
+                                        <button type="button" class="btn btn-sm ${i === this.selectedActiveJobIndex ? 'btn-primary' : 'btn-outline'}" style="font-weight: 800; white-space: nowrap; border-radius: 9999px; padding: 4px 12px;" onclick="PosApp.selectActiveJob(${i})">
+                                            <i class="fa-solid fa-car mr-1"></i> ${this.escapeHtml(j.order?.plate_number || `Job #${i+1}`)} (${this.escapeHtml(j.order?.bay_name || 'Bay')})
+                                        </button>
+                                    `).join('')}
+                                </div>
+                            `;
+                        }
+
+                        // Tasks stage tiles
+                        let tasksHtml = '';
+                        if (tasks.length === 0) {
+                            tasksHtml = `<div style="grid-column: 1 / -1; padding: 0.75rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">Standard service procedure in progress</div>`;
+                        } else {
+                            tasks.forEach((t, idx) => {
+                                const isDone = (t.status === 'completed');
+                                const isWorking = (t.status === 'in_progress');
+                                const stageClass = isDone ? 'is-done' : (isWorking ? 'is-active' : 'is-pending');
+                                const icon = isDone ? '<i class="fa-solid fa-check"></i>' : (isWorking ? '<i class="fa-solid fa-play"></i>' : '<i class="fa-regular fa-circle"></i>');
+                                let clickAction = '';
+                                if (!isDone) {
+                                    clickAction = isWorking ? `onclick="PosApp.handleFinishTechTask(${t.id})"` : `onclick="PosApp.handleStartTechTask(${t.id})"`;
+                                } else {
+                                    clickAction = `onclick="PosApp.showToastNotice('Task already completed', 'info')"`;
+                                }
+
+                                // Clean up task title for concise display
+                                let cleanTitle = t.title || 'Technical Procedure';
+                                if (/engine oil change/i.test(cleanTitle)) cleanTitle = 'Drain & Refill Engine Oil';
+                                else if (/safety inspection/i.test(cleanTitle)) cleanTitle = 'Multi-Point Inspection';
+
+                                tasksHtml += `
+                                    <button type="button" class="btn-stage-tile ${stageClass}" ${clickAction} title="${this.escapeHtml(t.title)} (Lane: ${t.lane || 'Lane 1'})">
+                                        <div class="stage-tile-icon">${icon}</div>
+                                        <div class="stage-tile-title">${idx + 1}. ${this.escapeHtml(cleanTitle)}</div>
+                                    </button>
+                                `;
+                            });
+                        }
+
+                        liftCol.innerHTML = `
+                            ${jobSwitcherHtml}
+                            <article class="lift-hero-card">
+                                <span class="lift-accent-stripe"></span>
+
+                                <!-- Top Row -->
+                                <div class="lift-top-row">
+                                    <div class="lift-id-group">
+                                        <div class="lift-tile">${bayNum}</div>
+                                        <div class="lift-title-box">
+                                            <div class="title">${this.escapeHtml(ord.bay_name || 'Technical Service Bay')}</div>
+                                            <div class="subtitle"><i class="fa-solid fa-shield-halved"></i> Vehicle Hoist 1 &bull; Elevated 1.85m</div>
+                                        </div>
+                                    </div>
+                                    <span class="lift-chip" id="liftChip">
+                                        <i class="fa-solid fa-gear fa-spin"></i> In Service
+                                    </span>
+                                </div>
+
+                                <!-- Big Bold Vehicle Block -->
+                                <div class="vehicle-block">
+                                    <div class="plate-meta-group">
+                                        <div class="plate-badge-dark mono" id="liftPlate">${this.escapeHtml(ord.plate_number)}</div>
+                                        <div class="vehicle-info">
+                                            <div class="vehicle-car" id="liftCar">${this.escapeHtml(ord.customer_name || 'Walk-in Customer')} (${this.escapeHtml(ord.vehicle_type || 'Car')})</div>
+                                            <div class="vehicle-service" id="liftSvc">${this.escapeHtml(ord.service_names || 'Technical Service')} &bull; #${this.escapeHtml(ord.order_number)}</div>
+                                        </div>
+                                    </div>
+                                    <div class="timer-box">
+                                        <div class="timer-clock mono" id="liftTimer">--:--</div>
+                                        <div class="timer-sub">of 30m target</div>
+                                    </div>
+                                </div>
+
+                                <!-- Big Tactile 4-Stage Task Buttons -->
+                                <div class="stage-buttons-box">
+                                    <div class="stage-buttons-header">
+                                        <span>Procedural Execution Stages (Tap to Progress)</span>
+                                        <span id="stageProgressTxt" style="color: #0284c7; font-weight: 900;">${doneTasks} of ${totalTasks} Completed (${taskPercent}%)</span>
+                                    </div>
+                                    <div class="stage-buttons-grid">
+                                        ${tasksHtml}
+                                    </div>
+                                </div>
+
+                                <!-- Big Quick Oil Dispenser & Parts Bar -->
+                                <div class="quick-controls-row">
+                                    <div class="fluid-pill">
+                                        <i class="fa-solid fa-oil-can" style="color: #ea580c; font-size: 1.25rem;"></i>
+                                        <span>Engine Oil Dispensed:</span>
+                                        <div class="fluid-adjuster">
+                                            <button type="button" class="btn-big-step" onclick="PosApp.handleAdjustOil(-0.1)">-</button>
+                                            <strong class="mono" id="oilVolDisplay" style="color: #c2410c; min-width: 4rem; text-align: center; font-size: 1.15rem;">${(this.activeOilLiters || 4.2).toFixed(1)} L</strong>
+                                            <button type="button" class="btn-big-step" onclick="PosApp.handleAdjustOil(+0.1)">+</button>
+                                        </div>
+                                    </div>
+
+                                    <button type="button" class="btn-parts-pill" onclick="PosApp.openRequestPartsModal(${ord.id}, '${this.escapeHtml(ord.plate_number)}')">
+                                        <i class="fa-solid fa-boxes-stacked" style="color: #0284c7; font-size: 1.1rem;"></i>
+                                        <span id="partsCountText">Warehouse Parts: ${ord.has_pending_parts_request ? 'Parts Pending' : 'Request Spare / Oil'}</span>
+                                    </button>
+                                </div>
+
+                                <!-- Giant Bottom Action Buttons -->
+                                <div class="lift-actions-row">
+                                    <button type="button" class="btn-complete-green" onclick="PosApp.handleFinishTechJob(${ord.id}, '${this.escapeHtml(ord.plate_number)}')">
+                                        <i class="fa-solid fa-circle-check" style="font-size: 1.35rem;"></i>
+                                        <span>COMPLETE SERVICE &amp; HANDOVER TO QC</span>
+                                    </button>
+                                    <button type="button" class="btn-hoist-sub" onclick="PosApp.openEditRepairNotesModal(${ord.id}, '${this.escapeHtml(ord.order_number)}', '${this.escapeHtml(ord.plate_number)}', '${this.escapeHtml(ord.repair_notes || '')}')" title="Repair Notes">
+                                        <i class="fa-solid fa-file-lines"></i> Notes
+                                    </button>
+                                </div>
+                            </article>
+                        `;
+
+                        // Initial timer text
+                        PosApp.updateLiftTimer(ord.started_at);
+                    }
+                }
+
+                // ----------------------------------------------------
+                // 2. RENDER RIGHT COLUMN (QUEUE & INSPECTION BIG TOUCH TABS)
+                // ----------------------------------------------------
+                if (rightCol) {
+                    const primaryJobChecklists = primaryJob?.checklists || [];
+                    const primaryJobOrder = primaryJob?.order || null;
+                    const totalChk = primaryJobChecklists.length;
+                    const passedChk = primaryJobChecklists.filter(ci => ci.status === 'pass').length;
+                    const isInspectionComplete = (totalChk > 0 && passedChk >= totalChk);
+
+                    // Queue HTML
+                    let queueHtml = '';
                     if (handoverCars.length === 0) {
-                        handoverContainer.innerHTML = `
-                            <div style="background: white; border: 1.5px dashed var(--border); border-radius: var(--radius-md); padding: 1.25rem; text-align: center; color: var(--text-muted); font-size: 0.9rem;">
-                                <i class="fa-solid fa-soap mr-1" style="color: #0284c7;"></i> No cars currently waiting for handover from wash.
+                        queueHtml = `
+                            <div style="background: white; border: 2px dashed var(--border); border-radius: 1rem; padding: 2.5rem 1.5rem; text-align: center; color: var(--text-muted);">
+                                <div style="width: 56px; height: 56px; border-radius: 50%; background: #e0f2fe; color: #0284c7; display: inline-flex; align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 0.85rem;">
+                                    <i class="fa-solid fa-soap"></i>
+                                </div>
+                                <div style="font-weight: 800; font-size: 1.05rem; color: var(--text-main); margin-bottom: 0.25rem;">No Cars Waiting from Wash</div>
+                                <div style="font-size: 0.85rem;">Vehicles moving from wash to technical service will arrive here automatically.</div>
                             </div>
                         `;
                     } else {
-                        let hHtml = '';
                         handoverCars.forEach(car => {
-                            hHtml += `
-                                <div class="tech-handover-card">
-                                    <div>
-                                        <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.25rem;">
-                                            <span class="bay-plate-badge" style="font-size: 1.1rem; padding: 4px 10px;">${this.escapeHtml(car.plate_number)}</span>
-                                            <span class="badge" style="background: #e0f2fe; color: #0369a1; font-weight: 700; border-radius: 4px; padding: 3px 8px;">Wash Finished • Ready for Tech</span>
-                                        </div>
-                                        <div style="font-size: 0.88rem; font-weight: 700; color: var(--text-main);">${this.escapeHtml(car.service_names || 'Technical Service')}</div>
-                                        <div style="font-size: 0.8rem; color: var(--text-muted);">Customer: ${this.escapeHtml(car.customer_name || 'Walk-in')} • ${this.escapeHtml(car.vehicle_type || 'Car')}</div>
+                            queueHtml += `
+                                <div class="queue-card card-shadow">
+                                    <div class="queue-card-top">
+                                        <span class="queue-plate-dark mono">${this.escapeHtml(car.plate_number)}</span>
+                                        <span class="queue-origin-badge">
+                                            <i class="fa-solid fa-water"></i> Wash Finished &bull; Ready
+                                        </span>
                                     </div>
-                                    <button type="button" class="btn btn-primary" style="font-weight: 800; padding: 0.65rem 1.25rem; display: inline-flex; align-items: center; gap: 0.5rem;" onclick="PosApp.handleReceiveFromWash(${car.id}, '${this.escapeHtml(car.plate_number)}')">
-                                        <i class="fa-solid fa-handshake"></i> Receive from Wash
+                                    <div>
+                                        <div class="queue-car-title">${this.escapeHtml(car.customer_name || 'Walk-in Customer')} &bull; ${this.escapeHtml(car.vehicle_type || 'Car')}</div>
+                                        <div class="queue-car-svc">${this.escapeHtml(car.service_names || 'Technical Service')}</div>
+                                    </div>
+                                    <button type="button" class="btn-pullin-blue" onclick="PosApp.handleReceiveFromWash(${car.id}, '${this.escapeHtml(car.plate_number)}')">
+                                        <i class="fa-solid fa-arrow-down-to-bracket"></i> PULL ONTO BAY 4 LIFT
                                     </button>
                                 </div>
                             `;
                         });
-                        handoverContainer.innerHTML = hHtml;
-                    }
-                }
-
-                // 2. Render Active Technical Jobs
-                const activeJobs = res.active_jobs || [];
-                const completedJobs = res.completed_jobs || [];
-                const activeBadge = document.getElementById('techActiveBadge');
-                if (activeBadge) activeBadge.textContent = activeJobs.length;
-
-                let jHtml = '';
-                if (activeJobs.length === 0) {
-                    jHtml = `
-                        <div style="text-align: center; padding: 2.5rem; background: white; border-radius: var(--radius-lg); border: 1.5px dashed var(--border); margin-bottom: 1.5rem;">
-                            <i class="fa-solid fa-circle-check fa-2x" style="color: #16a34a; margin-bottom: 0.5rem;"></i>
-                            <p style="font-weight: 800; margin: 0 0 0.25rem 0; color: var(--text-main);">No Active Technical Jobs</p>
-                            <p style="font-size: 0.85rem; margin: 0; color: var(--text-muted);">All current technical jobs are completed. Receive a car from wash or queue to start.</p>
-                        </div>
-                    `;
-                } else {
-                    activeJobs.forEach(j => {
-                    const ord = j.order;
-                    const tasks = j.tasks || [];
-                    const checklists = j.checklists || [];
-                    const badgeText = j.status_badge || 'Job in Progress';
-                    let badgeClass = 'in-progress';
-                    let badgeIcon = 'fa-wrench';
-
-                    if (badgeText === 'Waiting for Parts') {
-                        badgeClass = 'waiting-parts';
-                        badgeIcon = 'fa-hourglass-half';
-                    } else if (badgeText === 'Parts Received') {
-                        badgeClass = 'parts-received';
-                        badgeIcon = 'fa-circle-check';
                     }
 
-                    // Check inspection readiness
-                    const totalMandatory = checklists.filter(ci => ci.is_mandatory).length;
-                    const passedMandatory = checklists.filter(ci => ci.is_mandatory && ci.status === 'pass').length;
-                    const isInspectionComplete = (totalMandatory > 0 && passedMandatory >= totalMandatory);
-
-                    // Render Tasks HTML
-                    let tasksHtml = '';
-                    tasks.forEach(t => {
-                        const isDone = (t.status === 'completed');
-                        const isWorking = (t.status === 'in_progress');
-                        let taskAction = '';
-                        if (!isDone) {
-                            if (!isWorking) {
-                                taskAction = `<button type="button" class="btn btn-primary btn-sm" onclick="PosApp.handleStartTechTask(${t.id})"><i class="fa-solid fa-play"></i> Start</button>`;
-                            } else {
-                                taskAction = `<button type="button" class="btn btn-sm btn-success" style="font-weight: 700;" onclick="PosApp.handleFinishTechTask(${t.id})"><i class="fa-solid fa-check"></i> Finish</button>`;
-                            }
-                        } else {
-                            taskAction = `<span style="font-size: 0.82rem; font-weight: 800; color: var(--success);"><i class="fa-solid fa-circle-check"></i> Completed</span>`;
-                        }
-
-                        tasksHtml += `
-                            <div class="tech-task-item" style="display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0.8rem; background: white; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.4rem;">
-                                <div>
-                                    <div style="font-weight: 800; font-size: 0.92rem; color: var(--text-main);">${this.escapeHtml(t.title)}</div>
-                                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Lane: <strong>${t.lane || 'Lane 1'}</strong> • Status: <strong>${t.status}</strong></div>
-                                </div>
-                                <div>${taskAction}</div>
-                            </div>
-                        `;
-                    });
-
-                    // Render Inspection Checklist HTML
+                    // Inspection HTML
                     let chkHtml = '';
-                    checklists.forEach(ci => {
-                        const curStatus = ci.status || 'pending';
-                        const curVal = ci.measurement_value || '';
-                        const photoUrl = ci.photo_url || ci.photo_path || this.checklistPhotos[ci.id] || null;
-                        const isPassed = (curStatus === 'pass');
-                        const isCaution = (curStatus === 'caution');
-                        const isFailed = (curStatus === 'fail');
-                        const cardBorder = isPassed
-                            ? 'border: 1.5px solid #86efac; background: #f0fdf4;'
-                            : (isFailed
-                                ? 'border: 1.5px solid #fca5a5; background: #fef2f2;'
-                                : (isCaution
-                                    ? 'border: 1.5px solid #fde047; background: #fefce8;'
-                                    : 'border: 1.5px solid var(--border); background: white;'));
-
-                        chkHtml += `
-                            <div class="checklist-item-card" id="chkCard-${ci.id}" style="${cardBorder} border-radius: 10px; padding: 0.9rem; transition: all 0.2s ease;">
-                                <div class="checklist-item-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.4rem;">
-                                    <div>
-                                        <strong style="font-size: 0.92rem; color: var(--text-main);">${this.escapeHtml(ci.item_name)}</strong>
-                                        ${ci.is_mandatory ? '<span style="color: #ef4444; font-weight: 800;" title="Mandatory item">*</span>' : ''}
-                                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">${this.escapeHtml(ci.notes || '')}</div>
-                                    </div>
-                                    <div class="checklist-status-buttons" style="display: flex; gap: 4px;">
-                                        <button type="button" class="btn-chk-status ${isPassed ? 'active-pass' : ''}" style="padding: 6px 12px; font-weight: 800; border-radius: 6px;" onclick="PosApp.handleQuickSetChecklist(${ci.id}, 'pass', ${ord.id})" title="Click to mark PASS and auto-save">
-                                            <i class="fa-solid fa-check mr-1"></i> Pass
-                                        </button>
-                                        <button type="button" class="btn-chk-status ${isCaution ? 'active-caution' : ''}" style="padding: 6px 10px; font-weight: 700; border-radius: 6px;" onclick="PosApp.handleQuickSetChecklist(${ci.id}, 'caution', ${ord.id})" title="Click to mark CAUTION and auto-save">
-                                            <i class="fa-solid fa-triangle-exclamation mr-1"></i> Caution
-                                        </button>
-                                        <button type="button" class="btn-chk-status ${isFailed ? 'active-fail' : ''}" style="padding: 6px 10px; font-weight: 700; border-radius: 6px;" onclick="PosApp.handleQuickSetChecklist(${ci.id}, 'fail', ${ord.id})" title="Click to mark FAIL and auto-save">
-                                            <i class="fa-solid fa-xmark mr-1"></i> Fail
-                                        </button>
-                                    </div>
+                    if (primaryJobChecklists.length === 0) {
+                        chkHtml = `
+                            <div style="background: white; border: 2px dashed var(--border); border-radius: 1rem; padding: 2.5rem 1.5rem; text-align: center; color: var(--text-muted);">
+                                <div style="width: 56px; height: 56px; border-radius: 50%; background: #f1f5f9; color: #94a3b8; display: inline-flex; align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 0.85rem;">
+                                    <i class="fa-solid fa-clipboard-check"></i>
                                 </div>
-                                <div style="display: flex; gap: 0.65rem; align-items: center; flex-wrap: wrap; margin-top: 0.4rem;">
-                                    <div style="flex: 1; min-width: 140px;">
-                                        <input type="text" id="chkVal-${ci.id}" class="form-control" placeholder="Measurement (e.g. 5.5mm, 12.6V)..." value="${this.escapeHtml(curVal)}" style="height: 36px; font-size: 0.85rem;" onchange="PosApp.handleUpdateChecklistMeasurement(${ci.id}, this.value, ${ord.id})">
-                                    </div>
-                                    <label class="btn btn-outline btn-sm" style="cursor: pointer; height: 36px; display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 700;">
-                                        <i class="fa-solid fa-camera"></i> <span>Photo</span>
-                                        <input type="file" accept="image/*" capture="environment" style="display: none;" onchange="PosApp.handleChecklistPhotoCapture(event, ${ci.id}, ${ord.id})">
-                                    </label>
-                                    <div id="chkPhotoPreview-${ci.id}" class="checklist-photo-box" style="${photoUrl ? '' : 'display: none;'} margin: 0; align-items: center; gap: 0.4rem;">
-                                        <img src="${(photoUrl && photoUrl !== 'certified_digital_inspection') ? photoUrl : 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%2316a34a\'><path d=\'M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z\'/></svg>'}" id="chkPhotoImg-${ci.id}" class="checklist-photo-thumb" alt="Checklist Photo" style="width: 32px; height: 32px; border-radius: 4px; border: 1px solid #86efac; background: #dcfce7; object-fit: contain;">
-                                        <span style="font-size: 0.72rem; color: #16a34a; font-weight: 700;"><i class="fa-solid fa-circle-check"></i> Attached</span>
-                                    </div>
-                                </div>
+                                <div style="font-weight: 800; font-size: 1.05rem; color: var(--text-main); margin-bottom: 0.25rem;">${primaryJob ? 'No Inspection Items Required' : 'No Vehicle on Hoist'}</div>
+                                <div style="font-size: 0.85rem;">${primaryJob ? 'This service does not require safety inspection checklist items.' : 'Pull a vehicle onto the hoist to perform its safety inspection.'}</div>
                             </div>
                         `;
-                    });
+                    } else {
+                        chkHtml += `
+                            <button type="button" class="btn-pass-all" onclick="PosApp.handleQuickPassAllChecklist(${primaryJobOrder.id})">
+                                <i class="fa-solid fa-check-double"></i> PASS ALL INSPECTION POINTS (${passedChk}/${totalChk})
+                            </button>
+                        `;
+                        primaryJobChecklists.forEach(ci => {
+                            const curStatus = ci.status || 'pending';
+                            const isPassed = (curStatus === 'pass');
+                            const isCaution = (curStatus === 'caution');
+                            const isFailed = (curStatus === 'fail');
+                            const cardClass = isPassed ? 'is-passed' : (isFailed ? 'is-fail' : (isCaution ? 'is-warn' : ''));
 
-                    jHtml += `
-                        <div class="tech-job-card" style="border-radius: 14px; box-shadow: 0 4px 14px rgba(0,0,0,0.05); margin-bottom: 1.5rem; padding: 1.4rem;">
-                            <div class="tech-job-header" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.1rem; padding-bottom: 0.9rem; border-bottom: 1.5px solid var(--border); flex-wrap: wrap; gap: 0.75rem;">
-                                <div>
-                                    <div style="display: flex; align-items: center; gap: 0.65rem; margin-bottom: 0.35rem;">
-                                        <span class="bay-plate-badge" style="font-size: 1.3rem; padding: 4px 14px; font-weight: 800; background: #1e293b; color: #f8fafc; border-radius: 6px;">${this.escapeHtml(ord.plate_number)}</span>
-                                        <span class="tech-status-badge ${badgeClass}" id="jobBadge-${ord.id}" style="font-weight: 700; padding: 4px 10px; border-radius: 6px;">
-                                            <i class="fa-solid ${badgeIcon}"></i> ${badgeText}
-                                        </span>
-                                    </div>
-                                    <div style="font-size: 1rem; font-weight: 800; color: var(--text-main);">${this.escapeHtml(ord.service_names || 'Technical Service')}</div>
-                                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem;">
-                                        Order #${this.escapeHtml(ord.order_number)} • Bay: <strong style="color: #ea580c;">${this.escapeHtml(ord.bay_name || 'Oil Change Bay')}</strong> • Customer: <strong>${this.escapeHtml(ord.customer_name || 'Walk-in')}</strong>
-                                    </div>
-                                </div>
-                                <div style="display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center;">
-                                    ${(ord.status === 'finished' || ord.repair_status === 'finished') ? `
-                                        <span class="badge" style="background: #dcfce7; color: #166534; border: 1.5px solid #86efac; font-weight: 800; padding: 6px 14px; border-radius: 8px; display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem;">
-                                            <i class="fa-solid fa-check-double text-success"></i> ${parseInt(ord.is_mixed) === 1 ? 'Mechanical Complete • Sent to Wash' : 'Completed • Ready for Pickup'}
-                                        </span>
-                                    ` : `
-                                        <button type="button" class="btn btn-outline btn-sm" style="font-weight: 700; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.9rem;" onclick="PosApp.openRequestPartsModal(${ord.id}, '${this.escapeHtml(ord.plate_number)}')">
-                                            <i class="fa-solid fa-boxes-packing text-primary"></i> Request Parts
-                                        </button>
-                                        <button type="button" class="btn btn-success btn-sm" style="font-weight: 800; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1.1rem; background: #16a34a; border-color: #15803d; box-shadow: 0 2px 6px rgba(22, 163, 74, 0.3);" onclick="PosApp.handleFinishTechJob(${ord.id}, '${this.escapeHtml(ord.plate_number)}')">
-                                            <i class="fa-solid fa-circle-check"></i> Finish Job
-                                        </button>
-                                    `}
-                                </div>
-                            </div>
-
-                            <!-- Tasks List -->
-                            <div class="tech-tasks-section" style="margin-bottom: 1.25rem; background: #f8fafc; padding: 1rem; border-radius: 10px; border: 1px solid var(--border);">
-                                <h4 style="font-size: 0.95rem; font-weight: 800; color: var(--text-main); margin: 0 0 0.6rem 0; display: flex; align-items: center; gap: 0.4rem;">
-                                    <i class="fa-solid fa-list-check text-primary"></i> Tasks in Progress
-                                </h4>
-                                ${tasksHtml}
-                            </div>
-
-                            <!-- Guided Safety Inspection Checklist -->
-                            <div>
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
-                                    <div style="display: flex; align-items: center; gap: 0.6rem;">
-                                        <h4 style="font-size: 0.95rem; font-weight: 800; color: var(--text-main); margin: 0; display: flex; align-items: center; gap: 0.4rem;">
-                                            <i class="fa-solid fa-clipboard-check text-primary"></i> Guided Safety Inspection Checklist
-                                        </h4>
-                                        <span class="badge" style="${isInspectionComplete ? 'background: #dcfce7; color: #166534; border: 1.5px solid #86efac;' : 'background: #fef3c7; color: #92400e; border: 1.5px solid #fde68a;'} font-weight: 800; font-size: 0.78rem; padding: 3px 10px; border-radius: 999px;">
-                                            <i class="fa-solid ${isInspectionComplete ? 'fa-circle-check text-success' : 'fa-clock text-warning'} mr-1"></i> ${passedMandatory}/${totalMandatory} Passed ${isInspectionComplete ? '(Ready)' : ''}
-                                        </span>
-                                    </div>
-                                    <button type="button" class="btn btn-outline btn-sm btn-quick-pass-all" style="font-weight: 800; border-color: #22c55e; color: #16a34a; background: #f0fdf4; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.85rem;" onclick="PosApp.handleQuickPassAllChecklist(${ord.id})">
-                                        <i class="fa-solid fa-check-double text-success"></i> Quick Pass All (ជាប់ទាំងអស់)
-                                    </button>
-                                </div>
-                                <div class="checklist-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.75rem;">
-                                    ${chkHtml}
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                });
-                }
-
-                let completedHtml = '';
-                if (completedJobs.length > 0) {
-                    completedHtml = `
-                        <div style="margin-top: 2rem; border-top: 2px dashed var(--border); padding-top: 1.5rem;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.9rem;">
-                                <h4 style="font-size: 1rem; font-weight: 800; color: var(--text-main); margin: 0; display: flex; align-items: center; gap: 0.4rem;">
-                                    <i class="fa-solid fa-clock-rotate-left text-success"></i> Completed Jobs Today (${completedJobs.length})
-                                </h4>
-                            </div>
-                            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                                ${completedJobs.map(cj => `
-                                    <div style="background: white; border: 1.5px solid var(--border); border-left: 4px solid #16a34a; border-radius: 10px; padding: 0.75rem 1.1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
-                                        <div>
-                                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.2rem;">
-                                                <span style="font-weight: 800; font-size: 1rem; color: var(--text-main);">${this.escapeHtml(cj.plate_number)}</span>
-                                                <span style="font-size: 0.8rem; color: var(--text-muted);">#${this.escapeHtml(cj.order_number)}</span>
-                                                <span class="badge" style="background: #dcfce7; color: #166534; font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 999px;">
-                                                    <i class="fa-solid fa-check"></i> ${parseInt(cj.is_mixed) === 1 ? 'Sent to Wash Queue' : 'Ready for Pickup'}
-                                                </span>
-                                            </div>
-                                            <div style="font-size: 0.85rem; color: var(--text-muted);">
-                                                ${this.escapeHtml(cj.service_names || 'Technical Service')} • Customer: <strong>${this.escapeHtml(cj.customer_name || 'Walk-in')}</strong>
-                                            </div>
+                            chkHtml += `
+                                <div class="inspect-item-card ${cardClass}" id="chkCard-${ci.id}">
+                                    <div class="inspect-item-info">
+                                        <div class="inspect-item-name">
+                                            ${this.escapeHtml(ci.item_name)}
+                                            ${ci.is_mandatory ? '<span style="color: #ef4444; font-weight: 900;" title="Mandatory">*</span>' : ''}
                                         </div>
-                                        <div style="text-align: right;">
-                                            <div style="font-weight: 800; font-size: 0.9rem; color: #16a34a;">
-                                                ${parseFloat(cj.commission_usd || 0) > 0 ? `+$${parseFloat(cj.commission_usd).toFixed(2)} comm.` : '<span style="color: var(--text-muted); font-size: 0.8rem;">Finished</span>'}
-                                            </div>
-                                            <div style="font-size: 0.75rem; color: var(--text-muted);">
-                                                ${(cj.finished_at || cj.updated_at || '').substring(11, 16)}
-                                            </div>
+                                        <div class="inspect-item-spec">
+                                            ${this.escapeHtml(ci.notes || 'Standard Spec & Calibration')}
+                                            ${ci.measurement_value ? ` &bull; <strong>${this.escapeHtml(ci.measurement_value)}</strong>` : ''}
                                         </div>
                                     </div>
-                                `).join('')}
+                                    <div class="inspect-status-group">
+                                        <button type="button" class="btn-chk-big ${isPassed ? 'active-pass' : ''}" onclick="PosApp.handleQuickSetChecklist(${ci.id}, 'pass', ${primaryJobOrder.id})">
+                                            <i class="fa-solid fa-check"></i> PASS
+                                        </button>
+                                        <button type="button" class="btn-chk-big ${isCaution ? 'active-caution' : ''}" onclick="PosApp.handleQuickSetChecklist(${ci.id}, 'caution', ${primaryJobOrder.id})">
+                                            <i class="fa-solid fa-triangle-exclamation"></i> WARN
+                                        </button>
+                                        <button type="button" class="btn-chk-big ${isFailed ? 'active-fail' : ''}" onclick="PosApp.handleQuickSetChecklist(${ci.id}, 'fail', ${primaryJobOrder.id})">
+                                            <i class="fa-solid fa-xmark"></i> FAIL
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                    }
+
+                    // Completed HTML
+                    let compHtml = '';
+                    if (completedJobs.length === 0) {
+                        compHtml = `
+                            <div style="background: white; border: 2px dashed var(--border); border-radius: 1rem; padding: 2.5rem 1.5rem; text-align: center; color: var(--text-muted);">
+                                <div style="font-weight: 800; font-size: 1.05rem; color: var(--text-main); margin-bottom: 0.25rem;">No Completed Jobs Today</div>
+                                <div style="font-size: 0.85rem;">Finished technical jobs will be listed here.</div>
                             </div>
+                        `;
+                    } else {
+                        completedJobs.forEach(cj => {
+                            compHtml += `
+                                <div style="background: white; border: 1.5px solid var(--border); border-left: 5px solid #16a34a; border-radius: 10px; padding: 0.9rem 1.1rem; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;">
+                                    <div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                                            <span class="mono" style="font-weight: 900; font-size: 1.1rem; color: var(--text-main);">${this.escapeHtml(cj.plate_number)}</span>
+                                            <span style="font-size: 0.8rem; color: var(--text-muted);">#${this.escapeHtml(cj.order_number)}</span>
+                                            <span class="badge" style="background: #dcfce7; color: #166534; font-size: 0.75rem; font-weight: 800; padding: 2px 8px; border-radius: 9999px;">
+                                                <i class="fa-solid fa-circle-check"></i> ${parseInt(cj.is_mixed) === 1 ? 'Sent to Wash' : 'Ready for Pickup'}
+                                            </span>
+                                        </div>
+                                        <div style="font-size: 0.85rem; color: var(--text-muted);">
+                                            ${this.escapeHtml(cj.service_names || 'Technical Service')} &bull; Customer: <strong>${this.escapeHtml(cj.customer_name || 'Walk-in')}</strong>
+                                        </div>
+                                    </div>
+                                    <div style="text-align: right; flex-shrink: 0;">
+                                        <div style="font-size: 0.85rem; font-weight: 800; color: #16a34a;"><i class="fa-solid fa-check"></i> Done</div>
+                                        <div style="font-size: 0.75rem; color: var(--text-muted);">${(cj.finished_at || cj.updated_at || '').substring(11, 16)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                    }
+
+                    rightCol.innerHTML = `
+                        <!-- Tab Header -->
+                        <div class="right-tab-header">
+                            <button type="button" class="tab-btn ${this.currentMechanicTab === 'queue' ? 'active' : ''}" id="tabBtnQueue" onclick="PosApp.switchMechanicTab('queue')">
+                                <i class="fa-solid fa-list-ol"></i>
+                                <span>Wash Queue</span>
+                                <span class="tab-badge" id="queueBadge">${handoverCars.length}</span>
+                            </button>
+                            <button type="button" class="tab-btn ${this.currentMechanicTab === 'inspection' ? 'active' : ''}" id="tabBtnInspection" onclick="PosApp.switchMechanicTab('inspection')">
+                                <i class="fa-solid fa-shield-halved"></i>
+                                <span>Inspection</span>
+                                <span class="tab-badge" id="inspectBadge" style="${isInspectionComplete ? 'background:#dcfce7; color:#15803d;' : ''}">
+                                    ${totalChk > 0 ? `${passedChk}/${totalChk}` : '0/0'}
+                                </span>
+                            </button>
+                            <button type="button" class="tab-btn ${this.currentMechanicTab === 'completed' ? 'active' : ''}" id="tabBtnCompleted" onclick="PosApp.switchMechanicTab('completed')">
+                                <i class="fa-solid fa-clock-rotate-left"></i>
+                                <span>Completed</span>
+                                <span class="tab-badge" id="completedBadge">${completedJobs.length}</span>
+                            </button>
+                        </div>
+
+                        <!-- TAB 1: WAITING QUEUE PANE -->
+                        <div class="tab-pane scroll-thin" id="paneQueue" style="display: ${this.currentMechanicTab === 'queue' ? 'flex' : 'none'};">
+                            ${queueHtml}
+                        </div>
+
+                        <!-- TAB 2: SAFETY INSPECTION PANE -->
+                        <div class="tab-pane scroll-thin" id="paneInspection" style="display: ${this.currentMechanicTab === 'inspection' ? 'flex' : 'none'};">
+                            ${chkHtml}
+                        </div>
+
+                        <!-- TAB 3: COMPLETED PANE -->
+                        <div class="tab-pane scroll-thin" id="paneCompleted" style="display: ${this.currentMechanicTab === 'completed' ? 'flex' : 'none'};">
+                            ${compHtml}
                         </div>
                     `;
                 }
-
-                jobsContainer.innerHTML = jHtml + completedHtml;
             }
         } catch (e) {
             console.warn('Technical screen fetch error:', e);
-            jobsContainer.innerHTML = `<div style="text-align: center; padding: 2rem; color: var(--danger);">Failed to load technical jobs. Please check connection.</div>`;
+            if (liftCol) {
+                liftCol.innerHTML = `<div style="text-align: center; padding: 2rem; color: var(--danger);">Failed to load technical jobs. Please check connection.</div>`;
+            }
         }
     }
 
@@ -12177,6 +12573,52 @@ class PosApp {
     // ========================================================
     // APPOINTMENTS SCHEDULER (AUTHORITATIVE BACK OFFICE)
     // ========================================================
+    static currentApptFilter = 'all';
+    static cachedAppointments = [];
+
+    static setApptFilterTab(filter) {
+        this.currentApptFilter = filter || 'all';
+        const tabs = document.querySelectorAll('.btn-appt-tab');
+        tabs.forEach(tab => {
+            if (tab.getAttribute('data-filter') === this.currentApptFilter) {
+                tab.classList.add('active');
+            } else {
+                tab.classList.remove('active');
+            }
+        });
+        this.renderFilteredAppointments();
+    }
+
+    static async setApptDateQuick(which) {
+        const today = new Date();
+        let targetDate = new Date();
+        if (which === 'tomorrow') {
+            targetDate.setDate(today.getDate() + 1);
+        }
+        const yyyy = targetDate.getFullYear();
+        const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(targetDate.getDate()).padStart(2, '0');
+        const dateStr = `${yyyy}-${mm}-${dd}`;
+
+        const viewDateInput = document.getElementById('apptViewDate');
+        const bookDateInput = document.getElementById('apptBookingDate');
+        if (viewDateInput) viewDateInput.value = dateStr;
+        if (bookDateInput) bookDateInput.value = dateStr;
+
+        const btnToday = document.getElementById('btnApptQuickToday');
+        const btnTomorrow = document.getElementById('btnApptQuickTomorrow');
+        if (which === 'today') {
+            btnToday?.classList.add('active');
+            btnTomorrow?.classList.remove('active');
+        } else {
+            btnTomorrow?.classList.add('active');
+            btnToday?.classList.remove('active');
+        }
+
+        await this.loadAppointmentSlots();
+        await this.loadAppointmentsList();
+    }
+
     static async renderAppointmentsScreen() {
         const todayStr = new Date().toISOString().split('T')[0];
         const dateInput = document.getElementById('apptBookingDate');
@@ -12195,10 +12637,14 @@ class PosApp {
         if (svcSelect && svcSelect.options.length <= 1) {
             const catalog = PosStorage.getCatalog();
             const services = catalog?.services || [];
+            svcSelect.innerHTML = '';
             services.forEach(s => {
                 const opt = document.createElement('option');
                 opt.value = s.id;
-                opt.textContent = `${s.name_en} (${s.name_km || s.name_en})`;
+                const nameEn = s.name_en || s.name || '';
+                const nameKm = s.name_km || nameEn;
+                const priceFormatted = s.price_usd ? ` ($${parseFloat(s.price_usd).toFixed(2)})` : '';
+                opt.textContent = `${nameEn} / ${nameKm}${priceFormatted}`;
                 svcSelect.appendChild(opt);
             });
         }
@@ -12209,21 +12655,28 @@ class PosApp {
 
     static async loadAppointmentSlots() {
         const grid = document.getElementById('apptTimeSlotsGrid');
+        const indicator = document.getElementById('selectedSlotIndicator');
+        const kpiSlotsEl = document.getElementById('kpiApptSlots');
         if (!grid) return;
         const dateInput = document.getElementById('apptBookingDate');
         const svcSelect = document.getElementById('apptServiceSelect');
         const date = dateInput?.value || new Date().toISOString().split('T')[0];
         const serviceId = svcSelect?.value || null;
 
-        grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 1rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading free slots...</div>`;
+        grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 1rem;"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading free slots...</div>`;
 
         try {
             const res = await PosApi.getAppointmentSlots(date, serviceId);
             if (!res || !res.success || !res.slots || res.slots.length === 0) {
-                grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 1rem;">No slots available for this date.</div>`;
+                grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 1rem; font-weight: 600;">No slots available for this date.</div>`;
                 this.selectedApptSlot = null;
+                if (indicator) indicator.textContent = I18nManager.t('noSlotSelected') || 'Select a slot below';
+                if (kpiSlotsEl) kpiSlotsEl.textContent = '0';
                 return;
             }
+
+            const availSlots = res.slots.filter(slot => (slot.is_free !== false && (slot.available_capacity === undefined || slot.available_capacity > 0) && (slot.available === undefined || slot.available)));
+            if (kpiSlotsEl) kpiSlotsEl.textContent = availSlots.length;
 
             grid.innerHTML = '';
             res.slots.forEach(slot => {
@@ -12241,18 +12694,27 @@ class PosApp {
                 } else {
                     if (this.selectedApptSlot === timeVal) {
                         btn.classList.add('active');
+                        if (indicator) {
+                            indicator.innerHTML = `<i class="fa-solid fa-circle-check mr-1"></i> ${I18nManager.t('selectedSlot') || 'Selected:'} ${timeVal}`;
+                        }
                     }
                     btn.addEventListener('click', () => {
                         grid.querySelectorAll('.time-slot-btn').forEach(b => b.classList.remove('active'));
                         btn.classList.add('active');
                         this.selectedApptSlot = timeVal;
+                        const hiddenInput = document.getElementById('selectedTimeSlot');
+                        if (hiddenInput) hiddenInput.value = timeVal;
+                        if (indicator) {
+                            indicator.innerHTML = `<i class="fa-solid fa-circle-check mr-1"></i> ${I18nManager.t('selectedSlot') || 'Selected:'} ${timeVal}`;
+                        }
                     });
                 }
                 grid.appendChild(btn);
             });
         } catch (e) {
             console.warn('Error loading appointment slots:', e);
-            grid.innerHTML = `<div style="grid-column: 1/-1; color: var(--danger); padding: 1rem;">Failed to load slots.</div>`;
+            grid.innerHTML = `<div style="grid-column: 1/-1; color: var(--danger); padding: 1rem; text-align: center;">Failed to load slots.</div>`;
+            if (kpiSlotsEl) kpiSlotsEl.textContent = '0';
         }
     }
 
@@ -12265,6 +12727,7 @@ class PosApp {
         const phoneInput = document.getElementById('apptCustomerPhone');
         const notesInput = document.getElementById('apptNotes');
         const btnSave = document.getElementById('btnSaveAppt');
+        const indicator = document.getElementById('selectedSlotIndicator');
 
         const date = dateInput?.value;
         const timeSlot = this.selectedApptSlot;
@@ -12311,12 +12774,16 @@ class PosApp {
             const res = await PosApi.createAppointment(payload);
             if (res && res.success) {
                 this.showToastNotice('Appointment booked successfully!', 'success');
+                this.playChimeSound();
                 // Clear inputs
                 if (plateInput) plateInput.value = '';
                 if (nameInput) nameInput.value = '';
                 if (phoneInput) phoneInput.value = '';
                 if (notesInput) notesInput.value = '';
                 this.selectedApptSlot = null;
+                const hiddenInput = document.getElementById('selectedTimeSlot');
+                if (hiddenInput) hiddenInput.value = '';
+                if (indicator) indicator.textContent = I18nManager.t('noSlotSelected') || 'Select a slot below';
 
                 // Refresh slots and appointments list
                 await this.loadAppointmentSlots();
@@ -12338,66 +12805,147 @@ class PosApp {
 
     static async loadAppointmentsList() {
         const listContainer = document.getElementById('appointmentsList');
-        const countBadge = document.getElementById('apptCountBadge');
         const viewDateInput = document.getElementById('apptViewDate');
         const date = viewDateInput?.value || new Date().toISOString().split('T')[0];
 
         if (!listContainer) return;
-        listContainer.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading appointments...</div>`;
+        listContainer.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 2.5rem;"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading appointments...</div>`;
 
         try {
             const res = await PosApi.getAppointments(date);
-            if (!res || !res.success || !res.appointments || res.appointments.length === 0) {
-                listContainer.innerHTML = `
-                    <div style="text-align: center; color: var(--text-muted); padding: 3rem;">
-                        <i class="fa-regular fa-calendar-xmark" style="font-size: 2.2rem; margin-bottom: 0.5rem; display: block; opacity: 0.6;"></i>
-                        No appointments found for this date.
-                    </div>
-                `;
-                if (countBadge) countBadge.textContent = '0';
-                return;
-            }
+            const appointments = (res && res.success && Array.isArray(res.appointments)) ? res.appointments : [];
+            this.cachedAppointments = appointments;
 
-            if (countBadge) countBadge.textContent = res.appointments.length;
+            // Compute KPI counts
+            const totalCount = appointments.length;
+            const pendingCount = appointments.filter(a => a.status === 'pending' || a.status === 'booked' || a.status === 'confirmed').length;
+            const arrivedCount = appointments.filter(a => a.status === 'arrived' || a.status === 'in_progress' || a.status === 'completed').length;
 
-            let html = '';
-            res.appointments.forEach(appt => {
-                const isArrived = (appt.status === 'arrived' || appt.status === 'in_progress' || appt.status === 'completed');
-                const timeStr = appt.appointment_time ? appt.appointment_time.slice(0, 5) : (appt.time_slot || '');
-                const statusLabel = appt.status.charAt(0).toUpperCase() + appt.status.slice(1);
-                const plateText = appt.plate_number || appt.vehicle_plate || '';
-                const svcName = appt.service_name_en || appt.service_name_km || appt.service_name || 'Car Wash Service';
-                
-                html += `
-                    <div class="appt-card-row ${isArrived ? 'arrived' : ''}">
-                        <div class="appt-card-main">
-                            <div class="appt-time-pill"><i class="fa-regular fa-clock"></i> ${timeStr}</div>
-                            <div class="appt-plate-pill">${this.escapeHtml(plateText)}</div>
-                            <div class="appt-info">
-                                <div class="appt-svc-name">${this.escapeHtml(svcName)}</div>
-                                <div class="appt-cust-meta">
-                                    <span><i class="fa-solid fa-user"></i> ${this.escapeHtml(appt.customer_name || 'Guest')}</span>
-                                    ${appt.customer_phone ? `<span><i class="fa-solid fa-phone"></i> ${this.escapeHtml(appt.customer_phone)}</span>` : ''}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="appt-actions">
-                            ${!isArrived ? `
-                                <button type="button" class="btn-appt-arrived" onclick="PosApp.handleAppointmentArrived(${appt.id})">
-                                    <i class="fa-solid fa-flag-checkered"></i> Customer Arrived
-                                </button>
-                            ` : `
-                                <span class="appt-status-arrived"><i class="fa-solid fa-check"></i> ${statusLabel}</span>
-                            `}
-                        </div>
-                    </div>
-                `;
-            });
-            listContainer.innerHTML = html;
+            // Update KPI metric elements
+            const kpiTotalEl = document.getElementById('kpiApptTotal');
+            const kpiPendingEl = document.getElementById('kpiApptPending');
+            const kpiArrivedEl = document.getElementById('kpiApptArrived');
+            if (kpiTotalEl) kpiTotalEl.textContent = totalCount;
+            if (kpiPendingEl) kpiPendingEl.textContent = pendingCount;
+            if (kpiArrivedEl) kpiArrivedEl.textContent = arrivedCount;
+
+            // Update header and tab count badges
+            const apptCountBadge = document.getElementById('apptCountBadge');
+            const tabCountAll = document.getElementById('tabCountApptAll');
+            const tabCountPending = document.getElementById('tabCountApptPending');
+            const tabCountArrived = document.getElementById('tabCountApptArrived');
+
+            if (apptCountBadge) apptCountBadge.textContent = totalCount;
+            if (tabCountAll) tabCountAll.textContent = totalCount;
+            if (tabCountPending) tabCountPending.textContent = pendingCount;
+            if (tabCountArrived) tabCountArrived.textContent = arrivedCount;
+
+            // Render according to active tab filter
+            this.renderFilteredAppointments();
         } catch (e) {
             console.warn('Error loading appointments:', e);
             listContainer.innerHTML = `<div style="text-align: center; color: var(--danger); padding: 2rem;">Failed to load appointments.</div>`;
         }
+    }
+
+    static renderFilteredAppointments() {
+        const listContainer = document.getElementById('appointmentsList');
+        if (!listContainer) return;
+
+        const appointments = this.cachedAppointments || [];
+        const filter = this.currentApptFilter || 'all';
+
+        let filtered = appointments;
+        if (filter === 'pending') {
+            filtered = appointments.filter(a => a.status !== 'arrived' && a.status !== 'in_progress' && a.status !== 'completed');
+        } else if (filter === 'arrived') {
+            filtered = appointments.filter(a => a.status === 'arrived' || a.status === 'in_progress' || a.status === 'completed');
+        }
+
+        if (filtered.length === 0) {
+            let emptyMsg = I18nManager.t('noApptsFound') || 'No appointments found for this date.';
+            if (filter === 'pending') {
+                emptyMsg = I18nManager.t('noPendingAppts') || 'No pending appointments found.';
+            } else if (filter === 'arrived') {
+                emptyMsg = I18nManager.t('noArrivedAppts') || 'No arrived appointments yet.';
+            }
+
+            listContainer.innerHTML = `
+                <div class="appt-empty-state">
+                    <i class="fa-regular fa-calendar-xmark"></i>
+                    <p>${emptyMsg}</p>
+                </div>
+            `;
+            return;
+        }
+
+        const isKm = I18nManager.getLang() === 'km';
+        let html = '';
+        filtered.forEach(appt => {
+            const isArrived = (appt.status === 'arrived' || appt.status === 'in_progress' || appt.status === 'completed');
+            const timeStr = appt.appointment_time ? appt.appointment_time.slice(0, 5) : (appt.time_slot || '--:--');
+            const plateText = appt.plate_number || appt.vehicle_plate || 'N/A';
+            const svcName = isKm ? (appt.service_name_km || appt.service_name_en || appt.service_name || 'Car Wash') : (appt.service_name_en || appt.service_name || 'Car Wash');
+            const custName = appt.customer_name || (I18nManager.t('walkInGuest') || 'Guest');
+            const custPhone = appt.customer_phone || '';
+            const statusLabel = isArrived ? (I18nManager.t('kpiArrived') || 'Arrived') : (I18nManager.t('kpiPendingArrival') || 'Pending');
+
+            html += `
+                <div class="appt-card-row ${isArrived ? 'is-arrived' : 'is-pending'}">
+                    <div class="appt-card-left">
+                        <div class="appt-time-box">
+                            <i class="fa-regular fa-clock"></i>
+                            <span>${timeStr}</span>
+                        </div>
+                        <div class="appt-plate-badge-dark">
+                            <i class="fa-solid fa-car"></i>
+                            <span>${this.escapeHtml(plateText)}</span>
+                        </div>
+                    </div>
+                    <div class="appt-card-mid">
+                        <div class="appt-customer-row">
+                            <span class="appt-customer-name">
+                                <i class="fa-solid fa-user"></i>
+                                ${this.escapeHtml(custName)}
+                            </span>
+                            ${custPhone ? `
+                                <span class="appt-customer-phone">
+                                    <i class="fa-solid fa-phone"></i>
+                                    ${this.escapeHtml(custPhone)}
+                                </span>
+                            ` : ''}
+                        </div>
+                        <div class="appt-service-row">
+                            <span class="appt-service-pill">
+                                <i class="fa-solid fa-spray-can-sparkles"></i>
+                                ${this.escapeHtml(svcName)}
+                            </span>
+                            ${appt.notes ? `
+                                <span class="appt-note-pill" title="${this.escapeHtml(appt.notes)}">
+                                    <i class="fa-solid fa-note-sticky"></i>
+                                    ${this.escapeHtml(appt.notes)}
+                                </span>
+                            ` : ''}
+                        </div>
+                    </div>
+                    <div class="appt-card-actions">
+                        ${!isArrived ? `
+                            <button type="button" class="btn-appt-arrived" onclick="PosApp.handleAppointmentArrived(${appt.id})">
+                                <i class="fa-solid fa-flag-checkered"></i>
+                                <span>${I18nManager.t('btnCustomerArrived') || 'Customer Arrived'}</span>
+                            </button>
+                        ` : `
+                            <span class="appt-status-arrived-pill">
+                                <i class="fa-solid fa-circle-check"></i>
+                                <span>${statusLabel}</span>
+                            </span>
+                        `}
+                    </div>
+                </div>
+            `;
+        });
+
+        listContainer.innerHTML = html;
     }
 
     static async handleAppointmentArrived(apptId) {
