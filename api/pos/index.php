@@ -5487,7 +5487,16 @@ if ($action === 'appointment_arrived') {
         $svcRow = $pdo->query("SELECT id, name_en, category FROM services WHERE id = {$svcId}")->fetch(PDO::FETCH_ASSOC);
         $price = (float)$appt['service_price'] ?: 3.50;
         $orderUid = generate_unique_id('ORD');
-        $orderNum = 'ORD-' . date('ymd') . '-' . sprintf('%03d', rand(100, 999));
+        $todayPrefix = 'ORD-' . date('ymd') . '-';
+        $seqStmt = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE order_number LIKE ?");
+        $seqStmt->execute([$todayPrefix . '%']);
+        $seqCount = (int)$seqStmt->fetchColumn() + 1;
+        $orderNum = $todayPrefix . str_pad((string)$seqCount, 3, '0', STR_PAD_LEFT);
+        $chkDup = $pdo->prepare("SELECT id FROM orders WHERE order_number = ? LIMIT 1");
+        $chkDup->execute([$orderNum]);
+        if ($chkDup->fetchColumn()) {
+            $orderNum = $todayPrefix . strtoupper(substr(bin2hex(random_bytes(3)), 0, 4));
+        }
 
         $insOrder = $pdo->prepare("
             INSERT INTO orders (

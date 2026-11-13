@@ -2062,6 +2062,34 @@ class PosApp {
         document.getElementById('btnCloseChooseBayModal')?.addEventListener('click', closeChooseBay);
         document.getElementById('btnCancelChooseBayModal')?.addEventListener('click', closeChooseBay);
 
+        // Bay Override Modal Close / Cancel / Confirm
+        const closeBayOverride = () => document.getElementById('modalBayOverride')?.classList.remove('open');
+        document.getElementById('btnCloseBayOverrideModal')?.addEventListener('click', closeBayOverride);
+        document.getElementById('btnCancelBayOverrideModal')?.addEventListener('click', closeBayOverride);
+        document.getElementById('btnConfirmBayOverride')?.addEventListener('click', () => PosApp.submitBayOverride());
+
+        // Bay Override Quick Reason Chips
+        document.querySelectorAll('#modalBayOverride .btn-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                const reason = chip.getAttribute('data-reason');
+                const input = document.getElementById('bayOverrideReasonInput');
+                if (input && reason) {
+                    input.value = reason;
+                    document.querySelectorAll('#modalBayOverride .btn-chip').forEach(c => c.classList.remove('active'));
+                    chip.classList.add('active');
+                    input.focus();
+                }
+            });
+        });
+
+        // Enter Key to Submit Bay Override
+        document.getElementById('bayOverrideReasonInput')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                PosApp.submitBayOverride();
+            }
+        });
+
         // Refresh Washer Screen Button
         document.getElementById('btnRefreshWasherJobs')?.addEventListener('click', async () => {
             await this.fetchBaysAndQueue();
@@ -6913,13 +6941,22 @@ class PosApp {
             return;
         }
 
+        const freeCount = bays.filter(b => b.status === 'free').length;
+        const busyCount = bays.filter(b => b.status !== 'free').length;
+        const summaryEl = document.getElementById('baysCapacitySummary');
+        if (summaryEl) {
+            summaryEl.innerHTML = `<i class="fa-solid fa-circle-check text-success"></i> <span><strong>${freeCount}</strong> Free &bull; <strong>${busyCount}</strong> In Service</span>`;
+        }
+
         let html = '';
         bays.forEach(bay => {
             const isFree = (bay.status === 'free');
             const isWash = (bay.bay_type === 'wash');
-            const typeLabel = isWash ? 'Wash' : 'Oil / Tech';
+            const typeLabel = isWash ? 'Wash Bay' : 'Oil / Tech';
             const typeClass = isWash ? 'wash' : 'oil_change';
+            const typeIcon = isWash ? 'fa-shower' : 'fa-wrench';
             const statusLabel = isFree ? (I18nManager.t('free') || 'FREE') : (I18nManager.t('busy') || 'BUSY');
+            const bayNum = bay.bay_number || bay.id;
 
             const relevantQueue = isWash ? washQueue : techQueue;
             const nextCar = relevantQueue && relevantQueue.length > 0 ? relevantQueue[0] : null;
@@ -6930,19 +6967,31 @@ class PosApp {
                     const assignTitle = I18nManager.t('assignNextCar') || 'Assign Next';
                     cardContentHtml = `
                         <div class="bay-empty-state" style="border-color: #86efac; background: #f0fdf4;">
-                            <span style="font-weight: 700; color: #15803d; font-size: 0.85rem;"><i class="fa-solid fa-check-circle"></i> ${I18nManager.t('free') || 'Free & Ready'}</span>
-                            <span style="font-size: 0.78rem; color: #166534;">${I18nManager.t('nextInLine') || 'Next'}: <strong>${this.escapeHtml(nextCar.plate_number)}</strong></span>
+                            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                                <span style="font-weight: 800; color: #15803d; font-size: 0.82rem;"><i class="fa-solid fa-check-circle"></i> ${I18nManager.t('free') || 'Clean & Ready'}</span>
+                                <span style="font-size: 0.78rem; color: #166534;">${I18nManager.t('nextInLine') || 'Next'}: <strong>${this.escapeHtml(nextCar.plate_number)}</strong></span>
+                            </div>
+                        </div>
+                        <div class="bay-drop-zone-hint">
+                            <i class="fa-solid fa-arrow-down-to-bracket"></i>
+                            <span>${I18nManager.t('dropCarHere') || 'Drop car here to assign'}</span>
                         </div>
                         <button type="button" class="btn-assign-next" ${!this.isOnline ? 'disabled title="Offline"' : ''} onclick="PosApp.handleAssignBayOneTap(${bay.id}, ${nextCar.order_id}, '${this.escapeHtml(nextCar.plate_number)}', '${this.escapeHtml(bay.bay_name)}')">
-                            <i class="fa-solid fa-play"></i> ${assignTitle}: <strong>${this.escapeHtml(nextCar.plate_number)}</strong>
+                            <i class="fa-solid fa-play"></i> <span>${assignTitle}: <strong>${this.escapeHtml(nextCar.plate_number)}</strong></span>
                         </button>
                     `;
                 } else {
                     cardContentHtml = `
                         <div class="bay-empty-state">
-                            <i class="fa-solid fa-circle-check" style="color: var(--success); font-size: 1.5rem; margin-bottom: 2px;"></i>
-                            <span style="font-weight: 700; color: var(--text-main);">${I18nManager.t('free') || 'Free & Ready'}</span>
-                            <span style="font-size: 0.76rem; color: var(--text-muted);">${I18nManager.t('noCarsWaiting') || 'No cars waiting'}</span>
+                            <div class="bay-empty-circle">
+                                <i class="fa-solid fa-check"></i>
+                            </div>
+                            <span class="bay-empty-title">${I18nManager.t('free') || 'Clean & Ready'}</span>
+                            <span class="bay-empty-sub">${I18nManager.t('noCarsWaiting') || 'Ready for vehicle'}</span>
+                        </div>
+                        <div class="bay-drop-zone-hint">
+                            <i class="fa-solid fa-arrow-down-to-bracket"></i>
+                            <span>${I18nManager.t('dropCarHere') || 'Drop car here to assign'}</span>
                         </div>
                     `;
                 }
@@ -6953,28 +7002,36 @@ class PosApp {
                 const duration = bay.in_bay_minutes ?? 0;
                 cardContentHtml = `
                     <div class="bay-occupied-info">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span class="bay-plate-badge">${this.escapeHtml(plate)}</span>
-                            <span style="font-size: 0.78rem; font-weight: 700; color: #1d4ed8; background: #eff6ff; padding: 2px 7px; border-radius: 4px;">
+                        <div class="bay-plate-timer-row">
+                            <span class="bay-plate-badge">
+                                <i class="fa-solid fa-car"></i> ${this.escapeHtml(plate)}
+                            </span>
+                            <span class="bay-timer-pill">
                                 <i class="fa-regular fa-clock"></i> ${duration}m in bay
                             </span>
                         </div>
-                        <div class="bay-service-text" title="${this.escapeHtml(service)}">${this.escapeHtml(service)}</div>
+                        <div class="bay-service-text" title="${this.escapeHtml(service)}">
+                            <i class="fa-solid fa-spray-can-sparkles text-primary"></i> <span>${this.escapeHtml(service)}</span>
+                        </div>
                         <div class="bay-meta-row">
                             <span><i class="fa-regular fa-user"></i> ${this.escapeHtml(custName)}</span>
-                            <span>#${this.escapeHtml(bay.order_number || '')}</span>
+                            <span class="bay-ord-badge">#${this.escapeHtml(bay.order_number || '')}</span>
                         </div>
                     </div>
                 `;
             }
 
             html += `
-                <div class="bay-card ${isFree ? 'bay-free' : 'bay-busy'}" id="cashierBayCard-${bay.id}">
+                <div class="bay-card ${isFree ? 'bay-free bay-drop-target' : 'bay-busy'}" id="cashierBayCard-${bay.id}" data-bay-id="${bay.id}" data-bay-name="${this.escapeHtml(bay.bay_name)}" data-is-free="${isFree ? '1' : '0'}">
                     <div class="bay-card-top">
                         <div class="bay-name-title">
-                            <i class="fa-solid fa-warehouse" style="color: ${isFree ? 'var(--success)' : '#2563eb'};"></i>
-                            <span>${this.escapeHtml(bay.bay_name)}</span>
-                            <span class="bay-type-badge ${typeClass}">${typeLabel}</span>
+                            <div class="bay-tile-number ${isFree ? 'tile-free' : 'tile-busy'}">
+                                ${bayNum}
+                            </div>
+                            <div class="bay-title-wrap">
+                                <div class="bay-title-text">${this.escapeHtml(bay.bay_name)}</div>
+                                <span class="bay-type-chip ${typeClass}"><i class="fa-solid ${typeIcon}"></i> ${typeLabel}</span>
+                            </div>
                         </div>
                         <span class="bay-status-badge ${isFree ? 'free' : 'busy'}">
                             <i class="fa-solid ${isFree ? 'fa-circle-check' : 'fa-circle live-pulse-dot'}"></i>
@@ -6987,6 +7044,7 @@ class PosApp {
         });
 
         container.innerHTML = html;
+        this.setupQueueDragAndDrop();
     }
 
     static renderWasherBays(bays, washQueue = []) {
@@ -7217,28 +7275,8 @@ class PosApp {
                     }
                     this.showAppAlert(`Receipt Required: Customer electronic receipt must be issued before vehicle ${plate} can enter service.`);
                 } else if (res?.error === 'OVERRIDE_REASON_REQUIRED') {
-                    const promptMsg = (res.message || 'An override reason is required to assign to an alternative bay.') +
-                        `\n\nPlease enter the override reason for assigning ${plate} to ${bayName}:`;
-                    const reason = prompt(promptMsg);
-                    if (!reason || reason.trim().length < 3) {
-                        this.showAppAlert('Bay assignment cancelled: A valid override reason (minimum 3 characters) is required when choosing an alternative bay.');
-                        return;
-                    }
-                    try {
-                        const retryRes = await PosApi.assignBay(bayId, orderId, {
-                            staff_id: this.currentUser?.id,
-                            reason: reason.trim()
-                        });
-                        if (retryRes && retryRes.success) {
-                            this.showToastNotice(`${plate} assigned to ${bayName} (Override recorded)`, 'success');
-                            await this.fetchBaysAndQueue();
-                            await this.renderJobQueue();
-                        } else {
-                            this.showAppAlert(retryRes?.message || 'Failed to assign bay');
-                        }
-                    } catch (retryErr) {
-                        this.showAppAlert(retryErr?.data?.message || retryErr.message || 'Failed to assign bay');
-                    }
+                    this.openBayOverrideModal(bayId, orderId, plate, bayName, res.message || 'Bay override required');
+                    return;
                 } else if (res?.error === 'BAY_ALREADY_TAKEN' || res?.error === 'BAY_BUSY') {
                     this.showAppAlert(I18nManager.t('bayAlreadyTaken') || 'Bay already taken! Another terminal or washer just occupied this bay.');
                     await this.fetchBaysAndQueue();
@@ -7273,33 +7311,102 @@ class PosApp {
                 }
                 this.showAppAlert(`Receipt Required: Customer electronic receipt must be issued before vehicle ${plate} can enter service.`);
             } else if (errCode === 'OVERRIDE_REASON_REQUIRED' || errMsg.includes('OVERRIDE_REASON_REQUIRED') || errMsg.includes('override reason is required')) {
-                const promptMsg = errMsg + `\n\nPlease enter the override reason for assigning ${plate} to ${bayName}:`;
-                const reason = prompt(promptMsg);
-                if (!reason || reason.trim().length < 3) {
-                    this.showAppAlert('Bay assignment cancelled: A valid override reason (minimum 3 characters) is required when choosing an alternative bay.');
-                    return;
-                }
-                try {
-                    const retryRes = await PosApi.assignBay(bayId, orderId, {
-                        staff_id: this.currentUser?.id,
-                        reason: reason.trim()
-                    });
-                    if (retryRes && retryRes.success) {
-                        this.showToastNotice(`${plate} assigned to ${bayName} (Override recorded)`, 'success');
-                        await this.fetchBaysAndQueue();
-                        await this.renderJobQueue();
-                    } else {
-                        this.showAppAlert(retryRes?.message || 'Failed to assign bay');
-                    }
-                } catch (retryErr) {
-                    this.showAppAlert(retryErr?.data?.message || retryErr.message || 'Failed to assign bay');
-                }
+                this.openBayOverrideModal(bayId, orderId, plate, bayName, errMsg || 'Bay override required');
+                return;
             } else if (errCode === 'BAY_ALREADY_TAKEN' || errMsg.includes('taken') || errMsg.includes('busy')) {
                 this.showAppAlert(I18nManager.t('bayAlreadyTaken') || 'Bay already taken! Another terminal or washer just occupied this bay.');
                 await this.fetchBaysAndQueue();
             } else {
                 this.showAppAlert(errMsg || 'Failed to assign bay');
             }
+        }
+    }
+
+    static openBayOverrideModal(bayId, orderId, plate, bayName, customMessage = '') {
+        const modal = document.getElementById('modalBayOverride');
+        if (!modal) {
+            // Graceful fallback if modal not found
+            PosApi.assignBay(bayId, orderId, { staff_id: this.currentUser?.id, reason: 'Customer requested this bay' })
+                .then(r => {
+                    if (r && r.success) {
+                        this.showToastNotice(`${plate} assigned to ${bayName} (Override recorded)`, 'success');
+                        this.fetchBaysAndQueue().then(() => this.renderJobQueue());
+                    }
+                });
+            return;
+        }
+
+        const noticeEl = document.getElementById('bayOverrideNotice');
+        const inputEl = document.getElementById('bayOverrideReasonInput');
+        const bayIdEl = document.getElementById('bayOverrideBayId');
+        const orderIdEl = document.getElementById('bayOverrideOrderId');
+        const plateEl = document.getElementById('bayOverridePlate');
+        const bayNameEl = document.getElementById('bayOverrideBayName');
+
+        if (noticeEl) {
+            noticeEl.innerHTML = `
+                <div style="font-weight: 700; color: #92400e; margin-bottom: 0.35rem;">
+                    <i class="fa-solid fa-circle-exclamation"></i> ${this.escapeHtml(customMessage || 'An alternative bay was selected.')}
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-muted);">
+                    ${I18nManager.t('platePreview') || 'Vehicle'}: <strong>${this.escapeHtml(plate)}</strong> &bull; Target Bay: <strong>${this.escapeHtml(bayName)}</strong>
+                </div>
+            `;
+        }
+
+        if (bayIdEl) bayIdEl.value = bayId;
+        if (orderIdEl) orderIdEl.value = orderId;
+        if (plateEl) plateEl.value = plate;
+        if (bayNameEl) bayNameEl.value = bayName;
+
+        if (inputEl) {
+            inputEl.value = 'Customer requested this bay';
+            document.querySelectorAll('#modalBayOverride .btn-chip').forEach(c => {
+                c.classList.toggle('active', c.getAttribute('data-reason') === 'Customer requested this bay');
+            });
+            setTimeout(() => {
+                inputEl.focus();
+                inputEl.select();
+            }, 100);
+        }
+
+        modal.classList.add('open');
+    }
+
+    static async submitBayOverride() {
+        const modal = document.getElementById('modalBayOverride');
+        const bayId = parseInt(document.getElementById('bayOverrideBayId')?.value || 0, 10);
+        const orderId = parseInt(document.getElementById('bayOverrideOrderId')?.value || 0, 10);
+        const plate = document.getElementById('bayOverridePlate')?.value || '';
+        const bayName = document.getElementById('bayOverrideBayName')?.value || 'Bay';
+        const inputEl = document.getElementById('bayOverrideReasonInput');
+        const reason = (inputEl?.value || '').trim();
+
+        if (reason.length < 3) {
+            this.showAppAlert('Please provide a valid override reason (minimum 3 characters).');
+            inputEl?.focus();
+            return;
+        }
+
+        try {
+            const res = await PosApi.assignBay(bayId, orderId, {
+                staff_id: this.currentUser?.id,
+                reason: reason
+            });
+
+            if (res && res.success) {
+                modal?.classList.remove('open');
+                this.showToastNotice(`${plate} assigned to ${bayName} (Override recorded)`, 'success');
+                await this.fetchBaysAndQueue();
+                await this.renderJobQueue();
+                if (typeof this.renderWasherScreen === 'function') {
+                    await this.renderWasherScreen();
+                }
+            } else {
+                this.showAppAlert(res?.message || 'Failed to assign bay');
+            }
+        } catch (e) {
+            this.showAppAlert(e.data?.message || e.message || 'Failed to assign bay');
         }
     }
 
@@ -7449,6 +7556,204 @@ class PosApp {
     static async handleChooseBaySelect(bayId, orderId, plate, bayName) {
         document.getElementById('modalChooseBay')?.classList.remove('open');
         await this.handleAssignBayOneTap(bayId, orderId, plate, bayName);
+    }
+
+    // ========================================================
+    // QUEUE DRAG & DROP TO BAY ASSIGNMENT (DUAL INTERACTION)
+    // ========================================================
+    static setupQueueDragAndDrop() {
+        const draggables = document.querySelectorAll('[data-draggable-vehicle="true"]');
+        const dropBays = document.querySelectorAll('.bay-card.bay-drop-target');
+
+        if (!draggables.length || !dropBays.length) return;
+
+        draggables.forEach(el => {
+            const handle = el.querySelector('.queue-drag-handle');
+            if (handle) {
+                handle.setAttribute('draggable', 'true');
+            }
+
+            const onDragStart = (e) => {
+                if (!PosApp.isOnline) {
+                    e.preventDefault();
+                    PosApp.showToastNotice(I18nManager.t('offlineAssignDisabled') || 'Offline: cannot assign bay', 'warning');
+                    return;
+                }
+
+                const orderId = el.getAttribute('data-order-id');
+                const plate = el.getAttribute('data-plate');
+                const orderNumber = el.getAttribute('data-order-number');
+
+                const dragData = JSON.stringify({ orderId, plate, orderNumber });
+                PosApp.activeDragPayload = { orderId, plate, orderNumber };
+
+                if (e.dataTransfer) {
+                    e.dataTransfer.setData('text/plain', dragData);
+                    e.dataTransfer.setData('application/json', dragData);
+                    e.dataTransfer.effectAllowed = 'move';
+
+                    if (e.dataTransfer.setDragImage) {
+                        const ghost = document.createElement('div');
+                        ghost.className = 'touch-drag-ghost';
+                        ghost.innerHTML = `<i class="fa-solid fa-car"></i> <span>${PosApp.escapeHtml(plate)}</span>`;
+                        ghost.style.position = 'fixed';
+                        ghost.style.top = '-9999px';
+                        ghost.style.left = '-9999px';
+                        document.body.appendChild(ghost);
+                        e.dataTransfer.setDragImage(ghost, 25, 25);
+                        setTimeout(() => ghost.remove(), 250);
+                    }
+                }
+
+                el.classList.add('is-dragging');
+
+                dropBays.forEach(bay => {
+                    bay.classList.add('bay-dropzone-active');
+                });
+            };
+
+            const onDragEnd = () => {
+                el.classList.remove('is-dragging');
+                PosApp.activeDragPayload = null;
+                dropBays.forEach(bay => {
+                    bay.classList.remove('bay-dropzone-active');
+                    bay.classList.remove('drag-hover');
+                });
+            };
+
+            el.addEventListener('dragstart', onDragStart);
+            el.addEventListener('dragend', onDragEnd);
+
+            if (handle) {
+                handle.addEventListener('dragstart', (e) => {
+                    e.stopPropagation();
+                    onDragStart(e);
+                });
+                handle.addEventListener('dragend', onDragEnd);
+            }
+
+            // Touch Drag Support for Touchscreens & Tablets
+            let touchStartX = 0;
+            let touchStartY = 0;
+            let touchGhost = null;
+            let currentHoveredBay = null;
+
+            const handleTouchStart = (e) => {
+                if (!PosApp.isOnline) return;
+                const touch = e.touches[0];
+                touchStartX = touch.clientX;
+                touchStartY = touch.clientY;
+            };
+
+            const handleTouchMove = (e) => {
+                if (!PosApp.isOnline) return;
+                const touch = e.touches[0];
+                const dx = touch.clientX - touchStartX;
+                const dy = touch.clientY - touchStartY;
+
+                // Threshold to initiate touch drag
+                if (!touchGhost && (Math.abs(dx) > 12 || Math.abs(dy) > 12)) {
+                    const plate = el.getAttribute('data-plate') || 'Vehicle';
+                    touchGhost = document.createElement('div');
+                    touchGhost.className = 'touch-drag-ghost';
+                    touchGhost.innerHTML = `<i class="fa-solid fa-car"></i> <span>${PosApp.escapeHtml(plate)}</span>`;
+                    document.body.appendChild(touchGhost);
+                    dropBays.forEach(bay => bay.classList.add('bay-dropzone-active'));
+                }
+
+                if (touchGhost) {
+                    touchGhost.style.left = touch.clientX + 'px';
+                    touchGhost.style.top = touch.clientY + 'px';
+
+                    touchGhost.style.display = 'none';
+                    const elemUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+                    touchGhost.style.display = 'flex';
+
+                    const targetBay = elemUnder ? elemUnder.closest('.bay-card.bay-drop-target') : null;
+                    if (targetBay !== currentHoveredBay) {
+                        if (currentHoveredBay) currentHoveredBay.classList.remove('drag-hover');
+                        currentHoveredBay = targetBay;
+                        if (currentHoveredBay) currentHoveredBay.classList.add('drag-hover');
+                    }
+                }
+            };
+
+            const handleTouchEnd = async () => {
+                if (touchGhost) {
+                    touchGhost.remove();
+                    touchGhost = null;
+                }
+                dropBays.forEach(bay => {
+                    bay.classList.remove('bay-dropzone-active');
+                    bay.classList.remove('drag-hover');
+                });
+
+                if (currentHoveredBay) {
+                    const bayId = parseInt(currentHoveredBay.getAttribute('data-bay-id'), 10);
+                    const bayName = currentHoveredBay.getAttribute('data-bay-name') || ('Bay ' + bayId);
+                    const orderId = el.getAttribute('data-order-id');
+                    const plate = el.getAttribute('data-plate');
+                    currentHoveredBay = null;
+                    if (bayId && orderId) {
+                        await PosApp.handleAssignBayOneTap(bayId, orderId, plate, bayName);
+                    }
+                }
+            };
+
+            const touchTarget = handle || el;
+            touchTarget.addEventListener('touchstart', handleTouchStart, { passive: true });
+            touchTarget.addEventListener('touchmove', handleTouchMove, { passive: true });
+            touchTarget.addEventListener('touchend', handleTouchEnd);
+        });
+
+        // Attach Drop Handlers on Available Bays
+        dropBays.forEach(bay => {
+            bay.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+                bay.classList.add('drag-hover');
+            });
+
+            bay.addEventListener('dragenter', (e) => {
+                e.preventDefault();
+                bay.classList.add('drag-hover');
+            });
+
+            bay.addEventListener('dragleave', (e) => {
+                if (!bay.contains(e.relatedTarget)) {
+                    bay.classList.remove('drag-hover');
+                }
+            });
+
+            bay.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                bay.classList.remove('drag-hover');
+                dropBays.forEach(b => b.classList.remove('bay-dropzone-active'));
+
+                let payload = null;
+                try {
+                    const raw = e.dataTransfer ? (e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('application/json')) : null;
+                    if (raw) payload = JSON.parse(raw);
+                } catch (err) {
+                    console.warn('Failed to parse dropped vehicle payload:', err);
+                }
+
+                if (!payload) {
+                    payload = PosApp.activeDragPayload;
+                }
+
+                if (!payload || !payload.orderId) return;
+
+                const bayId = parseInt(bay.getAttribute('data-bay-id'), 10);
+                const bayName = bay.getAttribute('data-bay-name') || ('Bay ' + bayId);
+                const orderId = payload.orderId;
+                const plate = payload.plate || '';
+
+                if (bayId && orderId) {
+                    await PosApp.handleAssignBayOneTap(bayId, orderId, plate, bayName);
+                }
+            });
+        });
     }
 
     static async handleCustomerArrived(orderId, plateNumber) {
@@ -7780,13 +8085,13 @@ class PosApp {
                 } else {
                     // Requirement 2: Assign bay button
                     nextActionBtn = `
-                        <button type="button" class="btn btn-primary btn-sm" ${!this.isOnline ? 'disabled title="Offline"' : ''} data-action="assign-bay-modal" data-order-number="${this.escapeHtml(ord.order_number)}" data-order-id="${ord.id || 0}" data-plate="${this.escapeHtml(ord.plate_number)}">
-                            <i class="fa-solid fa-warehouse"></i> ${I18nManager.t('assignBay') || 'Assign Bay'}
+                        <button type="button" class="btn btn-action-assign btn-sm" ${!this.isOnline ? 'disabled title="Offline"' : ''} data-action="assign-bay-modal" data-order-number="${this.escapeHtml(ord.order_number)}" data-order-id="${ord.id || 0}" data-plate="${this.escapeHtml(ord.plate_number)}">
+                            <i class="fa-solid fa-warehouse"></i> <span>${I18nManager.t('assignBay') || 'Assign Bay'}</span>
                         </button>
                     `;
                 }
             } else if (status === 'washing') {
-                nextActionBtn = `<button type="button" class="btn btn-outline btn-sm" style="border-color: var(--success); color: var(--success);" data-action="finish-job" data-order-number="${this.escapeHtml(ord.order_number)}"><i class="fa-solid fa-check"></i> ${I18nManager.t('finishWash') || 'Finish'}</button>`;
+                nextActionBtn = `<button type="button" class="btn btn-outline btn-sm" style="border-color: var(--success); color: var(--success); font-weight: 700;" data-action="finish-job" data-order-number="${this.escapeHtml(ord.order_number)}"><i class="fa-solid fa-check"></i> ${I18nManager.t('finishWash') || 'Finish'}</button>`;
             } else if (status === 'finished') {
                 nextActionBtn = isPaidStatus
                     ? `
@@ -7833,10 +8138,10 @@ class PosApp {
                     </button>
                 ` : ''}
 
-                <button type="button" class="btn btn-outline btn-sm btn-queue-icon-action" data-action="reprint-receipt" data-order-number="${this.escapeHtml(ord.order_number)}" title="Reprint Receipt">
+                <button type="button" class="btn btn-icon-round" data-action="reprint-receipt" data-order-number="${this.escapeHtml(ord.order_number)}" title="Reprint Receipt">
                     <i class="fa-solid fa-print"></i>
                 </button>
-                <button type="button" class="btn btn-outline btn-sm btn-queue-icon-action text-primary" data-action="print-ticket" data-order-number="${this.escapeHtml(ord.order_number)}" title="Print Washer Ticket">
+                <button type="button" class="btn btn-icon-round text-primary" data-action="print-ticket" data-order-number="${this.escapeHtml(ord.order_number)}" title="Print Washer Ticket">
                     <i class="fa-solid fa-ticket"></i>
                 </button>
             `;
@@ -7853,13 +8158,21 @@ class PosApp {
                 }
             }
 
+            const isWaitingToAssign = (!isCancelled && !isInBay && !isAtFinishingPad && this.isOnline && (!ord.bay_id || ord.bay_id == 0) && status !== 'washing' && status !== 'finished' && (ord.arrived_at || qItem || status === 'waiting' || status === 'confirmed' || isPaidStatus));
+            const draggableRowAttrs = isWaitingToAssign
+                ? `draggable="true" data-draggable-vehicle="true" data-order-id="${ord.id || 0}" data-order-number="${this.escapeHtml(ord.order_number)}" data-plate="${this.escapeHtml(ord.plate_number || '')}" class="queue-row-draggable ${isReadyToPay ? 'is-ready-to-pay' : ''}" title="${I18nManager.t('dragDropToAssign') || 'Drag to assign bay'}"`
+                : `class="${isReadyToPay ? 'is-ready-to-pay' : ''} ${isCancelled ? 'is-cancelled' : ''}"`;
+
             listRowsHtml += `
-                <tr class="${isReadyToPay ? 'is-ready-to-pay' : ''} ${isCancelled ? 'is-cancelled' : ''}">
+                <tr ${draggableRowAttrs}>
                     <td class="col-pos">
                         ${posCellHtml}
                     </td>
                     <td class="col-plate">
-                        <span class="queue-list-plate"><i class="fa-solid fa-car"></i> ${this.escapeHtml(ord.plate_number || 'N/A')}</span>
+                        <div style="display: flex; align-items: center;">
+                            ${isWaitingToAssign ? `<i class="fa-solid fa-grip-vertical queue-drag-handle" title="${I18nManager.t('dragDropToAssign') || 'Drag to assign bay'}"></i>` : ''}
+                            <span class="queue-list-plate"><i class="fa-solid fa-car"></i> ${this.escapeHtml(ord.plate_number || 'N/A')}</span>
+                        </div>
                     </td>
                     <td class="col-info">
                         <div style="font-weight: 800; color: var(--text-main); font-size: 0.92rem;">${this.formatCustomerName(ord.customer_name)}</div>
@@ -7874,8 +8187,8 @@ class PosApp {
                         </div>
                     </td>
                     <td class="col-status">
-                        <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
-                            <span class="queue-badge ${badgeClass}"><i class="fa-solid ${badgeIcon}"></i> <span>${statusText}</span></span>
+                        <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start; white-space: nowrap;">
+                            <span class="queue-badge ${badgeClass}" style="white-space: nowrap !important;"><i class="fa-solid ${badgeIcon}"></i> <span style="white-space: nowrap !important;">${statusText}</span></span>
                             ${pendingBadgeHtml}
                             ${receiptPendingBadge}
                         </div>
@@ -7898,13 +8211,17 @@ class PosApp {
                 </tr>
             `;
 
+            const draggableCardAttrs = isWaitingToAssign
+                ? `draggable="true" data-draggable-vehicle="true" data-order-id="${ord.id || 0}" data-order-number="${this.escapeHtml(ord.order_number)}" data-plate="${this.escapeHtml(ord.plate_number || '')}" class="queue-card queue-card-draggable ${isCancelled ? 'is-cancelled' : ''} ${isReadyToPay ? 'is-ready-to-pay' : ''}" title="${I18nManager.t('dragDropToAssign') || 'Drag to assign bay'}"`
+                : `class="queue-card ${isCancelled ? 'is-cancelled' : ''} ${isReadyToPay ? 'is-ready-to-pay' : ''}"`;
+
             // Build Legacy Grid Card HTML (for toggle switch)
             gridCardsHtml += `
-                <div class="queue-card ${isCancelled ? 'is-cancelled' : ''} ${isReadyToPay ? 'is-ready-to-pay' : ''}">
+                <div ${draggableCardAttrs}>
                     <!-- Section 1: Vehicle Plate & Queue Position -->
                     <div class="queue-card-section queue-section-plate">
                         <div class="queue-plate-wrap">
-                            <i class="fa-solid fa-car-side queue-plate-icon"></i>
+                            ${isWaitingToAssign ? `<i class="fa-solid fa-grip-vertical queue-drag-handle" style="margin-right: 0.35rem;"></i>` : '<i class="fa-solid fa-car-side queue-plate-icon"></i>'}
                             <span class="queue-card-plate">${this.escapeHtml(ord.plate_number || 'N/A')}</span>
                         </div>
                         <div class="queue-pos-wrap">
@@ -7914,8 +8231,8 @@ class PosApp {
 
                     <!-- Section 2: Order Status & Synchronization Badges -->
                     <div class="queue-card-section queue-section-status">
-                        <div class="queue-status-badges">
-                            <span class="queue-badge ${badgeClass}"><i class="fa-solid ${badgeIcon}"></i> <span>${statusText}</span></span>
+                        <div class="queue-status-badges" style="display: flex; flex-wrap: wrap; gap: 4px;">
+                            <span class="queue-badge ${badgeClass}" style="white-space: nowrap !important;"><i class="fa-solid ${badgeIcon}"></i> <span style="white-space: nowrap !important;">${statusText}</span></span>
                             ${pendingBadgeHtml}
                             ${receiptPendingBadge}
                         </div>
@@ -7965,8 +8282,8 @@ class PosApp {
 
         if (viewMode === 'list') {
             grid.innerHTML = `
-                <div class="queue-list-card">
-                    <div class="queue-list-table-responsive">
+                <div class="queue-table-card-container">
+                    <div class="queue-list-table-responsive" style="overflow-x: auto;">
                         <table class="queue-list-table">
                             <thead>
                                 <tr>
@@ -8045,6 +8362,8 @@ class PosApp {
                 this.printWasherTicket(num);
             }
         };
+
+        this.setupQueueDragAndDrop();
     }
 
     // Requirement 7: Offline status changes saved in queue, sent when connection returns, not overwritten
@@ -12848,12 +13167,33 @@ class PosApp {
         }
     }
 
+    static currentApptSearch = '';
+
+    static handleApptSearchFilter(val) {
+        this.currentApptSearch = (val || '').trim().toLowerCase();
+        const clearBtn = document.getElementById('btnClearApptSearch');
+        if (clearBtn) {
+            clearBtn.style.display = this.currentApptSearch ? 'inline-flex' : 'none';
+        }
+        this.renderFilteredAppointments();
+    }
+
+    static clearApptSearchFilter() {
+        this.currentApptSearch = '';
+        const searchInput = document.getElementById('apptSearchFilterInput');
+        if (searchInput) searchInput.value = '';
+        const clearBtn = document.getElementById('btnClearApptSearch');
+        if (clearBtn) clearBtn.style.display = 'none';
+        this.renderFilteredAppointments();
+    }
+
     static renderFilteredAppointments() {
         const listContainer = document.getElementById('appointmentsList');
         if (!listContainer) return;
 
         const appointments = this.cachedAppointments || [];
         const filter = this.currentApptFilter || 'all';
+        const search = (this.currentApptSearch || '').trim().toLowerCase();
 
         let filtered = appointments;
         if (filter === 'pending') {
@@ -12862,9 +13202,22 @@ class PosApp {
             filtered = appointments.filter(a => a.status === 'arrived' || a.status === 'in_progress' || a.status === 'completed');
         }
 
+        if (search) {
+            filtered = filtered.filter(a => {
+                const plate = (a.plate_number || a.vehicle_plate || '').toLowerCase();
+                const name = (a.customer_name || '').toLowerCase();
+                const phone = (a.customer_phone || '').toLowerCase();
+                const notes = (a.notes || '').toLowerCase();
+                const svc = (a.service_name_km || a.service_name_en || a.service_name || '').toLowerCase();
+                return plate.includes(search) || name.includes(search) || phone.includes(search) || notes.includes(search) || svc.includes(search);
+            });
+        }
+
         if (filtered.length === 0) {
             let emptyMsg = I18nManager.t('noApptsFound') || 'No appointments found for this date.';
-            if (filter === 'pending') {
+            if (search) {
+                emptyMsg = `No appointments matching "${this.escapeHtml(search)}"`;
+            } else if (filter === 'pending') {
                 emptyMsg = I18nManager.t('noPendingAppts') || 'No pending appointments found.';
             } else if (filter === 'arrived') {
                 emptyMsg = I18nManager.t('noArrivedAppts') || 'No arrived appointments yet.';
@@ -12872,14 +13225,16 @@ class PosApp {
 
             listContainer.innerHTML = `
                 <div class="appt-empty-state">
-                    <i class="fa-regular fa-calendar-xmark"></i>
-                    <p>${emptyMsg}</p>
+                    <div class="appt-empty-icon-wrap"><i class="fa-regular fa-calendar-xmark"></i></div>
+                    <p class="appt-empty-title">${emptyMsg}</p>
+                    ${search ? `<button type="button" class="btn btn-sm btn-outline mt-2" onclick="PosApp.clearApptSearchFilter()"><i class="fa-solid fa-xmark mr-1"></i> Clear Search</button>` : ''}
                 </div>
             `;
             return;
         }
 
         const isKm = I18nManager.getLang() === 'km';
+        const viewQueueLabel = I18nManager.t('viewInQueue') || 'View in Queue';
         let html = '';
         filtered.forEach(appt => {
             const isArrived = (appt.status === 'arrived' || appt.status === 'in_progress' || appt.status === 'completed');
@@ -12893,7 +13248,7 @@ class PosApp {
             html += `
                 <div class="appt-card-row ${isArrived ? 'is-arrived' : 'is-pending'}">
                     <div class="appt-card-left">
-                        <div class="appt-time-box">
+                        <div class="appt-time-box ${isArrived ? 'time-arrived' : 'time-pending'}">
                             <i class="fa-regular fa-clock"></i>
                             <span>${timeStr}</span>
                         </div>
@@ -12935,10 +13290,16 @@ class PosApp {
                                 <span>${I18nManager.t('btnCustomerArrived') || 'Customer Arrived'}</span>
                             </button>
                         ` : `
-                            <span class="appt-status-arrived-pill">
-                                <i class="fa-solid fa-circle-check"></i>
-                                <span>${statusLabel}</span>
-                            </span>
+                            <div class="appt-arrived-group">
+                                <span class="appt-status-arrived-pill">
+                                    <i class="fa-solid fa-circle-check"></i>
+                                    <span>${statusLabel}</span>
+                                </span>
+                                <button type="button" class="btn-appt-view-queue" onclick="PosApp.switchView('queue')" title="${viewQueueLabel}">
+                                    <i class="fa-solid fa-warehouse"></i>
+                                    <span>${viewQueueLabel}</span>
+                                </button>
+                            </div>
                         `}
                     </div>
                 </div>

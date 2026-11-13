@@ -14,7 +14,7 @@
     <link rel="icon" type="image/png" href="icons/icon-192.png">
     <!-- Offline FontAwesome & Google Fonts -->
     <link rel="stylesheet" href="css/font-awesome.min.css">
-    <link rel="stylesheet" href="css/app.css?v=20261111_redesign">
+    <link rel="stylesheet" href="css/app.css?v=20261113_minimal">
     <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
 </head>
 
@@ -690,18 +690,29 @@
         <!-- 3. Job Queue View -->
         <section class="view-section" id="viewQueue">
             <div class="queue-container">
-                <div
-                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
-                    <div>
-                        <h2 data-i18n="jobQueueTitle"
-                            style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); line-height: 1.4;">
-                            ស្ថានភាពជួរការងារលាងរថយន្ត & ជួសជុល
-                        </h2>
-                        <span style="color: var(--text-muted); font-size: 0.88rem;">Live Job Status & Wash Bay Queue</span>
+                <!-- Queue Cockpit Top Header Banner -->
+                <div class="queue-cockpit-header">
+                    <div class="queue-cockpit-title-wrap">
+                        <div class="queue-title-icon-badge">
+                            <i class="fa-solid fa-warehouse"></i>
+                        </div>
+                        <div>
+                            <div class="queue-title-row">
+                                <h2 data-i18n="jobQueueTitle">ស្ថានភាពជួរការងារ &amp; បន្ទប់លាង</h2>
+                                <span class="queue-live-sync-badge" id="queueSyncIndicator">
+                                    <i class="fa-solid fa-circle live-pulse-dot"></i>
+                                    <span data-i18n="liveUpdates">Live Cockpit</span>
+                                </span>
+                            </div>
+                            <p class="queue-subtitle-text" data-i18n="jobQueueSubtitle">Live Job Status, Drag &amp; Drop Bay Allocation &amp; Queue Management</p>
+                        </div>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.75rem;">
-                        <span id="queueSyncIndicator" class="live-sync-pill"><i class="fa-solid fa-circle live-pulse-dot"></i> <span data-i18n="liveUpdates">Live</span></span>
-                        <button type="button" class="btn btn-outline" id="btnRefreshQueue">
+                    <div class="queue-cockpit-actions">
+                        <div class="queue-interaction-badge" title="Drag vehicle or tap Assign Bay">
+                            <i class="fa-solid fa-arrows-up-down-left-right text-primary"></i>
+                            <span>Drag &amp; Drop / 1-Tap Assign</span>
+                        </div>
+                        <button type="button" class="btn btn-outline btn-queue-refresh" id="btnRefreshQueue">
                             <i class="fa-solid fa-rotate"></i>
                             <span data-i18n="refreshBtn">Refresh</span>
                         </button>
@@ -719,46 +730,49 @@
                     </button>
                 </div>
 
-                <!-- Live Wash & Service Bays Section (Requirements 1 & 2) -->
-                <div id="cashierBaysSection" style="margin-bottom: 1.75rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                        <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; margin: 0;">
-                            <i class="fa-solid fa-warehouse text-primary"></i>
-                            <span data-i18n="baysBoardTitle">បន្ទប់លាងរថយន្ត (Wash Bays)</span>
-                        </h3>
+                <!-- Live Wash & Service Bays Section -->
+                <div id="cashierBaysSection" class="queue-bays-section">
+                    <div class="queue-section-header">
+                        <div class="queue-section-title-wrap">
+                            <i class="fa-solid fa-layer-group text-primary"></i>
+                            <h3 data-i18n="baysBoardTitle">បន្ទប់លាង &amp; សេវាកម្ម (Wash &amp; Service Bays)</h3>
+                            <span class="queue-bay-capacity-pill" id="baysCapacitySummary">
+                                <i class="fa-solid fa-circle-check text-success"></i> <span>Live Bay Allocation</span>
+                            </span>
+                        </div>
                     </div>
                     <div class="bays-grid" id="cashierBaysGrid">
                         <!-- Bays rendered dynamically -->
                     </div>
                 </div>
 
-                <!-- Waiting Line / Queue Header -->
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 0.85rem;">
-                    <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
-                        <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+                <!-- Waiting Line / Queue Header & Controls -->
+                <div class="queue-control-strip">
+                    <div class="queue-control-left">
+                        <div class="queue-section-title-wrap">
                             <i class="fa-solid fa-list-ol text-primary"></i>
-                            <span data-i18n="waitingQueueTitle">ជួររង់ចាំ (Waiting Queue)</span>
-                            <span class="badge" id="queueTotalWaitingBadge" style="background: var(--primary); color: white; font-size: 0.8rem; border-radius: 999px; padding: 2px 8px; margin-left: 4px;">0</span>
-                        </h3>
+                            <h3 data-i18n="waitingQueueTitle">ជួររង់ចាំ (Waiting Queue)</h3>
+                            <span class="badge-total-waiting" id="queueTotalWaitingBadge">0</span>
+                        </div>
                         <div class="queue-filter-tabs" id="queueFilterTabs">
                             <button type="button" class="btn-queue-tab active" id="tabQueueWaiting" data-tab="waiting" onclick="PosApp.setQueueFilterTab('waiting')">
-                                <i class="fa-solid fa-hourglass-half" style="color: #f59e0b;"></i>
+                                <i class="fa-solid fa-hourglass-half"></i>
                                 <span data-i18n="tabWaitingWash">ជួររង់ចាំ &amp; កំពុងលាង</span>
                                 <span class="queue-tab-count" id="tabCountWaiting">0</span>
                             </button>
                             <button type="button" class="btn-queue-tab" id="tabQueueReady" data-tab="ready" onclick="PosApp.setQueueFilterTab('ready')">
-                                <i class="fa-solid fa-flag-checkered" style="color: #10b981;"></i>
+                                <i class="fa-solid fa-flag-checkered"></i>
                                 <span data-i18n="tabReadyPickup">រួចរាល់រង់ចាំទទួល</span>
                                 <span class="queue-tab-count is-ready-count" id="tabCountReady">0</span>
                             </button>
                             <button type="button" class="btn-queue-tab" id="tabQueueAll" data-tab="all" onclick="PosApp.setQueueFilterTab('all')">
-                                <i class="fa-solid fa-layer-group" style="color: #0284c7;"></i>
+                                <i class="fa-solid fa-bars-staggered"></i>
                                 <span data-i18n="tabAllJobs">ទាំងអស់</span>
                                 <span class="queue-tab-count" id="tabCountAll">0</span>
                             </button>
                         </div>
                     </div>
-                    <div class="queue-view-toggle" id="queueViewToggle">
+                    <div class="queue-view-toggle-segmented" id="queueViewToggle">
                         <button type="button" class="btn-view-toggle active" id="btnQueueViewList" onclick="PosApp.setQueueViewMode('list')">
                             <i class="fa-solid fa-list"></i> <span data-i18n="listView">List</span>
                         </button>
@@ -777,13 +791,25 @@
         <!-- Section: Appointments View (Requirement 3) -->
         <section class="view-section" id="viewAppointments">
             <div class="appointments-container">
-                <!-- Top Bar / Header -->
-                <div class="appointments-header">
-                    <div class="appt-header-title-wrap">
-                        <h2><i class="fa-solid fa-calendar-check mr-2 text-primary"></i> <span data-i18n="appointmentsTitle">ការណាត់ជួប</span></h2>
-                        <p class="text-muted" data-i18n="appointmentsSubtitle">Book advance customer slots and manage arrivals</p>
+                <!-- Modern Appointments Cockpit Header -->
+                <div class="appt-cockpit-header">
+                    <div class="appt-cockpit-left">
+                        <div class="appt-title-icon-badge">
+                            <i class="fa-solid fa-calendar-check"></i>
+                        </div>
+                        <div class="appt-title-text-group">
+                            <div class="appt-title-row">
+                                <h2 data-i18n="appointmentsTitle">ការណាត់ជួប &amp; កាលវិភាគ</h2>
+                                <span class="appt-live-sync-badge" id="apptSyncIndicator">
+                                    <span class="sync-pulse-dot"></span> Live
+                                </span>
+                            </div>
+                            <p class="appt-subtitle-text" data-i18n="appointmentsSubtitle">
+                                កក់កាលវិភាគទុកជាមុន និងគ្រប់គ្រងការមកដល់
+                            </p>
+                        </div>
                     </div>
-                    <div class="appt-date-filter-wrap">
+                    <div class="appt-cockpit-actions">
                         <div class="appt-quick-date-pills">
                             <button type="button" class="btn-quick-date active" id="btnApptQuickToday" onclick="PosApp.setApptDateQuick('today')">
                                 <i class="fa-solid fa-calendar-day"></i> <span data-i18n="btnToday">Today</span>
@@ -793,48 +819,65 @@
                             </button>
                         </div>
                         <div class="appt-date-input-group">
-                            <label for="apptViewDate" class="appt-date-label"><i class="fa-regular fa-calendar mr-1"></i> <span data-i18n="date">Date:</span></label>
+                            <label for="apptViewDate" class="appt-date-label"><i class="fa-regular fa-calendar"></i> <span data-i18n="date">Date:</span></label>
                             <input type="date" id="apptViewDate" class="form-control appt-date-control">
                         </div>
                         <button type="button" class="btn btn-outline appt-refresh-btn" id="btnRefreshAppointments" title="Refresh Appointments">
                             <i class="fa-solid fa-arrows-rotate"></i>
+                            <span data-i18n="refresh">Refresh</span>
                         </button>
                     </div>
                 </div>
 
                 <!-- KPI Metric Stats Cards Strip -->
-                <div class="view-kpi-grid appt-kpi-grid">
-                    <div class="view-kpi-card kpi-primary">
-                        <div class="view-kpi-top">
-                            <span class="view-kpi-label" data-i18n="kpiTotalBooked">Total Booked</span>
-                            <div class="view-kpi-icon"><i class="fa-solid fa-calendar-check"></i></div>
+                <div class="appt-kpi-grid view-kpi-grid">
+                    <div class="appt-kpi-card kpi-total view-kpi-card kpi-primary">
+                        <div class="appt-kpi-card-inner">
+                            <div class="appt-kpi-info">
+                                <span class="appt-kpi-label view-kpi-label" data-i18n="kpiTotalBooked">Total Booked</span>
+                                <div class="appt-kpi-value view-kpi-value" id="kpiApptTotal">0</div>
+                                <div class="appt-kpi-sub view-kpi-sub" data-i18n="kpiTotalBookedSub">Scheduled for selected date</div>
+                            </div>
+                            <div class="appt-kpi-icon-badge icon-total view-kpi-icon">
+                                <i class="fa-solid fa-calendar-check"></i>
+                            </div>
                         </div>
-                        <div class="view-kpi-value" id="kpiApptTotal">0</div>
-                        <div class="view-kpi-sub" data-i18n="kpiTotalBookedSub">Scheduled for selected date</div>
                     </div>
-                    <div class="view-kpi-card kpi-warning">
-                        <div class="view-kpi-top">
-                            <span class="view-kpi-label" data-i18n="kpiPendingArrival">Pending Arrival</span>
-                            <div class="view-kpi-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
+                    <div class="appt-kpi-card kpi-pending view-kpi-card kpi-warning">
+                        <div class="appt-kpi-card-inner">
+                            <div class="appt-kpi-info">
+                                <span class="appt-kpi-label view-kpi-label" data-i18n="kpiPendingArrival">Pending Arrival</span>
+                                <div class="appt-kpi-value view-kpi-value" id="kpiApptPending">0</div>
+                                <div class="appt-kpi-sub view-kpi-sub" data-i18n="kpiPendingArrivalSub">Awaiting customer check-in</div>
+                            </div>
+                            <div class="appt-kpi-icon-badge icon-pending view-kpi-icon">
+                                <i class="fa-solid fa-clock-rotate-left"></i>
+                            </div>
                         </div>
-                        <div class="view-kpi-value" id="kpiApptPending">0</div>
-                        <div class="view-kpi-sub" data-i18n="kpiPendingArrivalSub">Awaiting customer check-in</div>
                     </div>
-                    <div class="view-kpi-card kpi-success">
-                        <div class="view-kpi-top">
-                            <span class="view-kpi-label" data-i18n="kpiArrived">Customer Arrived</span>
-                            <div class="view-kpi-icon"><i class="fa-solid fa-circle-check"></i></div>
+                    <div class="appt-kpi-card kpi-arrived view-kpi-card kpi-success">
+                        <div class="appt-kpi-card-inner">
+                            <div class="appt-kpi-info">
+                                <span class="appt-kpi-label view-kpi-label" data-i18n="kpiArrived">Customer Arrived</span>
+                                <div class="appt-kpi-value view-kpi-value" id="kpiApptArrived">0</div>
+                                <div class="appt-kpi-sub view-kpi-sub" data-i18n="kpiArrivedSub">Admitted into wash queue</div>
+                            </div>
+                            <div class="appt-kpi-icon-badge icon-arrived view-kpi-icon">
+                                <i class="fa-solid fa-circle-check"></i>
+                            </div>
                         </div>
-                        <div class="view-kpi-value" id="kpiApptArrived">0</div>
-                        <div class="view-kpi-sub" data-i18n="kpiArrivedSub">Admitted into wash queue</div>
                     </div>
-                    <div class="view-kpi-card kpi-azure">
-                        <div class="view-kpi-top">
-                            <span class="view-kpi-label" data-i18n="kpiAvailableSlots">Available Slots</span>
-                            <div class="view-kpi-icon"><i class="fa-solid fa-cubes-stacked"></i></div>
+                    <div class="appt-kpi-card kpi-slots view-kpi-card kpi-azure">
+                        <div class="appt-kpi-card-inner">
+                            <div class="appt-kpi-info">
+                                <span class="appt-kpi-label view-kpi-label" data-i18n="kpiAvailableSlots">Available Slots</span>
+                                <div class="appt-kpi-value view-kpi-value" id="kpiApptSlots">0</div>
+                                <div class="appt-kpi-sub view-kpi-sub" data-i18n="kpiAvailableSlotsSub">Open booking windows</div>
+                            </div>
+                            <div class="appt-kpi-icon-badge icon-slots view-kpi-icon">
+                                <i class="fa-solid fa-cubes-stacked"></i>
+                            </div>
                         </div>
-                        <div class="view-kpi-value" id="kpiApptSlots">0</div>
-                        <div class="view-kpi-sub" data-i18n="kpiAvailableSlotsSub">Open booking windows</div>
                     </div>
                 </div>
 
@@ -842,17 +885,25 @@
                     <!-- Left Column: Book Appointment Form -->
                     <div class="card appt-booking-card">
                         <div class="card-header appt-card-header">
-                            <h3><i class="fa-solid fa-calendar-plus mr-2 text-primary"></i> <span data-i18n="bookAppointment">Book Appointment</span></h3>
+                            <div class="appt-card-header-flex">
+                                <div class="appt-card-header-icon bg-primary-soft">
+                                    <i class="fa-solid fa-calendar-plus"></i>
+                                </div>
+                                <div class="appt-card-header-titles">
+                                    <h3 data-i18n="bookAppointment">Book Appointment</h3>
+                                    <p class="appt-header-sub" data-i18n="bookAppointmentSub">Reserve slot &amp; assign vehicle</p>
+                                </div>
+                            </div>
                         </div>
                         <div class="card-body appt-booking-body">
                             <form id="formBookAppt">
-                                <div class="form-group">
-                                    <label for="apptBookingDate"><i class="fa-regular fa-calendar mr-1 text-primary"></i> <span data-i18n="apptDate">Appointment Date *</span></label>
-                                    <input type="date" id="apptBookingDate" class="form-control" required>
+                                <div class="form-group appt-form-group">
+                                    <label for="apptBookingDate"><i class="fa-regular fa-calendar text-primary"></i> <span data-i18n="apptDate">Appointment Date *</span></label>
+                                    <input type="date" id="apptBookingDate" class="form-control appt-input-styled" required>
                                 </div>
-                                <div class="form-group">
+                                <div class="form-group appt-form-group">
                                     <div class="appt-slot-header">
-                                        <label><i class="fa-regular fa-clock mr-1 text-primary"></i> <span data-i18n="freeTimeSlot">Free Time Slot *</span></label>
+                                        <label><i class="fa-regular fa-clock text-primary"></i> <span data-i18n="freeTimeSlot">Free Time Slot *</span></label>
                                         <span id="selectedSlotIndicator" class="appt-slot-status-pill" data-i18n="noSlotSelected">Select a slot below</span>
                                     </div>
                                     <div class="appt-time-slots-grid" id="apptTimeSlotsGrid">
@@ -860,35 +911,35 @@
                                     </div>
                                     <input type="hidden" id="selectedTimeSlot" required>
                                 </div>
-                                <div class="form-group">
-                                    <label for="apptServiceSelect"><i class="fa-solid fa-spray-can-sparkles mr-1 text-primary"></i> <span data-i18n="service">Service *</span></label>
-                                    <select id="apptServiceSelect" class="form-control" required>
+                                <div class="form-group appt-form-group">
+                                    <label for="apptServiceSelect"><i class="fa-solid fa-spray-can-sparkles text-primary"></i> <span data-i18n="service">Service *</span></label>
+                                    <select id="apptServiceSelect" class="form-control appt-input-styled" required>
                                         <!-- Populated dynamically with services -->
                                     </select>
                                 </div>
-                                <div class="form-group">
-                                    <label for="apptPlateInput"><i class="fa-solid fa-car mr-1 text-primary"></i> <span data-i18n="plateNumber">Vehicle Plate *</span></label>
+                                <div class="form-group appt-form-group">
+                                    <label for="apptPlateInput"><i class="fa-solid fa-car text-primary"></i> <span data-i18n="plateNumber">Vehicle Plate *</span></label>
                                     <div class="appt-plate-input-group">
                                         <span class="appt-plate-input-icon"><i class="fa-solid fa-car"></i></span>
                                         <input type="text" id="apptPlateInput" class="form-control appt-plate-input" placeholder="e.g. 2A-8888" style="text-transform: uppercase; font-weight: 800; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; letter-spacing: 0.05em;" required>
                                     </div>
                                 </div>
                                 <div class="form-row appt-two-col-row">
-                                    <div class="form-group" style="flex: 1;">
-                                        <label for="apptCustomerName"><i class="fa-solid fa-user mr-1 text-muted"></i> <span data-i18n="customerName">Customer Name</span></label>
-                                        <input type="text" id="apptCustomerName" class="form-control" placeholder="Optional or Walk-in">
+                                    <div class="form-group appt-form-group" style="flex: 1;">
+                                        <label for="apptCustomerName"><i class="fa-solid fa-user text-muted"></i> <span data-i18n="customerName">Customer Name</span></label>
+                                        <input type="text" id="apptCustomerName" class="form-control appt-input-styled" placeholder="Optional or Walk-in">
                                     </div>
-                                    <div class="form-group" style="flex: 1;">
-                                        <label for="apptCustomerPhone"><i class="fa-solid fa-phone mr-1 text-muted"></i> <span data-i18n="phone">Phone</span></label>
-                                        <input type="tel" id="apptCustomerPhone" class="form-control" placeholder="012 345 678">
+                                    <div class="form-group appt-form-group" style="flex: 1;">
+                                        <label for="apptCustomerPhone"><i class="fa-solid fa-phone text-muted"></i> <span data-i18n="phone">Phone</span></label>
+                                        <input type="tel" id="apptCustomerPhone" class="form-control appt-input-styled" placeholder="012 345 678">
                                     </div>
                                 </div>
-                                <div class="form-group">
-                                    <label for="apptNotes"><i class="fa-solid fa-note-sticky mr-1 text-muted"></i> <span data-i18n="notes">Notes / Special Requests</span></label>
-                                    <input type="text" id="apptNotes" class="form-control" placeholder="e.g. VIP - use premium products">
+                                <div class="form-group appt-form-group">
+                                    <label for="apptNotes"><i class="fa-solid fa-note-sticky text-muted"></i> <span data-i18n="notes">Notes / Special Requests</span></label>
+                                    <input type="text" id="apptNotes" class="form-control appt-input-styled" placeholder="e.g. VIP - use premium products">
                                 </div>
                                 <button type="submit" class="btn btn-primary btn-lg appt-btn-submit" id="btnSaveAppt">
-                                    <i class="fa-solid fa-calendar-check mr-2"></i> <span data-i18n="saveAppointment">Save Appointment</span>
+                                    <i class="fa-solid fa-calendar-check"></i> <span data-i18n="saveAppointment">Save Appointment</span>
                                 </button>
                             </form>
                         </div>
@@ -898,11 +949,16 @@
                     <div class="card appt-list-card">
                         <div class="card-header appt-list-header">
                             <div class="appt-list-header-left">
-                                <h3>
-                                    <i class="fa-solid fa-calendar-day mr-1 text-primary"></i>
-                                    <span id="apptListTitle" data-i18n="apptSchedule">Appointments Schedule</span>
-                                    <span class="badge badge-primary appt-total-count-badge" id="apptCountBadge">0</span>
-                                </h3>
+                                <div class="appt-card-header-icon bg-azure-soft">
+                                    <i class="fa-solid fa-calendar-day"></i>
+                                </div>
+                                <div class="appt-card-header-titles">
+                                    <div class="appt-list-title-row">
+                                        <h3 id="apptListTitle" data-i18n="apptSchedule">Appointments Schedule</h3>
+                                        <span class="badge badge-primary appt-total-count-badge" id="apptCountBadge">0</span>
+                                    </div>
+                                    <p class="appt-header-sub" data-i18n="manageScheduleSub">Track status &amp; admit directly to wash bays</p>
+                                </div>
                             </div>
                             <div class="appt-filter-tabs" id="apptFilterTabs">
                                 <button type="button" class="btn-appt-tab active" id="tabApptAll" data-filter="all" onclick="PosApp.setApptFilterTab('all')">
@@ -911,14 +967,24 @@
                                     <span class="appt-tab-badge" id="tabCountApptAll">0</span>
                                 </button>
                                 <button type="button" class="btn-appt-tab" id="tabApptPending" data-filter="pending" onclick="PosApp.setApptFilterTab('pending')">
-                                    <i class="fa-solid fa-clock-rotate-left" style="color: #f59e0b;"></i>
+                                    <i class="fa-solid fa-clock-rotate-left"></i>
                                     <span data-i18n="tabPendingAppts">Pending</span>
                                     <span class="appt-tab-badge is-pending" id="tabCountApptPending">0</span>
                                 </button>
                                 <button type="button" class="btn-appt-tab" id="tabApptArrived" data-filter="arrived" onclick="PosApp.setApptFilterTab('arrived')">
-                                    <i class="fa-solid fa-circle-check" style="color: #10b981;"></i>
+                                    <i class="fa-solid fa-circle-check"></i>
                                     <span data-i18n="tabArrivedAppts">Arrived</span>
                                     <span class="appt-tab-badge is-arrived" id="tabCountApptArrived">0</span>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Live Search / Filter Bar -->
+                        <div class="appt-search-filter-bar">
+                            <div class="appt-search-input-wrap">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="apptSearchFilterInput" class="form-control appt-search-input" data-i18n="searchApptPlaceholder" placeholder="ស្វែងរកតាមស្លាកលេខ ឬឈ្មោះអតិថិជន..." oninput="PosApp.handleApptSearchFilter(this.value)">
+                                <button type="button" class="btn-clear-appt-search" id="btnClearApptSearch" onclick="PosApp.clearApptSearchFilter()" style="display: none;" title="Clear search">
+                                    <i class="fa-solid fa-xmark"></i>
                                 </button>
                             </div>
                         </div>
@@ -2570,6 +2636,47 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline" id="btnCancelChooseBayModal" data-i18n="cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Bay Override Reason (In-App Dialog for Drag & Manual Assign) -->
+    <div class="modal-backdrop" id="modalBayOverride" style="z-index: 10002;">
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header" style="background: #fffbeb; border-bottom: 2px solid #fde68a;">
+                <h3 style="display: flex; align-items: center; gap: 0.5rem; font-size: 1.15rem; font-weight: 700; color: #92400e;">
+                    <i class="fa-solid fa-triangle-exclamation" style="color: #d97706;"></i>
+                    <span data-i18n="bayOverrideTitle">ការបញ្ជាក់ផ្លាស់ប្តូរបន្ទប់លាង (Bay Override)</span>
+                </h3>
+                <button type="button" class="btn-close-modal" id="btnCloseBayOverrideModal">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem;">
+                <div id="bayOverrideNotice" style="font-size: 0.92rem; color: var(--text-main); margin-bottom: 1rem; line-height: 1.45;">
+                    <!-- Message populated dynamically -->
+                </div>
+                <label style="display: block; font-size: 0.82rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.4rem;">
+                    មូលហេតុរហ័ស (Quick Reason):
+                </label>
+                <div class="override-chips" style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;">
+                    <button type="button" class="btn-chip" data-reason="Customer requested this bay">Customer Request</button>
+                    <button type="button" class="btn-chip" data-reason="Fastest available wash bay">Fastest Available</button>
+                    <button type="button" class="btn-chip" data-reason="Bay 1 occupied soon">Bay 1 Occupied Soon</button>
+                    <button type="button" class="btn-chip" data-reason="Cashier manual assignment">Cashier Choice</button>
+                </div>
+                <label for="bayOverrideReasonInput" style="display: block; font-size: 0.82rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.4rem;">
+                    មូលហេតុផ្លាស់ប្តូរ (Reason - Min 3 chars):
+                </label>
+                <input type="text" id="bayOverrideReasonInput" class="form-control" placeholder="e.g. Customer requested this bay" style="width: 100%; font-size: 0.95rem; padding: 0.65rem 0.75rem; border-radius: 6px; border: 1.5px solid var(--border);">
+                <input type="hidden" id="bayOverrideBayId">
+                <input type="hidden" id="bayOverrideOrderId">
+                <input type="hidden" id="bayOverridePlate">
+                <input type="hidden" id="bayOverrideBayName">
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+                <button type="button" class="btn btn-outline" id="btnCancelBayOverrideModal" data-i18n="cancel">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btnConfirmBayOverride">
+                    <i class="fa-solid fa-check"></i> <span data-i18n="confirmAssign">Confirm & Assign Bay</span>
+                </button>
             </div>
         </div>
     </div>
