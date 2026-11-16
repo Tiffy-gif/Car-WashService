@@ -233,6 +233,8 @@ class PosApp {
 
     static currentUser = null;
     static isOnline = true;
+    static isDeviceAuthorized = true;
+    static lastDeviceErrorCode = null;
     static pingInterval = null;
     static syncInterval = null;
     static currentPin = '';
@@ -579,13 +581,13 @@ class PosApp {
         const brandSecondary = document.getElementById('brandShopNameSecondary');
 
         if (lang === 'en') {
-            if (brandPrimary) brandPrimary.textContent = 'My Car Wash';
+            if (brandPrimary) brandPrimary.innerHTML = '<span class="gotpos-brand-orange">G</span>OTPOS <span class="gotpos-brand-sub">Car Wash</span>';
             if (brandSecondary) {
                 brandSecondary.textContent = '';
                 brandSecondary.style.display = 'none';
             }
         } else {
-            if (brandPrimary) brandPrimary.textContent = 'My Car Wash';
+            if (brandPrimary) brandPrimary.innerHTML = '<span class="gotpos-brand-orange">G</span>OTPOS <span class="gotpos-brand-sub">Car Wash</span>';
             if (brandSecondary) {
                 brandSecondary.textContent = '';
                 brandSecondary.style.display = 'none';
@@ -871,6 +873,18 @@ class PosApp {
                 });
                 dateEl.textContent = dateStr;
                 timeEl.textContent = timeStr;
+                const gotDateEl = document.getElementById("gotposLiveDate");
+                const gotTimeEl = document.getElementById("gotposLiveTime");
+                if (gotDateEl) {
+                    try {
+                        gotDateEl.textContent = now.toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+                    } catch(e) { gotDateEl.textContent = now.toDateString(); }
+                }
+                if (gotTimeEl) {
+                    try {
+                        gotTimeEl.textContent = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
+                    } catch(e) { gotTimeEl.textContent = now.toTimeString().slice(0,5); }
+                }
             } catch (e) {
                 dateEl.textContent = now.toLocaleDateString();
                 timeEl.textContent = now.toLocaleTimeString();
@@ -1173,6 +1187,10 @@ class PosApp {
         if (btnOpenSettings) {
             btnOpenSettings.addEventListener('click', openSettings);
         }
+        const btnHeaderSettings = document.getElementById('btnHeaderSettings');
+        if (btnHeaderSettings) {
+            btnHeaderSettings.addEventListener('click', openSettings);
+        }
 
         if (btnCloseSettings) {
             btnCloseSettings.addEventListener('click', closeSettings);
@@ -1186,6 +1204,38 @@ class PosApp {
         const btnTest = document.getElementById('btnTestConnection');
         if (btnTest) {
             btnTest.addEventListener('click', () => this.handleTestConnection());
+        }
+
+        // Device Locked Modal & Banner Action Buttons
+        const btnDevSettings = document.getElementById('btnDeviceLockedSettings');
+        if (btnDevSettings) {
+            btnDevSettings.addEventListener('click', () => {
+                openSettings();
+                tabBtnBackoffice?.click();
+                setTimeout(() => document.getElementById('cfgDeviceKey')?.focus(), 250);
+            });
+        }
+
+        const btnBannerSettings = document.getElementById('btnBannerOpenSettings');
+        if (btnBannerSettings) {
+            btnBannerSettings.addEventListener('click', () => {
+                openSettings();
+                tabBtnBackoffice?.click();
+                setTimeout(() => document.getElementById('cfgDeviceKey')?.focus(), 250);
+            });
+        }
+
+        const btnDevRetry = document.getElementById('btnDeviceLockedRetry');
+        if (btnDevRetry) {
+            btnDevRetry.addEventListener('click', async () => {
+                const icon = document.getElementById('iconDeviceLockedRetry');
+                if (icon) icon.classList.add('fa-spin');
+                try {
+                    await this.checkConnectionHealth();
+                } finally {
+                    if (icon) setTimeout(() => icon.classList.remove('fa-spin'), 600);
+                }
+            });
         }
 
         // Tab switching in Settings Modal (Back Office vs Thermal Printer vs Layout)
@@ -1316,6 +1366,65 @@ class PosApp {
         const btnLogout = document.getElementById('btnLogout');
         if (btnLogout) {
             btnLogout.addEventListener('click', () => this.handleLogout());
+        }
+
+        // Option A: User Profile Dropdown Menu in POS Header
+        const userPill = document.getElementById('userPill');
+        const userMenuDropdown = document.getElementById('userMenuDropdown');
+        const userMenuContainer = document.getElementById('userMenuContainer');
+
+        if (userPill && userMenuDropdown) {
+            userPill.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isShowing = (userMenuDropdown.style.display === 'block');
+                if (!isShowing) {
+                    this.updateUserDropdownDetails();
+                    userMenuDropdown.style.display = 'block';
+                    userPill.classList.add('active');
+                } else {
+                    userMenuDropdown.style.display = 'none';
+                    userPill.classList.remove('active');
+                }
+            });
+
+            document.addEventListener('click', (e) => {
+                if (userMenuContainer && !userMenuContainer.contains(e.target)) {
+                    userMenuDropdown.style.display = 'none';
+                    userPill.classList.remove('active');
+                }
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && userMenuDropdown.style.display === 'block') {
+                    userMenuDropdown.style.display = 'none';
+                    userPill.classList.remove('active');
+                }
+            });
+
+            // User Dropdown Action Items
+            document.getElementById('userMenuLogout')?.addEventListener('click', () => {
+                userMenuDropdown.style.display = 'none';
+                userPill.classList.remove('active');
+                this.handleLogout();
+            });
+
+            document.getElementById('userMenuEndShift')?.addEventListener('click', () => {
+                userMenuDropdown.style.display = 'none';
+                userPill.classList.remove('active');
+                this.showEndShiftModal();
+            });
+
+            document.getElementById('userMenuSpotAudit')?.addEventListener('click', () => {
+                userMenuDropdown.style.display = 'none';
+                userPill.classList.remove('active');
+                this.showSpotAuditOverlay();
+            });
+
+            document.getElementById('userMenuSettings')?.addEventListener('click', () => {
+                userMenuDropdown.style.display = 'none';
+                userPill.classList.remove('active');
+                openSettings();
+            });
         }
 
         // Header Menu Dropdown (Replaces individual topbar tool buttons)
@@ -1538,7 +1647,7 @@ class PosApp {
             });
 
             document.addEventListener('click', (e) => {
-                if (!e.target.closest('.search-box-wrap') && !e.target.closest('.intake-plate-field')) {
+                if (!e.target.closest('.search-box-wrap') && !e.target.closest('.intake-plate-field') && !e.target.closest('#modalSelectCustomer') && !e.target.closest('#gotposCustomerCard')) {
                     document.getElementById('custDropdown')?.classList.remove('open');
                     this.custSearchHighlightedIndex = -1;
                     this.closeSavedCustomersPanel();
@@ -1572,6 +1681,34 @@ class PosApp {
 
         // Initialize Saved Customers Directory Panel
         this.initSavedCustomersPanel();
+
+        // GOTPOS Customer Card Click & Reset
+        const custCard = document.getElementById('gotposCustomerCard');
+        if (custCard) {
+            custCard.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (e.target.closest('#btnGotposResetCustomer')) {
+                    this.resetCustomer();
+                    return;
+                }
+                this.openCustomerSelectModal();
+            });
+        }
+        const btnEditCust = document.getElementById('btnGotposEditCustomer');
+        if (btnEditCust) {
+            btnEditCust.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.openCustomerSelectModal();
+            });
+        }
+        const btnResetCustCard = document.getElementById('btnGotposResetCustomer');
+        if (btnResetCustCard) {
+            btnResetCustCard.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.resetCustomer();
+            });
+        }
+        this.updateGotposCustomerCard();
 
         // Walk-in Guest Button
         const btnWalkIn = document.getElementById('btnWalkIn');
@@ -2395,6 +2532,10 @@ class PosApp {
                 this.applyShopBranding();
             }
         } catch (err) {
+            if (err.code === 'DEVICE_BLOCKED' || err.code === 'UNAPPROVED_DEVICE' || err.code === 'DEVICE_KEY_REQUIRED') {
+                this.handleDeviceUnauthorized(err.code, err.message);
+                return;
+            }
             console.warn('Background catalog sync failed (server unreachable):', err);
             this.setOnlineStatus(false);
             this.updateCatalogSyncStatus(false);
@@ -2475,15 +2616,26 @@ class PosApp {
         try {
             const res = await PosApi.testConnection();
             if (res.success) {
+                this.isDeviceAuthorized = true;
+                this.hideDeviceLockedModal();
                 this.setOnlineStatus(true);
                 PosStorage.setItem('carwash_pos_has_connected', 'true');
                 // Refresh catalog, prices, and shop branding from back office
                 await this.refreshCatalogSilently(false);
             } else {
-                this.setOnlineStatus(false);
+                const errCode = res.code || res.data?.error;
+                if (res.status === 403 || res.status === 401 || ['DEVICE_BLOCKED', 'UNAPPROVED_DEVICE', 'DEVICE_KEY_REQUIRED'].includes(errCode)) {
+                    this.handleDeviceUnauthorized(errCode || 'DEVICE_BLOCKED', res.error);
+                } else {
+                    this.setOnlineStatus(false);
+                }
             }
         } catch (e) {
-            this.setOnlineStatus(false);
+            if (e.code === 'DEVICE_BLOCKED' || e.code === 'UNAPPROVED_DEVICE' || e.code === 'DEVICE_KEY_REQUIRED') {
+                this.handleDeviceUnauthorized(e.code, e.message);
+            } else {
+                this.setOnlineStatus(false);
+            }
         }
     }
 
@@ -2540,6 +2692,8 @@ class PosApp {
                 user = res.user;
                 PosStorage.setSessionToken(token);
                 PosStorage.setUser(user);
+                this.isDeviceAuthorized = true;
+                this.hideDeviceLockedModal();
                 try { localStorage.setItem('carwash_pos_has_connected', 'true'); } catch (e) {}
                 if (res.device) {
                     PosConfig.save({
@@ -2558,6 +2712,11 @@ class PosApp {
                 }
             }
         } catch (e) {
+            // Check if server rejected terminal authorization
+            if (e.code === 'DEVICE_BLOCKED' || e.code === 'UNAPPROVED_DEVICE' || e.code === 'DEVICE_KEY_REQUIRED') {
+                this.handleDeviceUnauthorized(e.code, e.message);
+                return;
+            }
             // Not authenticated in web session (e.g. NO_WEB_SESSION) or offline;
             // fall back to existing local storage session if valid
         }
@@ -2991,6 +3150,80 @@ class PosApp {
     }
 
     /**
+     * Handle Device Authorization Revocation / Unapproved / Missing Key
+     * Displays non-dismissible device locked overlay and locks checkout
+     */
+    static handleDeviceUnauthorized(code = 'DEVICE_BLOCKED', message = '') {
+        this.isDeviceAuthorized = false;
+        this.lastDeviceErrorCode = code;
+        this.setOnlineStatus(false);
+
+        const lang = (typeof I18nManager !== 'undefined') ? I18nManager.getLang() : 'km';
+        let title = (lang === 'km') ? 'ស្ថានីយមិនទាន់ទទួលបានការអនុញ្ញាត' : 'Terminal Not Authorized';
+        let desc = '';
+
+        if (code === 'DEVICE_BLOCKED') {
+            desc = (lang === 'km')
+                ? 'ឧបករណ៍ POS នេះត្រូវបានបិទដំណើរការ ឬលុបចេញពីប្រព័ន្ធ Back Office ដោយម្ចាស់ហាង។ សូមភ្ជាប់ Device Key ត្រឹមត្រូវដើម្បីបន្តការលក់។'
+                : 'This POS terminal has been deactivated or deleted in the Back Office. Please configure an authorized Device Key to resume operations.';
+        } else if (code === 'DEVICE_KEY_REQUIRED') {
+            desc = (lang === 'km')
+                ? 'ស្ថានីយ POS នេះត្រូវការ Device Key ដើម្បីតភ្ជាប់ជាមួយ Back Office។ សូមបញ្ចូល Key នៅក្នុងការកំណត់។'
+                : 'A valid Device Key is required to communicate with the Back Office. Please configure it in Settings.';
+        } else {
+            // UNAPPROVED_DEVICE or other
+            desc = (lang === 'km')
+                ? 'Device Key នេះមិនត្រឹមត្រូវ ឬមិនទាន់បានចុះឈ្មោះក្នុងប្រព័ន្ធ។ សូមចុះឈ្មោះក្នុង Back Office រួចភ្ជាប់ឡើងវិញ។'
+                : 'This Device Key is invalid or not registered in the Back Office. Please authorize this device in Back Office.';
+        }
+
+        const modal = document.getElementById('modalDeviceLocked');
+        const titleEl = document.getElementById('deviceLockedTitle');
+        const descEl = document.getElementById('deviceLockedDesc');
+        const codeEl = document.getElementById('deviceLockedCode');
+        const banner = document.getElementById('posDeviceLockedBanner');
+        const bannerText = document.getElementById('posDeviceLockedBannerText');
+
+        if (titleEl) titleEl.textContent = title;
+        if (descEl) descEl.textContent = desc;
+        if (codeEl) codeEl.textContent = `STATUS: ${code}`;
+        if (bannerText) bannerText.textContent = `${title}: ${desc}`;
+
+        if (banner) banner.style.display = 'flex';
+        if (modal) modal.classList.add('open');
+
+        // Close payment modal if currently open
+        document.getElementById('modalPayment')?.classList.remove('open');
+
+        // Lock checkout button
+        const btnProcess = document.getElementById('btnProcessPayment');
+        if (btnProcess) {
+            btnProcess.classList.add('disabled');
+            btnProcess.title = desc;
+        }
+    }
+
+    /**
+     * Clear Device Locked Overlay when a valid key is verified
+     */
+    static hideDeviceLockedModal() {
+        this.isDeviceAuthorized = true;
+        this.lastDeviceErrorCode = null;
+
+        const modal = document.getElementById('modalDeviceLocked');
+        if (modal) modal.classList.remove('open');
+
+        const banner = document.getElementById('posDeviceLockedBanner');
+        if (banner) banner.style.display = 'none';
+
+        const btnProcess = document.getElementById('btnProcessPayment');
+        if (btnProcess) {
+            btnProcess.classList.remove('disabled');
+            btnProcess.title = '';
+        }
+    }
+
+    /**
      * Requirement 3: Localized Role Display for Header User Pill
      */
     static getLocalizedRole(role) {
@@ -3038,7 +3271,7 @@ class PosApp {
         const userFullNameEl = document.getElementById('userFullName');
         const userRoleBadgeEl = document.getElementById('userRoleBadge');
         if (userFullNameEl) userFullNameEl.textContent = cleanName;
-        if (userRoleBadgeEl) userRoleBadgeEl.textContent = roleName;
+        if (userRoleBadgeEl) userRoleBadgeEl.innerHTML = `${roleName} <i class="fa-solid fa-chevron-down" style="font-size: 8px; margin-left: 2px;"></i>`;
 
         const menuUserFull = document.getElementById('menuUserFullName');
         const menuUserRole = document.getElementById('menuUserRoleBadge');
@@ -3047,7 +3280,7 @@ class PosApp {
 
         const userNameEl = document.getElementById('userName');
         if (userNameEl && !userFullNameEl) {
-            userNameEl.innerHTML = `<span class="user-fullname">${this.escapeHtml(cleanName)}</span><span class="user-role-badge">${this.escapeHtml(roleName)}</span>`;
+            userNameEl.innerHTML = `<span class="user-fullname">${this.escapeHtml(cleanName)}</span><span class="user-role-badge">${this.escapeHtml(roleName)} <i class="fa-solid fa-chevron-down" style="font-size: 8px; margin-left: 2px;"></i></span>`;
         }
 
         const userPill = document.getElementById('userPill');
@@ -3055,6 +3288,35 @@ class PosApp {
             userPill.style.display = 'flex';
             userPill.title = `${cleanName} (${roleName})`;
         }
+
+        this.updateUserDropdownDetails();
+    }
+
+    /**
+     * Update details inside the User Profile Dropdown Menu (Option A)
+     */
+    static updateUserDropdownDetails() {
+        if (!this.currentUser) return;
+        const rawName = this.currentUser.full_name || this.currentUser.username || 'Staff';
+        const cleanName = rawName.replace(/\s*\([^)]*\)/g, '').trim() || rawName;
+        const role = this.currentUser.role || 'cashier';
+        const roleName = this.currentUser.role_name_km && I18nManager.getLang() === 'km'
+            ? this.currentUser.role_name_km
+            : (this.currentUser.role_name_en && I18nManager.getLang() === 'en'
+                ? this.currentUser.role_name_en
+                : this.getLocalizedRole(role));
+
+        const dropName = document.getElementById('dropdownUserFullName');
+        const dropRole = document.getElementById('dropdownUserRole');
+        if (dropName) dropName.textContent = cleanName;
+        if (dropRole) dropRole.textContent = roleName;
+
+        const hasShift = !!(this.activeShift || PosStorage.getCurrentShift());
+        const endShiftBtn = document.getElementById('userMenuEndShift');
+        const spotAuditBtn = document.getElementById('userMenuSpotAudit');
+
+        if (endShiftBtn) endShiftBtn.style.display = hasShift ? 'flex' : 'none';
+        if (spotAuditBtn) spotAuditBtn.style.display = hasShift ? 'flex' : 'none';
     }
 
     /**
@@ -3093,6 +3355,7 @@ class PosApp {
         this.applyLayoutPreference();
         this.updatePicturesToggleUI();
         this.renderCatalog();
+        this.updateGotposCustomerCard();
 
         const btnSavedCust = document.getElementById('btnOpenSavedCustomers');
         if (btnSavedCust) {
@@ -3549,22 +3812,26 @@ class PosApp {
             // English
             'Car Wash & Detailing': 'Car Wash',
             'Wash & Detailing Services': 'Car Wash',
+            'Washing Services': 'Car Wash',
             'Basic Maintenance & Repair': 'Maintenance',
             'Maintenance & Repair': 'Maintenance',
+            'Oils & Parts': 'Oils & Parts',
             'Car Care Products': 'Car Care',
             'Care Products': 'Car Care',
             'Spare Parts & Hardware': 'Spare Parts',
             'Accessories & Spare Parts': 'Spare Parts',
             'Engine Oils': 'Engine Oils',
             'Oil Filters': 'Oil Filters',
-            'Fluids & Coolants': 'Fluids & Coolants',
+            'Fluids & Coolants': 'Fluids',
             // Khmer
             'លាងសម្អាត & ថែទាំរថយន្ត': 'លាង & ប៉ូលា',
             'សេវាកម្មលាង & ប៉ូលា': 'លាង & ប៉ូលា',
+            'Washing Services': (lang === 'km' ? 'លាង & ប៉ូលា' : 'Car Wash'),
+            'Oils & Parts': (lang === 'km' ? 'ប្រេង & គ្រឿង' : 'Oils & Parts'),
             'ជួសជុល & ថែទាំទូទៅ': 'ជួសជុល & ថែទាំ',
             'ទំនិញថែទាំរថយន្ត': 'ផលិតផលថែទាំ',
             'គ្រឿងបន្លាស់ & ផ្នែករឹង': 'គ្រឿងបន្លាស់',
-            'ទឹកស្អំ & ទឹកកញ្ចក់': 'ទឹកស្អំ & ទឹកកញ្ចក់',
+            'ទឹកស្អំ & ទឹកកញ្ចក់': 'ទឹកស្អំ',
             'ប្រេងម៉ាស៊ីន': 'ប្រេងម៉ាស៊ីន',
             'តម្រងប្រេង': 'តម្រងប្រេង'
         };
@@ -3611,6 +3878,13 @@ class PosApp {
         if (hasServerCategories) {
             categories = rawCategories
                 .filter(c => c.type !== 'expense' && (c.is_active === undefined || c.is_active == 1 || c.is_active === true))
+                .filter(c => {
+                    const catId = String(c.id);
+                    const catCode = c.code;
+                    const hasAnySvc = services.some(s => (s.category_id && String(s.category_id) === catId) || (s.category && s.category === catCode));
+                    const hasAnyProd = products.some(p => (p.category_id && String(p.category_id) === catId) || (p.category && p.category === catCode));
+                    return hasAnySvc || hasAnyProd;
+                })
                 .sort((a, b) => (parseInt(a.sort_order || 0) - parseInt(b.sort_order || 0)) || (parseInt(a.id || 0) - parseInt(b.id || 0)));
         } else {
             // Fallback to legacy categories if cached catalog has no categories list
@@ -3663,13 +3937,13 @@ class PosApp {
             sidebar.querySelectorAll(':scope > .category-pill:not(.pictures-toggle-pill)').forEach(el => el.remove());
         }
 
-        // 2. Build "All" Button (No icon)
+        // 2. Build "All" Button (With GOTPOS 3D asset)
         const allBtn = document.createElement('button');
         allBtn.type = 'button';
         allBtn.className = 'category-pill' + (this.selectedCategory === 'all' ? ' active' : '');
         allBtn.setAttribute('data-cat', 'all');
         const allText = (lang === 'km') ? (I18nManager.t('allCategories') || 'ទាំងអស់') : (I18nManager.t('allCategories') || 'All');
-        allBtn.innerHTML = `<span>${allText}</span>`;
+        allBtn.innerHTML = `<img src="icons/cat-all.png" alt="All" class="category-icon-img"><span class="pill-text">${allText}</span>`;
         allBtn.title = (lang === 'km') ? 'មុខទំនិញទាំងអស់' : 'All Items';
         allBtn.addEventListener('click', () => {
             sidebar.querySelectorAll('.category-pill:not(.pictures-toggle-pill)').forEach(p => p.classList.remove('active'));
@@ -3685,8 +3959,58 @@ class PosApp {
             sidebar.appendChild(allBtn);
         }
 
-        // 3. Build Category Buttons from Back Office (Short names, No icon)
-        categories.forEach(cat => {
+        // 3. Build Category Buttons from Back Office (GOTPOS 3D icons)
+        const defaultCategoryImages = [
+            'cat-clothing.png',
+            'cat-footwear.png',
+            'cat-watches.png',
+            'cat-food.png',
+            'cat-accessories.png',
+            'cat-electronics.png',
+            'cat-bags.png',
+            'cat-beauty.png',
+            'cat-fitness.png'
+        ];
+
+        const catImageMap = {
+            'all': 'cat-all.png',
+            'wash': 'cat-clothing.png',
+            '1': 'cat-clothing.png',
+            'parts': 'cat-footwear.png',
+            '636': 'cat-footwear.png',
+            'oil_part': 'cat-footwear.png',
+            'oil': 'cat-food.png',
+            'engine_oil': 'cat-food.png',
+            '3': 'cat-food.png',
+            'repair': 'cat-watches.png',
+            '2': 'cat-watches.png',
+            'maint': 'cat-watches.png',
+            'filter': 'cat-accessories.png',
+            'oil_filter': 'cat-accessories.png',
+            '4': 'cat-accessories.png',
+            'fluid': 'cat-electronics.png',
+            'coolant': 'cat-electronics.png',
+            '5': 'cat-electronics.png',
+            'care': 'cat-beauty.png',
+            'products': 'cat-beauty.png',
+            'care_product': 'cat-beauty.png',
+            '6': 'cat-beauty.png',
+            'spare_parts': 'cat-bags.png',
+            'spare_part': 'cat-bags.png',
+            'spare': 'cat-bags.png',
+            '7': 'cat-bags.png',
+            'clothing': 'cat-clothing.png',
+            'footwear': 'cat-footwear.png',
+            'watches': 'cat-watches.png',
+            'food': 'cat-food.png',
+            'accessories': 'cat-accessories.png',
+            'electronics': 'cat-electronics.png',
+            'bags': 'cat-bags.png',
+            'beauty': 'cat-beauty.png',
+            'fitness': 'cat-fitness.png'
+        };
+
+        categories.forEach((cat, index) => {
             const catId = String(cat.id);
             const isSelected = (String(this.selectedCategory) === catId || this.selectedCategory === cat.code);
             const activeItemsExist = hasActiveItems(cat);
@@ -3707,9 +4031,12 @@ class PosApp {
 
             const displayName = this.getShortCategoryName(rawName, lang);
             const fullName = (lang === 'km') ? (cat.name_km || cat.name_en) : (cat.name_en || cat.name_km);
-            const catIcon = cat.icon || PosApp.getCategoryIcon(cat.code, cat.name_en);
 
-            btn.innerHTML = `<i class="fa-solid ${catIcon}"></i><span>${this.escapeHtml(displayName)}</span>`;
+            const codeKey = (cat.code || '').toLowerCase();
+            const idKey = String(cat.id || '').toLowerCase();
+            const imgFile = catImageMap[codeKey] || catImageMap[idKey] || defaultCategoryImages[index % defaultCategoryImages.length];
+
+            btn.innerHTML = `<img src="icons/${imgFile}" alt="${this.escapeHtml(displayName)}" class="category-icon-img"><span>${this.escapeHtml(displayName)}</span>`;
             btn.title = fullName || displayName;
 
             if (!activeItemsExist) {
@@ -3994,6 +4321,29 @@ class PosApp {
         }
 
         grid.innerHTML = html;
+        this.updateCatalogCartBadges();
+    }
+
+    
+    static updateCatalogCartBadges() {
+        const inCartSvcIds = new Set(
+            (this.cart || [])
+                .filter(it => it.type === 'service')
+                .map(it => String(it.service_id || it.id))
+        );
+        const inCartProdIds = new Set(
+            (this.cart || [])
+                .filter(it => it.type === 'product')
+                .map(it => String(it.product_id || it.id))
+        );
+
+        document.querySelectorAll('#catalogGrid .pos-item-card').forEach(card => {
+            const svcId = card.getAttribute('data-svc-id');
+            const prodId = card.getAttribute('data-prod-id');
+            const isInCart = (svcId && inCartSvcIds.has(String(svcId))) || 
+                             (prodId && inCartProdIds.has(String(prodId)));
+            card.classList.toggle('in-cart', isInCart);
+        });
     }
 
     static updateVehiclePricesInCart(showNotice = false) {
@@ -4454,38 +4804,60 @@ class PosApp {
 
         if (!cartList) return;
 
-        const totalQty = this.cart.reduce((sum, it) => sum + it.qty, 0);
+        const totalQty = (this.cart || []).reduce((sum, it) => sum + it.qty, 0);
         if (countBadge) {
             countBadge.textContent = totalQty;
             countBadge.style.display = totalQty > 0 ? 'inline-flex' : 'none';
         }
+        const gotCountBadge = document.getElementById('gotposItemCount');
+        if (gotCountBadge) gotCountBadge.textContent = totalQty;
 
+        const colHeaders = document.querySelector('.gotpos-cart-col-headers');
+        const discBox = document.getElementById('gotposDiscountBox');
+        const finSummary = document.querySelector('.gotpos-financial-summary');
+        const methodWrap = document.querySelector('.gotpos-select-method-wrap');
+        const detailsAcc = document.getElementById('cartServiceDetailsAccordion');
+        const cartCol = document.getElementById('posCartColumn');
         const btnCartPillClear = document.getElementById('btnCartPillClear');
 
-        if (this.cart.length === 0) {
+        if (!this.cart || this.cart.length === 0) {
+            if (colHeaders) colHeaders.style.display = 'none';
+            if (discBox) discBox.style.display = 'none';
+            if (finSummary) finSummary.style.display = 'none';
+            if (methodWrap) methodWrap.style.display = 'none';
+            if (detailsAcc) detailsAcc.style.display = 'none';
+            if (cartCol) cartCol.classList.add('empty-cart');
+
             const wfBadge = document.getElementById('cartOrderWorkflowBadge');
             if (wfBadge) wfBadge.style.display = 'none';
 
             cartList.innerHTML = `
-                <div class="cart-empty-state">
-                    <div class="cart-empty-icon-wrap">
-                        <i class="fa-solid fa-cart-shopping"></i>
-                    </div>
-                    <h3 class="cart-empty-title" data-i18n="cartEmptyTitle">${I18nManager.t('cartEmptyTitle')}</h3>
-                    <p class="cart-empty-subtitle" data-i18n="cartEmptySubtitle">${I18nManager.t('cartEmptySubtitle')}</p>
+                <div class="gotpos-empty-cart-state" id="emptyOrderMessage">
+                    <img src="icons/no-order.svg" alt="Empty Cart" class="gotpos-empty-cart-img">
                 </div>
             `;
-            if (checkoutBtn) checkoutBtn.disabled = true;
+
+            if (checkoutBtn) {
+                checkoutBtn.disabled = true;
+                checkoutBtn.classList.add('is-disabled');
+                checkoutBtn.classList.remove('is-active');
+            }
             if (btnCartPillClear) btnCartPillClear.disabled = true;
             const btnCartPillDiscount = document.getElementById('btnCartPillDiscount');
             if (btnCartPillDiscount) {
                 btnCartPillDiscount.disabled = true;
                 btnCartPillDiscount.classList.remove('active');
-                btnCartPillDiscount.setAttribute('title', I18nManager.t('cartEmptyForDiscount') || 'Add items to cart first');
             }
             const cartDiscountBadge = document.getElementById('cartDiscountBadge');
             if (cartDiscountBadge) cartDiscountBadge.style.display = 'none';
         } else {
+            if (colHeaders) colHeaders.style.display = 'flex';
+            if (discBox) discBox.style.display = 'flex';
+            if (finSummary) finSummary.style.display = 'block';
+            if (methodWrap) methodWrap.style.display = 'block';
+            if (detailsAcc) detailsAcc.style.display = 'block';
+            if (cartCol) cartCol.classList.remove('empty-cart');
+
             // Operational Workflow Badge & Service Crew Visibility (Tasks 2 & 5)
             const wfBadge = document.getElementById('cartOrderWorkflowBadge');
             const hasWash = this.cart.some(it => it.type === 'service' && !this.isMechanicalService(it));
@@ -4523,37 +4895,31 @@ class PosApp {
             const btnCartPillDiscount = document.getElementById('btnCartPillDiscount');
             if (btnCartPillDiscount) {
                 btnCartPillDiscount.disabled = false;
-                btnCartPillDiscount.setAttribute('title', I18nManager.t('discount') || 'Discount');
             }
+
             let html = '';
             this.cart.forEach((it, idx) => {
                 const lineTotalUsd = it.price_usd * it.qty;
-                const lineTotalKhr = it.price_khr * it.qty;
                 const isFree = (it.is_member_benefit || it.price_usd === 0);
                 const freeBadge = isFree ? `<span class="cart-free-badge">${I18nManager.t('includedNoCharge') || 'FREE'}</span>` : '';
                 const upsellBadge = it.is_upsell ? `<span class="badge-accent" style="font-size: 0.65rem; margin-left: 0.35rem; font-weight: 700; background: #ede9fe; color: #7c3aed; padding: 1px 5px; border-radius: 4px;">UPSELL</span>` : '';
 
                 html += `
-                    <div class="cart-item-row">
-                        <div class="cart-item-main">
-                            <div class="cart-item-info">
-                                <span class="cart-item-title">${this.escapeHtml(it.name_km || it.name_en)} ${freeBadge}${upsellBadge}</span>
-                                <span class="cart-item-sub">${this.escapeHtml(it.name_en)}${it.note ? ` • ${this.escapeHtml(it.note)}` : ''}</span>
-                            </div>
-                            <div>
-                                <div class="cart-item-price">${isFree ? '$0.00' : '$' + lineTotalUsd.toFixed(2)}</div>
-                                <div class="cart-item-khr">${isFree ? '0 ៛' : lineTotalKhr.toLocaleString() + ' ៛'}</div>
-                            </div>
+                    <div class="cart-item-row gotpos-cart-row">
+                        <div class="gotpos-col-product">
+                            <span class="gotpos-item-title">${this.escapeHtml(it.name_km || it.name_en)} ${freeBadge}${upsellBadge}</span>
+                            <span class="gotpos-item-sub">${this.escapeHtml(it.name_en)}${it.note ? " • " + this.escapeHtml(it.note) : ""}</span>
                         </div>
-                        <div class="cart-item-actions">
+                        <div class="gotpos-col-qty">
                             <div class="qty-control">
                                 <button type="button" class="qty-btn" onclick="PosApp.updateCartQty(${idx}, -1)">-</button>
                                 <span class="qty-val">${it.qty}</span>
                                 <button type="button" class="qty-btn" onclick="PosApp.updateCartQty(${idx}, 1)">+</button>
                             </div>
-                            <button type="button" class="btn-remove-item" onclick="PosApp.removeCartItem(${idx})">
-                                <i class="fa-solid fa-trash-can"></i> Remove
-                            </button>
+                        </div>
+                        <div class="gotpos-col-subtotal">
+                            <span class="gotpos-item-price">${isFree ? "$0.00" : "$" + lineTotalUsd.toFixed(2)}</span>
+                            <button type="button" class="gotpos-remove-x" onclick="PosApp.removeCartItem(${idx})" title="Remove"><i class="fa-solid fa-xmark"></i></button>
                         </div>
                     </div>
                 `;
@@ -4608,22 +4974,27 @@ class PosApp {
             }
         }
 
-        document.getElementById('cartTotalUsd').textContent = `$${totals.totalUsd.toFixed(2)}`;
-        document.getElementById('cartTotalKhr').textContent = `${totals.totalKhr.toLocaleString()} ៛`;
+        const totalUsdEl = document.getElementById('cartTotalUsd');
+        if (totalUsdEl) totalUsdEl.textContent = `$${totals.totalUsd.toFixed(2)}`;
+        const totalKhrEl = document.getElementById('cartTotalKhr');
+        if (totalKhrEl) totalKhrEl.textContent = `${totals.totalKhr.toLocaleString()} ៛`;
 
-        // Update Checkout Button State (Phase 1 UI/UX: Collect Payment, helper text, empty/active states)
+        // Update Checkout Button State
         this.updateCheckoutButtonState();
+
+        // Update Catalog Grid Checkmarks
+        this.updateCatalogCartBadges();
 
         // Update Cart Wait Time & Trigger Server Refresh
         this.updateWaitTimesUI();
         this.fetchWaitTimes();
 
-        // Requirement 2: Check for upsell offer (show at most one offer, never block the sale)
+        // Check for upsell offer
         this.checkCartUpsellRules();
     }
 
     /**
-     * Update Collect Payment button and helper explanation based on cart and lock states
+     * Update Collect Payment button based on cart and lock states
      */
     static updateCheckoutButtonState() {
         const payBtn = document.getElementById('btnOpenCheckout');
@@ -4642,10 +5013,7 @@ class PosApp {
                     <span class="checkout-btn-text">Sales Locked</span>
                 </span>
             `;
-            if (helperText) {
-                helperText.style.display = 'flex';
-                helperText.innerHTML = `<i class="fa-solid fa-lock"></i> <span>Sales are locked. Day has been closed.</span>`;
-            }
+            if (helperText) helperText.style.display = 'none';
             return;
         }
 
@@ -4661,15 +5029,13 @@ class PosApp {
                     <span class="checkout-btn-text">Start Shift First</span>
                 </span>
             `;
-            if (helperText) {
-                helperText.style.display = 'flex';
-                helperText.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> <span>Open cash drawer shift to start sales</span>`;
-            }
+            if (helperText) helperText.style.display = 'none';
             return;
         }
 
         payBtn.style.opacity = '1';
         payBtn.style.pointerEvents = '';
+        const processText = I18nManager.t('processToPayment') || 'Process to Payment';
 
         if (!this.cart || this.cart.length === 0) {
             payBtn.disabled = true;
@@ -4677,29 +5043,20 @@ class PosApp {
             payBtn.classList.add('is-disabled');
             payBtn.innerHTML = `
                 <span class="btn-checkout-content">
-                    <i class="fa-solid fa-credit-card checkout-btn-icon"></i>
-                    <span class="checkout-btn-text" data-i18n="collectPayment">${I18nManager.t('collectPayment') || 'Collect Payment'}</span>
+                    <span class="checkout-btn-text" data-i18n="processToPayment">${processText}</span>
                 </span>
             `;
-            if (helperText) {
-                helperText.style.display = 'flex';
-                helperText.innerHTML = `<i class="fa-solid fa-circle-info"></i> <span data-i18n="cartEmptyCheckoutHelp">${I18nManager.t('cartEmptyCheckoutHelp') || 'Add services or products to collect payment'}</span>`;
-            }
+            if (helperText) helperText.style.display = 'none';
         } else {
             payBtn.disabled = false;
             payBtn.classList.add('is-active');
             payBtn.classList.remove('is-disabled');
-            const totals = this.calculateTotals();
             payBtn.innerHTML = `
                 <span class="btn-checkout-content">
-                    <i class="fa-solid fa-credit-card checkout-btn-icon"></i>
-                    <span class="checkout-btn-text" data-i18n="collectPayment">${I18nManager.t('collectPayment') || 'Collect Payment'}</span>
-                    <span class="btn-checkout-amount" id="checkoutBtnAmount">$${totals.totalUsd.toFixed(2)}</span>
+                    <span class="checkout-btn-text" data-i18n="processToPayment">${processText}</span>
                 </span>
             `;
-            if (helperText) {
-                helperText.style.display = 'none';
-            }
+            if (helperText) helperText.style.display = 'none';
         }
     }
 
@@ -5061,6 +5418,7 @@ class PosApp {
 
         // Update UI & Intake Inputs (Task 1)
         document.getElementById('custDropdown')?.classList.remove('open');
+        document.getElementById('modalSelectCustomer')?.classList.remove('open');
         this.closeSavedCustomersPanel();
         const plateInp = document.getElementById('custPlateInput');
         if (plateInp) {
@@ -5103,6 +5461,9 @@ class PosApp {
 
         // Vehicle Recognition - Load Customer & Vehicle Profile (Requirement 4)
         this.loadVehicleProfile(cleanPlate);
+
+        // Update GOTPOS Customer Card Header
+        this.updateGotposCustomerCard();
     }
 
     static setCustomerToWalkIn() {
@@ -5148,6 +5509,9 @@ class PosApp {
         document.getElementById('cartLoyaltyRewardStatusBadge')?.setAttribute('style', 'display: none;');
         if (plateInp) plateInp.focus();
         else document.getElementById('custSearchInput')?.focus();
+
+        // Reset GOTPOS Customer Card Header
+        this.updateGotposCustomerCard();
     }
 
     // ========================================================
@@ -5167,11 +5531,103 @@ class PosApp {
     }
 
     static initSavedCustomersPanel() {
+        // Search Input in Customer Select Modal
+        const searchInp = document.getElementById('selectCustSearchInput');
+        const btnClear = document.getElementById('btnClearCustSearch');
+        if (searchInp) {
+            searchInp.addEventListener('input', (e) => {
+                const val = e.target.value || '';
+                if (btnClear) btnClear.style.display = val.length > 0 ? 'inline-flex' : 'none';
+                this.handleSavedCustomersSearch(val);
+            });
+        }
+        if (btnClear) {
+            btnClear.addEventListener('click', () => {
+                if (searchInp) {
+                    searchInp.value = '';
+                    searchInp.focus();
+                }
+                btnClear.style.display = 'none';
+                this.handleSavedCustomersSearch('');
+            });
+        }
+
+        // Close Button in Customer Select Modal
+        const btnCloseModal = document.getElementById('btnCloseSelectCustModal');
+        if (btnCloseModal) {
+            btnCloseModal.addEventListener('click', () => this.closeCustomerSelectModal());
+        }
+
+        // Backdrop Click
+        const modalSelect = document.getElementById('modalSelectCustomer');
+        if (modalSelect) {
+            modalSelect.addEventListener('click', (e) => {
+                if (e.target === modalSelect) this.closeCustomerSelectModal();
+            });
+        }
+
+        // Quick Walk-In Button
+        const btnQuickWalkIn = document.getElementById('btnQuickWalkIn');
+        if (btnQuickWalkIn) {
+            btnQuickWalkIn.addEventListener('click', () => {
+                this.setCustomerToWalkIn();
+                this.closeCustomerSelectModal();
+            });
+        }
+
+        // Quick Add Customer Button
+        const btnQuickAdd = document.getElementById('btnQuickAddCustomer');
+        if (btnQuickAdd) {
+            btnQuickAdd.addEventListener('click', () => {
+                this.closeCustomerSelectModal();
+                document.getElementById('btnOpenNewCustomerModal')?.click();
+            });
+        }
+
+        // Tab Filter Buttons
+        const tabBtns = document.querySelectorAll('.cust-tab-btn');
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                tabBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const tab = btn.getAttribute('data-cust-tab');
+                this.setSavedCustomersTab(tab);
+            });
+        });
+
+        // No Match Quick Actions
+        const btnUseSearchPlate = document.getElementById('btnUseSearchAsPlate');
+        if (btnUseSearchPlate) {
+            btnUseSearchPlate.addEventListener('click', () => {
+                const q = (this.savedCustQuery || '').trim().toUpperCase();
+                if (q) {
+                    this.selectCustomer(q, 'Walk-in Guest', '', this.selectedVehicleType);
+                    this.closeCustomerSelectModal();
+                }
+            });
+        }
+
+        const btnRegisterFromNoMatch = document.getElementById('btnRegisterFromNoMatch');
+        if (btnRegisterFromNoMatch) {
+            btnRegisterFromNoMatch.addEventListener('click', () => {
+                const q = (this.savedCustQuery || '').trim();
+                this.closeCustomerSelectModal();
+                document.getElementById('btnOpenNewCustomerModal')?.click();
+                if (/^\d+$/.test(q)) {
+                    const phoneEl = document.getElementById('newCustPhone');
+                    if (phoneEl) phoneEl.value = q;
+                } else if (q) {
+                    const plateEl = document.getElementById('newCustPlate');
+                    if (plateEl) plateEl.value = q.toUpperCase();
+                }
+            });
+        }
+
         const btnOpen = document.getElementById('btnOpenSavedCustomers');
         if (btnOpen) {
             btnOpen.addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.toggleSavedCustomersPanel();
+                this.openCustomerSelectModal();
             });
         }
 
@@ -5241,38 +5697,30 @@ class PosApp {
         }
     }
 
-    static openSavedCustomersPanel() {
+    static openCustomerSelectModal() {
         if (!this.canAccessCustomerList()) {
             this.showToast('warning', I18nManager.t('accessRestricted') || 'Access restricted');
             return;
         }
 
-        const panel = document.getElementById('panelSavedCustomers');
-        const iconBtn = document.getElementById('btnOpenSavedCustomers');
-        if (!panel) return;
+        const modal = document.getElementById('modalSelectCustomer');
+        if (!modal) return;
 
         // Hide autocomplete dropdown so they do not collide
         document.getElementById('custDropdown')?.classList.remove('open');
 
-        panel.style.display = 'flex';
-        if (iconBtn) {
-            iconBtn.classList.add('active');
-            if (!iconBtn.dataset.origTitle && iconBtn.hasAttribute('title')) {
-                iconBtn.dataset.origTitle = iconBtn.getAttribute('title');
-            }
-            iconBtn.removeAttribute('title');
-            iconBtn.blur();
+        modal.classList.add('open');
+
+        const searchInp = document.getElementById('selectCustSearchInput');
+        if (searchInp) {
+            searchInp.value = '';
+            setTimeout(() => searchInp.focus(), 80);
         }
+        const btnClear = document.getElementById('btnClearCustSearch');
+        if (btnClear) btnClear.style.display = 'none';
 
-        // Search using main search bar value
-        const mainInput = document.getElementById('custSearchInput');
-        this.savedCustQuery = (mainInput?.value || '').trim().toLowerCase();
-
+        this.savedCustQuery = '';
         this.renderSavedCustomersList(true);
-
-        if (mainInput) {
-            mainInput.focus();
-        }
 
         const data = PosStorage.getCustomers();
         const isOffline = !navigator.onLine || (typeof this.isOnline !== 'undefined' && !this.isOnline);
@@ -5281,7 +5729,19 @@ class PosApp {
         }
     }
 
+    static closeCustomerSelectModal() {
+        const modal = document.getElementById('modalSelectCustomer');
+        if (modal) modal.classList.remove('open');
+        this.closeSavedCustomersPanel();
+    }
+
+    static openSavedCustomersPanel() {
+        this.openCustomerSelectModal();
+    }
+
     static closeSavedCustomersPanel() {
+        const modal = document.getElementById('modalSelectCustomer');
+        if (modal) modal.classList.remove('open');
         const panel = document.getElementById('panelSavedCustomers');
         if (panel) panel.style.display = 'none';
         const iconBtn = document.getElementById('btnOpenSavedCustomers');
@@ -5291,6 +5751,72 @@ class PosApp {
                 iconBtn.setAttribute('title', iconBtn.dataset.origTitle);
             }
         }
+    }
+
+    static updateGotposCustomerCard() {
+        const nameDisplay = document.getElementById('gotposCustNameDisplay');
+        const tierDisplay = document.getElementById('gotposCustTierDisplay');
+        const avatarEl = document.getElementById('gotposCustAvatar');
+        const btnReset = document.getElementById('btnGotposResetCustomer');
+        const isKm = (I18nManager.getLang() === 'km');
+
+        if (!this.currentCustomer || !this.currentCustomer.name || this.currentCustomer.name === 'Walk-in Guest') {
+            if (nameDisplay) nameDisplay.textContent = isKm ? 'ភ្ញៀវទូទៅ' : 'Walk-in Guest';
+            if (tierDisplay) {
+                const plateStr = this.currentCustomer?.plate ? ` • ${this.currentCustomer.plate}` : '';
+                tierDisplay.textContent = (isKm ? 'អតិថិជនធម្មតា' : 'Standard Guest') + plateStr;
+            }
+            if (avatarEl) {
+                avatarEl.innerHTML = '<i class="fa-solid fa-user"></i>';
+                avatarEl.style.backgroundColor = '';
+                avatarEl.style.color = '';
+            }
+            if (btnReset) btnReset.style.display = 'none';
+            return;
+        }
+
+        const cust = this.currentCustomer;
+        if (nameDisplay) nameDisplay.textContent = cust.name;
+
+        let tier = 'Standard';
+        let points = 0;
+        if (cust.customer_id) {
+            const allCusts = PosStorage.getCustomers()?.customers || [];
+            const found = allCusts.find(c => c.id === cust.customer_id);
+            if (found) {
+                tier = found.membership_level || 'Standard';
+                points = parseInt(found.loyalty_points || 0);
+            }
+        }
+
+        const tierUpper = tier.charAt(0).toUpperCase() + tier.slice(1).toLowerCase();
+        const plateStr = cust.plate ? ` • ${cust.plate}` : '';
+        const ptsStr = points > 0 ? ` • ${points} Pts` : '';
+
+        if (tierDisplay) {
+            tierDisplay.textContent = `${tierUpper} Member${plateStr}${ptsStr}`;
+        }
+
+        if (avatarEl) {
+            const initials = this.getCustomerInitials(cust.name);
+            avatarEl.textContent = initials;
+            const lvl = tier.toLowerCase();
+            if (lvl === 'vip' || lvl === 'gold') {
+                avatarEl.style.backgroundColor = '#fef3c7';
+                avatarEl.style.color = '#d97706';
+            } else if (lvl === 'platinum') {
+                avatarEl.style.backgroundColor = '#ede9fe';
+                avatarEl.style.color = '#7c3aed';
+            } else if (lvl === 'silver') {
+                avatarEl.style.backgroundColor = '#f1f5f9';
+                avatarEl.style.color = '#475569';
+            } else {
+                avatarEl.style.backgroundColor = '#e0f2fe';
+                avatarEl.style.color = '#0284c7';
+            }
+        }
+
+        if (btnReset) btnReset.style.display = 'inline-flex';
     }
 
     static toggleSavedCustomersPanel() {
@@ -5403,6 +5929,20 @@ class PosApp {
             });
         }
 
+        const tab = this.savedCustActiveTab || 'all';
+        if (tab === 'vip') {
+            enriched = enriched.filter(c => {
+                const lvl = (c.membership_level || '').toLowerCase();
+                return lvl === 'vip' || lvl === 'gold' || lvl === 'platinum' || (c.name || '').toLowerCase().includes('vip');
+            });
+        } else if (tab === 'silver') {
+            enriched = enriched.filter(c => (c.membership_level || '').toLowerCase() === 'silver');
+        } else if (tab === 'standard') {
+            enriched = enriched.filter(c => (c.membership_level || '').toLowerCase() === 'standard');
+        } else if (tab === 'vehicles') {
+            enriched = enriched.filter(c => c.vehicles && c.vehicles.length > 0);
+        }
+
         // Sort: recent customers first (by total_visits DESC, then ID DESC)
         enriched.sort((a, b) => {
             const visitsA = parseInt(a.total_visits || 0);
@@ -5440,12 +5980,37 @@ class PosApp {
             return;
         }
 
+        // Update Tab Counts
+        const allCusts = (data.customers || []);
+        const countAllEl = document.getElementById('countCustAll');
+        if (countAllEl) countAllEl.textContent = allCusts.length;
+        const countVipEl = document.getElementById('countCustVip');
+        if (countVipEl) {
+            countVipEl.textContent = allCusts.filter(c => {
+                const lvl = (c.membership_level || '').toLowerCase();
+                return lvl === 'vip' || lvl === 'gold' || lvl === 'platinum' || (c.name || '').toLowerCase().includes('vip');
+            }).length;
+        }
+        const countSilverEl = document.getElementById('countCustSilver');
+        if (countSilverEl) {
+            countSilverEl.textContent = allCusts.filter(c => (c.membership_level || '').toLowerCase() === 'silver').length;
+        }
+
         const filtered = this.filterAndSortCustomers();
 
         if (filtered.length === 0) {
             if (noMatch) {
                 noMatch.style.display = 'block';
-                noMatch.textContent = I18nManager.t('noSavedCustomers') || 'No saved customers found';
+                const noCustActions = document.getElementById('noMatchQuickActions');
+                const lblPlate = document.getElementById('lblUseAsPlate');
+                const lblReg = document.getElementById('lblRegisterNewPlate');
+                if (this.savedCustQuery && this.savedCustQuery.length >= 2) {
+                    if (noCustActions) noCustActions.style.display = 'flex';
+                    if (lblPlate) lblPlate.textContent = `Use "${this.savedCustQuery.toUpperCase()}" as Walk-in`;
+                    if (lblReg) lblReg.textContent = `+ Register "${this.savedCustQuery}"`;
+                } else {
+                    if (noCustActions) noCustActions.style.display = 'none';
+                }
             }
             if (itemsBox) itemsBox.style.display = 'none';
             if (loadMoreIndicator) loadMoreIndicator.style.display = 'none';
@@ -5703,7 +6268,33 @@ class PosApp {
         alert(message);
     }
 
+    static openPaymentWithMethod(method) {
+        if (!this.cart || this.cart.length === 0) {
+            this.showCartToast("Cart is empty. Add services or products first.");
+            return;
+        }
+        this.openPaymentModal();
+        if (method) {
+            setTimeout(() => {
+                this.switchPaymentMethod(method);
+            }, 60);
+        }
+    }
+
+    static toggleFullscreen() {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+            document.exitFullscreen().catch(() => {});
+        }
+    }
+
     static openPaymentModal() {
+        if (!this.isDeviceAuthorized) {
+            this.handleDeviceUnauthorized(this.lastDeviceErrorCode || 'DEVICE_BLOCKED', 'This terminal is not authorized. The device key was revoked or deleted in the Back Office.');
+            return;
+        }
+
         if (!this.cart || this.cart.length === 0) {
             this.showCartToast('Cart is empty. Add services or products first.');
             return;
@@ -11089,10 +11680,17 @@ class PosApp {
             const res = await PosApi.testConnection();
             if (res.success) {
                 PosStorage.setItem('carwash_pos_has_connected', 'true');
+                this.isDeviceAuthorized = true;
+                this.hideDeviceLockedModal();
                 this.setOnlineStatus(true);
                 PosApi.syncCatalog().then(() => this.renderCatalog());
             } else {
-                this.setOnlineStatus(false);
+                const errCode = res.code || res.data?.error;
+                if (res.status === 403 || res.status === 401 || ['DEVICE_BLOCKED', 'UNAPPROVED_DEVICE', 'DEVICE_KEY_REQUIRED'].includes(errCode)) {
+                    this.handleDeviceUnauthorized(errCode || 'DEVICE_BLOCKED', res.error);
+                } else {
+                    this.setOnlineStatus(false);
+                }
             }
         }, 800);
     }
@@ -11746,6 +12344,17 @@ class PosApp {
     }
 
     static async handleStartShiftSubmit() {
+        if (!this.isDeviceAuthorized) {
+            const btn = document.getElementById('btnConfirmStartShift');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = `<i class="fa-solid fa-door-open mr-1"></i> <span data-i18n="openShiftBtn">បើកវេនការងារ (Open Shift)</span>`;
+            }
+            document.getElementById('modalStartShift')?.classList.remove('open');
+            this.handleDeviceUnauthorized(this.lastDeviceErrorCode || 'DEVICE_BLOCKED', 'This terminal is not authorized. The device key was revoked or deleted in the Back Office.');
+            return;
+        }
+
         const usdInp = document.getElementById('startShiftUsd');
         const khrInp = document.getElementById('startShiftKhr');
         const notesInp = document.getElementById('startShiftNotes');

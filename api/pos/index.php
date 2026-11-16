@@ -185,7 +185,7 @@ if ($apiKey) {
     $device = $devStmt->fetch();
 }
 
-// Fallback: If device is not found by API key (or key was stale/empty), check staff token or active web session
+// Fallback: If device is not found by API key (or key was stale/empty), check valid staff session token
 if (!$device) {
     // 1. Check valid unexpired X-Staff-Token
     $stToken = $_SERVER['HTTP_X_STAFF_TOKEN'] ?? ($headers['X-Staff-Token'] ?? ($headers['x-staff-token'] ?? ''));
@@ -194,34 +194,6 @@ if (!$device) {
         $devSess = $pdo->prepare("SELECT d.* FROM pos_sessions s JOIN pos_devices d ON s.device_id = d.id WHERE s.token_hash = ? AND s.expires_at > ? LIMIT 1");
         $devSess->execute([$stHash, date('Y-m-d H:i:s')]);
         $device = $devSess->fetch(PDO::FETCH_ASSOC);
-    }
-}
-
-if (!$device) {
-    // 2. Check if request is authenticated via active Back Office web session (e.g. from login redirect)
-    if (class_exists('Auth')) {
-        Auth::startSession();
-        if (Auth::check()) {
-            $userRole = Auth::getRole();
-            $deviceRoleMap = [
-                'cashier' => 'POS-Cashier',
-                'mechanic' => 'Technical',
-                'technical' => 'Technical',
-                'warehouse' => 'Warehouse',
-                'washer' => 'Washer',
-                'wash_supervisor' => 'Washer'
-            ];
-            $prefName = $deviceRoleMap[$userRole] ?? '';
-            if ($prefName !== '') {
-                $devStmt = $pdo->prepare("SELECT * FROM pos_devices WHERE status = 'active' AND (device_name LIKE ? OR device_uid LIKE ?) ORDER BY id ASC LIMIT 1");
-                $devStmt->execute(["%$prefName%", "%$prefName%"]);
-                $device = $devStmt->fetch(PDO::FETCH_ASSOC);
-            }
-            if (!$device) {
-                $devStmt = $pdo->query("SELECT * FROM pos_devices WHERE status = 'active' ORDER BY id ASC LIMIT 1");
-                $device = $devStmt->fetch(PDO::FETCH_ASSOC);
-            }
-        }
     }
 }
 
@@ -249,11 +221,20 @@ if (!$device) {
 }
 
 if ($device['status'] !== 'active') {
+    // Invalidate any lingering pos_sessions for this deactivated or blocked device
+    try {
+        $pdo->prepare("DELETE FROM pos_sessions WHERE device_id = ?")->execute([$device['id']]);
+    } catch (Throwable $t) {}
+
+    $isInactive = ($device['status'] === 'inactive');
     http_response_code(403);
     echo json_encode([
         'success' => false,
         'error' => 'DEVICE_BLOCKED',
-        'message' => 'Forbidden: This POS device has been blocked by the Owner.'
+        'device_status' => $device['status'],
+        'message' => $isInactive
+            ? 'Forbidden: This POS device has been deactivated or deleted in the Back Office.'
+            : 'Forbidden: This POS device has been blocked by the Owner.'
     ]);
     exit;
 }

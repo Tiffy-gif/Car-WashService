@@ -70,6 +70,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($csrfError)) {
             $id = (int)($_POST['device_id'] ?? 0);
             $newStatus = ($_POST['new_status'] === 'blocked') ? 'blocked' : 'active';
             $pdo->prepare("UPDATE pos_devices SET status = ? WHERE id = ?")->execute([$newStatus, $id]);
+            if ($newStatus === 'blocked') {
+                try {
+                    $pdo->prepare("DELETE FROM pos_sessions WHERE device_id = ?")->execute([$id]);
+                } catch (Throwable $t) {}
+            }
             $message = "Device status updated to: " . strtoupper($newStatus);
             if (class_exists('AuditLogger')) {
                 AuditLogger::log('DEVICE_STATUS_CHANGE', "Updated device #{$id} status to {$newStatus}", 'device', (string)$id);
@@ -87,6 +92,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($csrfError)) {
             $newKey = 'pos_sec_' . bin2hex(random_bytes(16));
             $newKeyHash = hash('sha256', $newKey);
             $pdo->prepare("UPDATE pos_devices SET api_key = '', api_key_hash = ? WHERE id = ?")->execute([$newKeyHash, $id]);
+            try {
+                $pdo->prepare("DELETE FROM pos_sessions WHERE device_id = ?")->execute([$id]);
+            } catch (Throwable $t) {}
             $dStmt = $pdo->prepare("SELECT device_name FROM pos_devices WHERE id = ?");
             $dStmt->execute([$id]);
             $devName = $dStmt->fetchColumn();
@@ -110,6 +118,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($csrfError)) {
             $dStmt->execute([$id]);
             $devName = $dStmt->fetchColumn();
             $pdo->prepare("UPDATE pos_devices SET status = 'inactive' WHERE id = ?")->execute([$id]);
+            try {
+                $pdo->prepare("DELETE FROM pos_sessions WHERE device_id = ?")->execute([$id]);
+            } catch (Throwable $t) {}
             $message = "Device '{$devName}' marked inactive (safe soft delete).";
             if (class_exists('AuditLogger')) {
                 AuditLogger::log('DEVICE_DEACTIVATED', "Deactivated POS device '{$devName}'", 'device', (string)$id);

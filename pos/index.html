@@ -26,11 +26,22 @@
         <div class="brand-area" id="brandArea">
             <div class="brand-logo-icon">
                 <img id="brandLogoImg" src="" alt="Shop Logo" style="display: none; max-width: 100%; max-height: 100%; object-fit: contain;">
-                <i class="fa-solid fa-car-side" id="brandDefaultIcon" style="color: #2563eb; font-size: 20px;"></i>
+                <i class="fa-solid fa-car-side" id="brandDefaultIcon" style="color: #ff762d; font-size: 20px;"></i>
             </div>
             <div class="brand-title">
-                <h1 id="brandShopNamePrimary">My Car Wash</h1>
+                <h1 id="brandShopNamePrimary"><span class="gotpos-brand-orange">G</span>OTPOS <span class="gotpos-brand-sub">Car Wash</span></h1>
                 <span id="brandShopNameSecondary" style="display: none;"></span>
+            </div>
+            <!-- GOTPOS Top Date & Time Pills -->
+            <div class="gotpos-top-pills">
+                <div class="gotpos-pill-box">
+                    <i class="fa-regular fa-calendar"></i>
+                    <span id="gotposLiveDate">Sat, 14 Nov 2026</span>
+                </div>
+                <div class="gotpos-pill-box">
+                    <i class="fa-regular fa-clock"></i>
+                    <span id="gotposLiveTime">09:59 AM</span>
+                </div>
             </div>
         </div>
 
@@ -83,22 +94,27 @@
 
         <!-- Right: Status, Last Updated, Language, Dark Mode, Backoffice, User, Settings, Logout -->
         <div class="header-actions">
-            <!-- Network Status Pill (Preserved for compatibility, hidden in favor of single unified sync wrapper) -->
+            <!-- Dashboard Button -->
+            <button type="button" class="btn-gotpos-dash" onclick="PosApp.switchView('queue')" title="Dashboard">
+                <i class="fa-solid fa-chart-pie"></i>
+                <span data-i18n="dashboard">Dashboard</span>
+            </button>
+            <!-- Network Status Pill (Preserved for compatibility) -->
             <div class="status-pill online" id="networkPill" title="Network Status" style="display: none;">
                 <span class="dot"></span>
                 <span id="networkText" data-i18n="online">អនឡាញ</span>
             </div>
 
-            <!-- Last Updated / Sync Info with Green Status Dot and Refresh Button -->
-            <div class="catalog-sync-wrapper" id="catalogSyncWrap" title="Clock & Network Status">
-                <i class="fa-solid fa-clock" style="color: #64748b; font-size: 13.5px; margin-right: 4px;"></i>
+            <!-- Online Sync Status Dot (Clean status dot, duplicate clock removed) -->
+            <div class="catalog-sync-wrapper" id="catalogSyncWrap" title="Network Status" style="padding: 0 10px; height: 31px; display: inline-flex; align-items: center; gap: 6px;">
                 <button type="button" class="btn-sync-refresh" id="btnManualSyncCatalog" title="Update services & prices now" style="display: none;">
                     <i class="fa-solid fa-arrows-rotate" id="syncCatalogIcon"></i>
                 </button>
-                <div class="catalog-sync-indicator" id="catalogSyncIndicator">
+                <div class="catalog-sync-indicator" id="catalogSyncIndicator" style="display: none;">
                     <span id="catalogLastUpdatedText"><span class="sync-time">--:--:--</span></span>
                 </div>
-                <span class="sync-dot" id="catalogSyncDot" title="Network Status"></span>
+                <span class="sync-dot" id="catalogSyncDot" title="Network Online"></span>
+                <span style="font-size: 11px; font-weight: 700; color: #10b981;">Online</span>
             </div>
 
             <!-- Offline Pending Orders Badge -->
@@ -120,12 +136,47 @@
             <!-- Hidden compatibility button for btnLangToggle -->
             <button class="btn btn-outline btn-sm" id="btnLangToggle" style="display: none;" title="Change Language">EN</button>
 
-            <!-- User Pill (2-line: name on line 1, role on line 2 in active language only) - Always Visible -->
-            <div class="user-pill" id="userPill">
-                <i class="fa-solid fa-circle-user"></i>
-                <div class="user-info" id="userName">
-                    <span class="user-fullname" id="userFullName">visual</span>
-                    <span class="user-role-badge" id="userRoleBadge">Cashier <i class="fa-solid fa-chevron-down" style="font-size: 8px; margin-left: 1px;"></i></span>
+            <!-- User Pill with Dropdown Menu (Option A) -->
+            <div class="user-menu-container" id="userMenuContainer" style="position: relative; display: inline-block;">
+                <div class="user-pill" id="userPill" role="button" tabindex="0" title="User Menu" style="cursor: pointer; user-select: none;">
+                    <i class="fa-solid fa-circle-user"></i>
+                    <div class="user-info" id="userName">
+                        <span class="user-fullname" id="userFullName">visal</span>
+                        <span class="user-role-badge" id="userRoleBadge">Cashier <i class="fa-solid fa-chevron-down" style="font-size: 8px; margin-left: 2px;"></i></span>
+                    </div>
+                </div>
+
+                <div class="header-menu-dropdown user-dropdown-menu" id="userMenuDropdown" style="display: none;">
+                    <!-- User Header Details -->
+                    <div style="padding: 0.65rem 1rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.65rem;">
+                        <div style="width: 34px; height: 34px; border-radius: 50%; background: rgba(255, 118, 45, 0.15); color: #ff762d; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0;">
+                            <i class="fa-solid fa-user"></i>
+                        </div>
+                        <div style="overflow: hidden; line-height: 1.25;">
+                            <div id="dropdownUserFullName" style="font-weight: 750; font-size: 0.88rem; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">visal</div>
+                            <div id="dropdownUserRole" style="font-size: 0.74rem; color: var(--text-muted); text-transform: capitalize;">Cashier</div>
+                        </div>
+                    </div>
+
+                    <button type="button" class="header-menu-item" id="userMenuEndShift" style="display: none;">
+                        <i class="fa-solid fa-handshake" style="color: #f59e0b;"></i>
+                        <span data-i18n="endShiftMenu">បញ្ចប់វេន (End Shift)</span>
+                    </button>
+                    <button type="button" class="header-menu-item" id="userMenuSpotAudit" style="display: none;">
+                        <i class="fa-solid fa-calculator" style="color: #0284c7;"></i>
+                        <span data-i18n="spotAuditMenu">ត្រួតពិនិត្យសាច់ប្រាក់ (Spot Audit)</span>
+                    </button>
+                    <button type="button" class="header-menu-item" id="userMenuSettings">
+                        <i class="fa-solid fa-gear" style="color: #64748b;"></i>
+                        <span data-i18n="settings">ការកំណត់ (Settings)</span>
+                    </button>
+                    
+                    <div class="menu-divider" style="height: 1px; background: var(--border); margin: 0.35rem 0;"></div>
+                    
+                    <button type="button" class="header-menu-item menu-item-danger" id="userMenuLogout" style="color: #dc2626; font-weight: 700;">
+                        <i class="fa-solid fa-right-from-bracket" style="color: #dc2626;"></i>
+                        <span data-i18n="logout">ចាកចេញ (Logout)</span>
+                    </button>
                 </div>
             </div>
 
@@ -169,6 +220,11 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Settings Button in POS Header -->
+            <button type="button" class="btn btn-icon btn-topbar-tool" id="btnHeaderSettings" title="POS Settings & Device Key" data-i18n-title="settings">
+                <i class="fa-solid fa-gear"></i>
+            </button>
 
             <!-- Fullscreen Button in POS Header -->
             <button type="button" class="btn btn-icon btn-topbar-tool" id="btnToggleFullscreen" title="Toggle Fullscreen" data-i18n-title="toggleFullscreen">
@@ -274,6 +330,15 @@
                 <span id="posDayLockText" data-i18n="dayLockNotice">Sales are locked. Day has been closed or cutoff has passed. New sales are blocked.</span>
             </div>
 
+            <!-- Terminal Authorization Lockout Banner -->
+            <div id="posDeviceLockedBanner" class="pos-day-lock-banner" style="display: none; background: #dc2626; color: #ffffff; border-bottom: 2px solid #b91c1c; display: none; align-items: center; justify-content: center; gap: 0.75rem;">
+                <i class="fa-solid fa-shield-halved" style="font-size: 1.15rem;"></i>
+                <span id="posDeviceLockedBannerText" data-i18n="terminalUnauthorizedDesc" style="font-weight: 700;">Terminal Not Authorized: Device key was revoked or deleted in Back Office. Sales are locked.</span>
+                <button type="button" class="btn btn-sm" id="btnBannerOpenSettings" style="background: #ffffff; color: #dc2626; font-weight: 800; border: none; padding: 0.25rem 0.85rem; border-radius: 6px; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+                    <i class="fa-solid fa-gear mr-1"></i> <span data-i18n="configureDeviceKey">Configure Key</span>
+                </button>
+            </div>
+
             <!-- Bay Status Strip (Requirement 1: Live summary of bays and queue) -->
             <div class="pos-bay-status-strip" id="posBayStatusStrip">
                 <div class="bay-strip-queue-summary" id="stripQueueSummary">
@@ -287,6 +352,13 @@
             </div>
 
             <div class="pos-workspace">
+
+                <!-- Left: Full Height Category Sidebar Rail (Starts at top) -->
+                <aside class="category-vertical-sidebar" id="categorySidebar">
+                    <div class="category-list-scroll" id="categoryListWrap">
+                        <!-- Category buttons dynamically rendered from Back Office sync_catalog -->
+                    </div>
+                </aside>
 
                 <!-- Left/Center: Catalog & Controls -->
                 <div class="pos-catalog-column">
@@ -349,22 +421,6 @@
                             <span id="intakeValidationText">សូមបញ្ចូលស្លាកលេខយានយន្តមុនពេលគិតលុយ (Vehicle license plate number is required before checkout)</span>
                         </div>
 
-                        <!-- Saved Customers Dropdown Panel -->
-                        <div class="saved-customers-panel" id="panelSavedCustomers" style="display: none;">
-                            <div class="saved-cust-list-wrap" id="savedCustListWrap">
-                                <div id="savedCustLoading" style="display: none;" class="saved-cust-state-msg">
-                                    <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> <span data-i18n="loadingCustomers">Loading...</span>
-                                </div>
-                                <div id="savedCustNoMatch" style="display: none;" class="saved-cust-state-msg" data-i18n="noSavedCustomers">
-                                    No saved customers found
-                                </div>
-                                <div class="saved-cust-items" id="savedCustItems"></div>
-                                <div class="saved-cust-load-more" id="savedCustLoadMore" style="display: none;">
-                                    <i class="fa-solid fa-spinner fa-spin mr-1"></i> <span data-i18n="loadingMore">Loading more...</span>
-                                </div>
-                            </div>
-                        </div>
-
                         <!-- Backward compatibility hidden wrapper for selectedCustBadgeWrap -->
                         <div id="selectedCustBadgeWrap" style="display: none;">
                             <span class="plate" id="badgePlate"></span>
@@ -374,27 +430,37 @@
                     </div>
 
                     <!-- Vehicle Type Switcher (Row spanning same width) -->
-                    <div class="vehicle-type-switcher">
-                        <button type="button" class="vehicle-btn" data-vtype="motorbike">
-                            <i class="fa-solid fa-motorcycle"></i>
-                            <span class="v-title-km">ម៉ូតូ</span>
-                            <span class="v-title-en">Motorbike</span>
-                        </button>
-                        <button type="button" class="vehicle-btn active" data-vtype="small_car">
-                            <i class="fa-solid fa-car-side"></i>
-                            <span class="v-title-km">ឡានតូច</span>
-                            <span class="v-title-en">Small Car</span>
-                        </button>
-                        <button type="button" class="vehicle-btn" data-vtype="suv_pickup">
-                            <i class="fa-solid fa-truck-pickup"></i>
-                            <span class="v-title-km">ឡានធំ / SUV</span>
-                            <span class="v-title-en">SUV / Pickup</span>
-                        </button>
-                        <button type="button" class="vehicle-btn" data-vtype="van_truck">
-                            <i class="fa-solid fa-van-shuttle"></i>
-                            <span class="v-title-km">ឡានដឹក / វ៉ាន់</span>
-                            <span class="v-title-en">Van / Truck</span>
-                        </button>
+                    <!-- GOTPOS Catalog Toolbar: Filter + Vehicle Pills + Real-Time Search -->
+                    <div class="gotpos-catalog-toolbar">
+                        <div class="gotpos-toolbar-left">
+                            <div class="vehicle-type-switcher gotpos-vehicle-switcher">
+                                <button type="button" class="vehicle-btn" data-vtype="motorbike" title="Motorbike">
+                                    <i class="fa-solid fa-motorcycle"></i>
+                                    <span class="v-title-km">ម៉ូតូ</span>
+                                    <span class="v-title-en">Motorbike</span>
+                                </button>
+                                <button type="button" class="vehicle-btn active" data-vtype="small_car" title="Small Car">
+                                    <i class="fa-solid fa-car-side"></i>
+                                    <span class="v-title-km">ឡានតូច</span>
+                                    <span class="v-title-en">Small Car</span>
+                                </button>
+                                <button type="button" class="vehicle-btn" data-vtype="suv_pickup" title="SUV / Pickup">
+                                    <i class="fa-solid fa-truck-pickup"></i>
+                                    <span class="v-title-km">ឡានធំ / SUV</span>
+                                    <span class="v-title-en">SUV / Pickup</span>
+                                </button>
+                                <button type="button" class="vehicle-btn" data-vtype="van_truck" title="Van / Truck">
+                                    <i class="fa-solid fa-van-shuttle"></i>
+                                    <span class="v-title-km">ឡានដឹក / វ៉ាន់</span>
+                                    <span class="v-title-en">Van / Truck</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="gotpos-search-wrapper">
+                            <i class="fa-solid fa-magnifying-glass gotpos-search-icon"></i>
+                            <input type="text" id="posGlobalSearchInput" class="gotpos-search-input" placeholder="Search product..." autocomplete="off">
+                            <button type="button" class="gotpos-barcode-btn" title="Barcode Scan"><i class="fa-solid fa-barcode"></i></button>
+                        </div>
                     </div>
 
                     <!-- Two Columns Below Vehicle Row (Item Products Grid on Left, Category Column on Right) -->
@@ -423,13 +489,6 @@
                             </div>
                         </div>
 
-                        <!-- Vertical Category Column (Right of grid, next to cart) -->
-                        <aside class="category-vertical-sidebar" id="categorySidebar">
-                            <!-- Scrollable category list container (uses full height down to the bottom) -->
-                            <div class="category-list-scroll" id="categoryListWrap">
-                                <!-- Category buttons dynamically rendered from Back Office sync_catalog -->
-                            </div>
-                        </aside>
                     </div>
 
                     <!-- Bottom Dock Bar (Quick Service, Hold Order, Help Hint) -->
@@ -451,7 +510,7 @@
                     </div>
 
                     <!-- Hidden backward-compatibility elements -->
-                    <input type="hidden" id="posGlobalSearchInput">
+                    
                     <div style="display: none;" id="topbarCustomerWrap">
                         <button id="btnCustomerDropdown"></button>
                         <div id="topbarCustomerPopover"></div>
@@ -461,19 +520,57 @@
 
                 <!-- Right Column: Cart & Order Summary (Requirement 5) -->
                 <div class="pos-cart-column" id="posCartColumn">
-                    <!-- Cart Header: Title on Left, Clear Cart text button on Right -->
-                    <div class="cart-header">
+                    <!-- GOTPOS Order ID Header -->
+                    <div class="gotpos-order-header">
+                        <h6 class="gotpos-order-id">Order ID: <strong id="gotposOrderIdDisplay">#GOT1698</strong></h6>
+                        <div class="gotpos-header-actions">
+                            <button type="button" class="btn-gotpos-icon" id="btnGotposMore" title="More Options"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+                            <button type="button" class="btn-gotpos-icon" id="btnGotposFullscreen" title="Fullscreen" onclick="PosApp.toggleFullscreen()"><i class="fa-solid fa-expand"></i></button>
+                            <button type="button" class="btn-gotpos-icon btn-clear-cart-text text-danger" id="btnClearCart" title="Clear Cart"><i class="fa-regular fa-trash-can"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- Hidden compatibility cart-header -->
+                    <div class="cart-header" style="display: none;">
                         <div class="cart-header-title">
                             <span data-i18n="cartTitle">Cart</span>
                             <span class="cart-items-count" id="cartCountBadge" style="display: none;">0</span>
                         </div>
-                        <button type="button" class="btn-clear-cart-text" id="btnClearCart" title="Clear Cart">
-                            <i class="fa-regular fa-trash-can"></i>
-                            <span data-i18n="clearBtn">Clear Cart</span>
-                        </button>
                     </div>
 
-                    <!-- Workflow Stage Badge (Task 2: Distinguish Wash, Mechanical, and Mixed Orders) -->
+                    <!-- GOTPOS Customer Profile Card -->
+                    <div class="gotpos-customer-card" id="gotposCustomerCard" style="cursor: pointer;" title="Click to select or change customer">
+                        <div class="gotpos-cust-avatar" id="gotposCustAvatar">
+                            <i class="fa-solid fa-user"></i>
+                        </div>
+                        <div class="gotpos-cust-details">
+                            <h6 class="gotpos-cust-name" id="gotposCustNameDisplay">Walk-in Guest</h6>
+                            <p class="gotpos-cust-tier" id="gotposCustTierDisplay">Standard Guest • Tap to select</p>
+                        </div>
+                        <div class="gotpos-cust-card-actions">
+                            <button type="button" class="btn-gotpos-cust-edit" id="btnGotposEditCustomer" title="Select / Change Customer">
+                                <i class="fa-solid fa-user-pen"></i>
+                            </button>
+                            <button type="button" class="btn-gotpos-cust-reset" id="btnGotposResetCustomer" title="Reset to Walk-in Guest" style="display: none;">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Order Detail Header -->
+                    <div class="gotpos-order-detail-header">
+                        <h6 class="gotpos-detail-title">Order Detail (<span data-i18n="items">Items</span>: <span id="gotposItemCount">0</span>)</h6>
+                        <button type="button" class="btn-gotpos-clear-all" id="btnGotposClearAll" onclick="PosApp.clearCart()">Clear All</button>
+                    </div>
+
+                    <!-- GOTPOS Table Column Headers -->
+                    <div class="gotpos-cart-col-headers">
+                        <span class="col-head-product">Product</span>
+                        <span class="col-head-qty">QTY</span>
+                        <span class="col-head-subtotal">Subtotal</span>
+                    </div>
+
+                    <!-- Workflow Stage Badge (Task 2) -->
                     <div id="cartOrderWorkflowBadge" class="cart-order-workflow-badge" style="display: none;"></div>
 
                     <!-- Vehicle Recognition Profile (Requirement 4) -->
@@ -493,11 +590,7 @@
                                 <i class="fa-solid fa-oil-can"></i> <span id="profOilText">No record</span>
                             </div>
                         </div>
-                        <div class="profile-flags-list" id="profFlagsList">
-                            <!-- Populated with flags, e.g. VIP - use premium products -->
-                        </div>
-
-                        <!-- Member Panel (Requirement 1: tier, visits this month, included vs used up) -->
+                        <div class="profile-flags-list" id="profFlagsList"></div>
                         <div class="member-panel-box" id="profMemberPanel" style="display: none;">
                             <div class="member-panel-header">
                                 <span class="member-panel-title"><i class="fa-solid fa-crown text-amber"></i> <span data-i18n="memberTier">Member Tier</span>: <strong id="memberTierName">Gold</strong></span>
@@ -505,14 +598,12 @@
                             </div>
                             <div class="member-benefits-section" id="profBenefitsSection">
                                 <div class="member-benefits-label"><i class="fa-solid fa-gift"></i> <span data-i18n="includedBenefits">Included Services</span>:</div>
-                                <div class="member-benefits-chips" id="profBenefitsChips">
-                                    <!-- Populated with benefits: e.g. 1x Exterior Wash (Included) or (Used up) -->
-                                </div>
+                                <div class="member-benefits-chips" id="profBenefitsChips"></div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Loyalty Reward Prompt Banner (Requirement 3: when a reward is earned) -->
+                    <!-- Loyalty Reward Prompt Banner -->
                     <div class="loyalty-reward-prompt-banner" id="cartLoyaltyRewardBanner" style="display: none;">
                         <div class="reward-prompt-left">
                             <div class="reward-prompt-icon"><i class="fa-solid fa-gift"></i></div>
@@ -555,13 +646,10 @@
                                 <i class="fa-solid fa-chevron-down accordion-caret"></i>
                             </summary>
                             <div class="cart-accordion-content">
-                                <!-- Hidden legacy crew selectors for backward compatibility -->
                                 <div style="display: none;">
                                     <select id="cartWasherSelect"><option value="">-- None --</option></select>
                                     <select id="cartMechanicSelect"><option value="">-- None --</option></select>
                                 </div>
-
-                                <!-- Current Vehicle Mileage & Next Oil Change Reminder -->
                                 <div class="cart-mileage-wrap">
                                     <div style="display: flex; align-items: center; gap: 0.5rem;">
                                         <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); white-space: nowrap;">
@@ -569,7 +657,6 @@
                                         </span>
                                         <input type="number" id="cartMileageInput" class="form-control" placeholder="e.g. 85000">
                                     </div>
-                                    <!-- Dynamic Next Oil Change Reminder Box -->
                                     <div id="cartOilReminderBox" style="display: none; margin-top: 0.35rem; padding: 0.5rem 0.6rem; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; font-size: 0.8rem; color: #065f46;">
                                         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
                                             <span style="font-weight: 700;"><i class="fa-solid fa-oil-can" style="color: #059669; margin-right: 4px;"></i><span data-i18n="nextOilReminder">រំលឹកប្តូរប្រេងលើកក្រោយ:</span></span>
@@ -587,8 +674,6 @@
                                         </div>
                                     </div>
                                 </div>
-
-                                <!-- Repair Notes -->
                                 <div style="margin-top: 0.4rem;">
                                     <input type="text" id="cartRepairNotesInput" class="form-control"
                                         placeholder="ចំណាំការជួសជុល..." data-i18n="repairNotesPlaceholder">
@@ -596,7 +681,7 @@
                             </div>
                         </details>
 
-                        <!-- Cart Estimated Wait Time (Requirement 1 & 2) -->
+                        <!-- Cart Estimated Wait Time -->
                         <div class="cart-wait-time-row" id="cartWaitTimeRow" style="display: none;">
                             <span class="wait-time-title">
                                 <i class="fa-regular fa-clock"></i> <span data-i18n="estWaitTime">Estimated Wait:</span>
@@ -604,75 +689,112 @@
                             <span class="cart-wait-badge" id="cartWaitTimeBadge">Wait about 25 min</span>
                         </div>
 
-                        <!-- Subtotal Line -->
-                        <div class="summary-line">
-                            <span data-i18n="subtotal">Sub Total</span>
-                            <span style="font-weight: 700; color: var(--text-main);" id="cartSubtotalText">$0.00</span>
+                        <!-- GOTPOS Discount Box -->
+                        <div class="gotpos-discount-box" id="gotposDiscountBox">
+                            <div class="gotpos-discount-info">
+                                <i class="fa-solid fa-tag gotpos-disc-icon"></i>
+                                <span class="gotpos-disc-label" id="gotposDiscountLabel">Discount 10%</span>
+                            </div>
+                            <button type="button" class="btn-gotpos-apply-disc" id="btnGotposApplyDiscount" onclick="PosApp.openDiscountModal()">Apply</button>
                         </div>
 
-                        <!-- Applied Discount Line (Between Subtotal and Grand Total) -->
-                        <div class="summary-line discount-applied-line" id="discountSummaryRow" style="display: none;">
-                            <div class="discount-applied-label">
-                                <i class="fa-solid fa-tag"></i>
+                        <!-- GOTPOS Financial Summary Breakdown -->
+                        <div class="gotpos-financial-summary">
+                            <div class="gotpos-summary-row">
+                                <span data-i18n="subtotal">Sub Total</span>
+                                <span id="cartSubtotalText">$0.00</span>
+                            </div>
+                            <div class="gotpos-summary-row discount-row" id="discountSummaryRow" style="display: none;">
                                 <span id="cartDiscountLabel">Discount</span>
-                                <button type="button" class="btn-remove-discount-x" id="btnRemoveCartDiscount" title="Remove discount">
-                                    <i class="fa-solid fa-xmark"></i>
+                                <span class="text-danger" id="cartDiscountText">-$0.00</span>
+                            </div>
+                            <div class="gotpos-summary-row">
+                                <span>GST (18%)</span>
+                                <span id="gotposGstText">$0.00</span>
+                            </div>
+                            <div class="gotpos-summary-row">
+                                <span>Service Charge</span>
+                                <span id="gotposServiceChargeText">$0.00</span>
+                            </div>
+                            <div class="gotpos-summary-total">
+                                <span data-i18n="totalPayable">Total Payable</span>
+                                <div class="total-amount-box text-end">
+                                    <span class="gotpos-total-amount" id="cartTotalUsd">$0.00</span>
+                                    <span class="gotpos-total-khr" id="cartTotalKhr" style="display: none;">0 ៛</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- GOTPOS Select Payment Method -->
+                        <div class="gotpos-select-method-wrap">
+                            <h6 class="gotpos-method-heading">Select Method</h6>
+                            <div class="gotpos-methods-grid">
+                                <button type="button" class="btn-gotpos-method active" data-method="cash" onclick="PosApp.openPaymentWithMethod('cash')">
+                                    <i class="fa-solid fa-coins"></i> Cash
+                                </button>
+                                <button type="button" class="btn-gotpos-method" data-method="card" onclick="PosApp.openPaymentWithMethod('card')">
+                                    <i class="fa-solid fa-credit-card"></i> Card
+                                </button>
+                                <button type="button" class="btn-gotpos-method" data-method="khqr" onclick="PosApp.openPaymentWithMethod('khqr')">
+                                    <i class="fa-solid fa-qrcode"></i> UPI / Scan
+                                </button>
+                                <button type="button" class="btn-gotpos-method" data-method="bank" onclick="PosApp.openPaymentWithMethod('bank')">
+                                    <i class="fa-solid fa-building-columns"></i> Bank Transfer
+                                </button>
+                                <button type="button" class="btn-gotpos-method" data-method="split" onclick="PosApp.openPaymentWithMethod('split')">
+                                    <i class="fa-solid fa-layer-group"></i> Split Payment
                                 </button>
                             </div>
-                            <span class="discount-applied-amount" id="cartDiscountText">-$0.00</span>
                         </div>
 
-                        <!-- Grand Total Line -->
-                        <div class="summary-line total-line cart-grand-total-card">
-                            <div class="total-meta-info">
-                                <span class="total-title" data-i18n="totalPayable">Grand Total</span>
-                                <span class="total-subtitle" data-i18n="payableAmountNote">Total due for current order</span>
-                            </div>
-                            <div class="total-amount-box">
-                                <div class="total-usd" id="cartTotalUsd">$0.00</div>
-                                <div class="total-khr" id="cartTotalKhr">0 ៛</div>
-                            </div>
-                        </div>
-
-                        <!-- Primary Collect Payment Button (Above Action Pills as shown in picture) -->
+                        <!-- Primary Process to Payment Button -->
                         <div class="cart-checkout-action-wrap primary-wrap">
-                            <button type="button" class="btn-checkout-primary is-disabled" id="btnOpenCheckout" disabled>
+                            <button type="button" class="btn-checkout-primary btn-gotpos-process-payment is-disabled" id="btnOpenCheckout" disabled>
                                 <span class="btn-checkout-content">
-                                    <i class="fa-solid fa-credit-card checkout-btn-icon"></i>
-                                    <span class="checkout-btn-text" data-i18n="collectPayment">Collect Payment</span>
+                                    <span class="checkout-btn-text" data-i18n="processToPayment">Process to Payment</span>
                                     <span class="btn-checkout-amount" id="checkoutBtnAmount" style="display: none;">$0.00</span>
                                 </span>
                             </button>
                         </div>
 
-                        <!-- Row of Action Buttons (Clear Cart, Saved Bills, Discount) -->
-                        <div class="cart-action-pills-row">
-                            <button type="button" class="btn-cart-pill pill-clear" id="btnCartPillClear" disabled title="Clear Cart">
-                                <i class="fa-regular fa-trash-can"></i>
-                                <span data-i18n="clearBtn">Clear Cart</span>
-                            </button>
-                            <button type="button" class="btn-cart-pill pill-saved" id="btnCartPillQueue" title="Job Queue / Saved Bills">
-                                <i class="fa-solid fa-list-check"></i>
-                                <span data-i18n="savedBills">Saved Bills</span>
-                            </button>
-                            <button type="button" class="btn-cart-pill pill-discount" id="btnCartPillDiscount" disabled title="Discount">
-                                <i class="fa-solid fa-tag"></i>
-                                <span data-i18n="discount">Discount</span>
-                                <span class="cart-discount-badge" id="cartDiscountBadge" style="display: none;"></span>
-                            </button>
+                        <!-- Compatibility hidden Action Pills -->
+                        <div class="cart-action-pills-row" style="display: none;">
+                            <button type="button" class="btn-cart-pill pill-clear" id="btnCartPillClear" disabled></button>
+                            <button type="button" class="btn-cart-pill pill-saved" id="btnCartPillQueue"></button>
+                            <button type="button" class="btn-cart-pill pill-discount" id="btnCartPillDiscount" disabled></button>
+                            <span class="cart-discount-badge" id="cartDiscountBadge" style="display: none;"></span>
                         </div>
 
-                        <!-- Secondary Collect Payment Button & Helper Text (Below Action Pills) -->
-                        <div class="cart-checkout-action-wrap secondary-wrap">
-                            <button type="button" class="btn-checkout-secondary" id="btnOpenCheckoutSecondary" disabled>
-                                <i class="fa-solid fa-credit-card"></i>
-                                <span data-i18n="collectPayment">Collect Payment</span>
-                            </button>
+                        <div class="cart-checkout-action-wrap secondary-wrap" style="display: none;">
+                            <button type="button" class="btn-checkout-secondary" id="btnOpenCheckoutSecondary" disabled></button>
                             <div class="checkout-helper-text" id="checkoutHelperText">
-                                <i class="fa-solid fa-circle-info"></i>
                                 <span data-i18n="cartEmptyCheckoutHelp">Add services or products to collect payment</span>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- GOTPOS Bottom Pastel Features Bar -->
+                    <div class="gotpos-advance-features">
+                        <button type="button" class="btn-pastel-feature" id="btnPastelPayment" onclick="PosApp.openPaymentModal()" title="Payment">
+                            <span class="pastel-circle bg-purple-subtle text-purple"><i class="fa-solid fa-coins"></i></span>
+                            <span class="pastel-label">Payment</span>
+                        </button>
+                        <button type="button" class="btn-pastel-feature" id="btnPastelHold" onclick="document.getElementById('btnHoldOrder')?.click()" title="Hold Order">
+                            <span class="pastel-circle bg-success-subtle text-success"><i class="fa-solid fa-pause"></i></span>
+                            <span class="pastel-label">Hold</span>
+                        </button>
+                        <button type="button" class="btn-pastel-feature" id="btnPastelInvoice" onclick="PosApp.switchView('orders')" title="Invoice">
+                            <span class="pastel-circle bg-pink-subtle text-pink"><i class="fa-solid fa-file-invoice"></i></span>
+                            <span class="pastel-label">Invoice</span>
+                        </button>
+                        <button type="button" class="btn-pastel-feature" id="btnPastelPayLater" onclick="document.getElementById('btnCartPillQueue')?.click()" title="Pay Later">
+                            <span class="pastel-circle bg-secondary-subtle text-secondary"><i class="fa-regular fa-clock"></i></span>
+                            <span class="pastel-label">Pay Later</span>
+                        </button>
+                        <button type="button" class="btn-pastel-feature" id="btnPastelHistory" onclick="PosApp.switchView('orders')" title="History">
+                            <span class="pastel-circle bg-danger-subtle text-danger"><i class="fa-solid fa-clock-rotate-left"></i></span>
+                            <span class="pastel-label">History</span>
+                        </button>
                     </div>
 
                 </div>
@@ -1479,6 +1601,86 @@
          MODALS
          ============================================================ -->
 
+    <!-- Modal: Select Saved Customer (GOTPOS Modern UI) -->
+    <div class="modal-backdrop" id="modalSelectCustomer">
+        <div class="modal-content modal-customer-select-content">
+            <div class="modal-header">
+                <div class="modal-title-with-icon" style="display: flex; align-items: center; gap: 0.65rem;">
+                    <i class="fa-solid fa-users text-primary" style="font-size: 1.25rem; color: #ff5b1a;"></i>
+                    <h3 style="margin: 0; font-size: 1.2rem; font-weight: 700;" data-i18n="savedCustomersTitle">Select Customer</h3>
+                </div>
+                <button type="button" class="btn btn-outline btn-sm btn-icon" id="btnCloseSelectCustModal">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body p-0">
+                <!-- Search & Quick Action Header -->
+                <div class="select-cust-top-bar">
+                    <div class="select-cust-search-wrap">
+                        <i class="fa-solid fa-magnifying-glass select-cust-search-icon"></i>
+                        <input type="text" id="selectCustSearchInput" class="select-cust-search-input"
+                            placeholder="Search name, phone, or license plate..." autocomplete="off">
+                        <button type="button" id="btnClearCustSearch" class="btn-clear-search" style="display: none;">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    <div class="select-cust-actions-row">
+                        <button type="button" class="btn btn-outline btn-walkin-quick" id="btnQuickWalkIn">
+                            <i class="fa-solid fa-person-walking"></i>
+                            <span data-i18n="walkInGuest">Walk-in</span>
+                        </button>
+                        <button type="button" class="btn btn-primary btn-add-cust-quick" id="btnQuickAddCustomer">
+                            <i class="fa-solid fa-user-plus"></i>
+                            <span data-i18n="addCustomer">+ New</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filter Tabs -->
+                <div class="select-cust-tabs-row">
+                    <button type="button" class="cust-tab-btn active" data-cust-tab="all">
+                        <span>All</span> <span class="cust-tab-count" id="countCustAll">0</span>
+                    </button>
+                    <button type="button" class="cust-tab-btn" data-cust-tab="vip">
+                        <i class="fa-solid fa-crown text-amber"></i> <span>VIP / Gold</span> <span class="cust-tab-count" id="countCustVip">0</span>
+                    </button>
+                    <button type="button" class="cust-tab-btn" data-cust-tab="silver">
+                        <i class="fa-solid fa-medal text-slate"></i> <span>Silver</span> <span class="cust-tab-count" id="countCustSilver">0</span>
+                    </button>
+                    <button type="button" class="cust-tab-btn" data-cust-tab="standard">
+                        <i class="fa-solid fa-shield-halved"></i> <span>Standard</span>
+                    </button>
+                    <button type="button" class="cust-tab-btn" data-cust-tab="vehicles">
+                        <i class="fa-solid fa-car"></i> <span>Has Vehicles</span>
+                    </button>
+                </div>
+
+                <!-- Customer Directory List -->
+                <div class="select-cust-list-wrap" id="savedCustListWrap">
+                    <div id="savedCustLoading" style="display: none;" class="saved-cust-state-msg">
+                        <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> <span data-i18n="loadingCustomers">Loading...</span>
+                    </div>
+                    <div id="savedCustNoMatch" style="display: none;" class="saved-cust-state-msg" data-i18n="noSavedCustomers">
+                        <div class="no-match-icon"><i class="fa-solid fa-magnifying-glass"></i></div>
+                        <div class="no-match-text">No saved customer matches your search.</div>
+                        <div class="no-match-actions" id="noMatchQuickActions" style="display: none; margin-top: 0.75rem; gap: 0.5rem; justify-content: center;">
+                            <button type="button" class="btn btn-outline btn-sm" id="btnUseSearchAsPlate">
+                                <i class="fa-solid fa-car"></i> <span id="lblUseAsPlate">Use as Walk-in Plate</span>
+                            </button>
+                            <button type="button" class="btn btn-primary btn-sm" id="btnRegisterFromNoMatch">
+                                <i class="fa-solid fa-user-plus"></i> <span id="lblRegisterNewPlate">+ Register Customer</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="saved-cust-items" id="savedCustItems"></div>
+                    <div class="saved-cust-load-more" id="savedCustLoadMore" style="display: none;">
+                        <i class="fa-solid fa-spinner fa-spin mr-1"></i> <span data-i18n="loadingMore">Loading more...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal 1: Quick Add Customer & Vehicle -->
     <div class="modal-backdrop" id="modalCustomer">
         <div class="modal-content">
@@ -1873,7 +2075,7 @@
 
 
     <!-- Modal 4: POS Connection & Thermal Printer Settings (Requirement 3) -->
-    <div class="modal-backdrop" id="modalSettings">
+    <div class="modal-backdrop" id="modalSettings" style="z-index: 10010;">
         <div class="modal-content" style="max-width: 560px;">
             <div class="modal-header">
                 <h3><i class="fa-solid fa-gear" style="color: var(--primary);"></i> <span
@@ -3358,6 +3560,32 @@
                         <i class="fa-solid fa-check mr-1"></i> <span data-i18n="acceptOffer">Accept</span>
                     </button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Device Locked / Terminal Not Authorized -->
+    <div class="modal-backdrop" id="modalDeviceLocked" style="z-index: 10005;">
+        <div class="modal-content" style="max-width: 490px; text-align: center; padding: 2.25rem 1.75rem; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.45); border: 2px solid #ef4444;">
+            <div style="width: 76px; height: 76px; margin: 0 auto 1.25rem; background: #fee2e2; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #dc2626; font-size: 2.4rem; box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.1);">
+                <i class="fa-solid fa-shield-halved"></i>
+            </div>
+            <h3 id="deviceLockedTitle" style="font-size: 1.35rem; font-weight: 850; margin-bottom: 0.6rem; color: var(--text-main);" data-i18n="terminalUnauthorized">
+                ស្ថានីយមិនទាន់ទទួលបានការអនុញ្ញាត (Terminal Not Authorized)
+            </h3>
+            <p id="deviceLockedDesc" style="font-size: 0.95rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 1.25rem; word-break: break-word;" data-i18n="terminalUnauthorizedDesc">
+                ឧបករណ៍ POS នេះត្រូវបានបិទដំណើរការ ឬលុបចេញពីប្រព័ន្ធ Back Office ដោយម្ចាស់ហាង។ សូមភ្ជាប់ Device Key ត្រឹមត្រូវដើម្បីបន្តការលក់។
+            </p>
+            <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 0.65rem 1rem; margin-bottom: 1.5rem; font-size: 0.85rem; color: #b91c1c; font-weight: 700; font-family: monospace;" id="deviceLockedCode">
+                STATUS: DEVICE_BLOCKED / DEACTIVATED
+            </div>
+            <div style="display: flex; gap: 0.75rem; flex-direction: column;">
+                <button type="button" class="btn btn-primary" id="btnDeviceLockedSettings" style="font-weight: 800; padding: 0.85rem; font-size: 1rem; border-radius: 10px; background: #ea580c; border-color: #ea580c;">
+                    <i class="fa-solid fa-gear mr-1"></i> <span data-i18n="openSettingsBtn">បើកការកំណត់ការតភ្ជាប់ (Open Settings)</span>
+                </button>
+                <button type="button" class="btn btn-outline" id="btnDeviceLockedRetry" style="font-weight: 700; padding: 0.75rem; border-radius: 10px;">
+                    <i class="fa-solid fa-arrows-rotate mr-1" id="iconDeviceLockedRetry"></i> <span data-i18n="retryConnectionBtn">ព្យាយាមភ្ជាប់ឡើងវិញ (Retry Connection)</span>
+                </button>
             </div>
         </div>
     </div>

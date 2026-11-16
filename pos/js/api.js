@@ -71,8 +71,17 @@ class PosApi {
                 err.code = json?.error || 'SERVER_ERROR';
                 err.data = json;
 
-                // On 401 SESSION_INVALID, inform app to handle session expiration cleanly
-                if (response.status === 401 && (json?.error === 'SESSION_INVALID' || json?.error === 'STAFF_REQUIRED')) {
+                // On 403 DEVICE_BLOCKED / UNAPPROVED_DEVICE or 401 DEVICE_KEY_REQUIRED, notify app of terminal authorization lockout
+                if (response.status === 403 && (json?.error === 'DEVICE_BLOCKED' || json?.error === 'UNAPPROVED_DEVICE')) {
+                    if (typeof PosApp !== 'undefined' && typeof PosApp.handleDeviceUnauthorized === 'function') {
+                        PosApp.handleDeviceUnauthorized(json.error, json?.message || errMsg);
+                    }
+                } else if (response.status === 401 && json?.error === 'DEVICE_KEY_REQUIRED') {
+                    if (typeof PosApp !== 'undefined' && typeof PosApp.handleDeviceUnauthorized === 'function') {
+                        PosApp.handleDeviceUnauthorized(json.error, json?.message || errMsg);
+                    }
+                } else if (response.status === 401 && (json?.error === 'SESSION_INVALID' || json?.error === 'STAFF_REQUIRED')) {
+                    // On 401 SESSION_INVALID, inform app to handle session expiration cleanly
                     if (typeof PosApp !== 'undefined' && typeof PosApp.handleSessionInvalid === 'function') {
                         PosApp.handleSessionInvalid(json?.message || errMsg);
                     }
@@ -143,7 +152,13 @@ class PosApi {
                 } else if (response.status === 404) {
                     reason = `Endpoint not found (404) at ${endpoint}. Check the Back Office address.`;
                 }
-                return { success: false, error: reason, status: response.status, data: json };
+                return {
+                    success: false,
+                    error: reason,
+                    status: response.status,
+                    code: json?.error || (response.status === 401 ? 'DEVICE_KEY_REQUIRED' : (response.status === 403 ? 'DEVICE_BLOCKED' : 'HTTP_ERROR')),
+                    data: json
+                };
             }
 
             if (json && json.success) {

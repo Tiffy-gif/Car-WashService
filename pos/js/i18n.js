@@ -35,6 +35,13 @@ const I18N = {
         useNewPrice: 'ប្រើតម្លៃថ្មី',
         keepCurrentPrice: 'រក្សាតម្លៃបច្ចុប្បន្ន',
         permissionDenied: 'មិនមានសិទ្ធិអនុញ្ញាតសម្រាប់សកម្មភាពនេះទេ',
+        terminalUnauthorized: 'ស្ថានីយមិនទាន់ទទួលបានការអនុញ្ញាត',
+        terminalUnauthorizedDesc: 'ឧបករណ៍ POS នេះត្រូវបានបិទដំណើរការ ឬលុបចេញពីប្រព័ន្ធ Back Office ដោយម្ចាស់ហាង។ សូមភ្ជាប់ Device Key ត្រឹមត្រូវដើម្បីបន្តការលក់។',
+        deviceKeyRequiredDesc: 'ស្ថានីយ POS នេះត្រូវការ Device Key ដើម្បីតភ្ជាប់ជាមួយ Back Office។ សូមបញ្ចូល Key នៅក្នុងការកំណត់។',
+        deviceUnapprovedDesc: 'Device Key នេះមិនត្រឹមត្រូវ ឬមិនទាន់បានចុះឈ្មោះក្នុងប្រព័ន្ធ។ សូមចុះឈ្មោះក្នុង Back Office រួចភ្ជាប់ឡើងវិញ។',
+        configureDeviceKey: 'កំណត់ Device Key',
+        openSettingsBtn: 'បើកការកំណត់ការតភ្ជាប់',
+        retryConnectionBtn: 'ព្យាយាមភ្ជាប់ឡើងវិញ',
         connectionSettings: 'ការកំណត់ការតភ្ជាប់ Back Office',
         backofficeUrlLabel: 'អាសយដ្ឋាន Back Office',
         deviceKeyLabel: 'កូនសោឧបករណ៍',
@@ -65,6 +72,10 @@ const I18N = {
         services: 'សេវាកម្មលាង & ប៉ូលា',
         products: 'ផលិតផល & គ្រឿងបន្លាស់',
         cartTitle: 'បញ្ជីគិតលុយ',
+        orderDetail: 'ព័ត៌មានកុម្ម៉ង់',
+        clearAll: 'សម្អាតទាំងអស់',
+        processToPayment: 'បន្តការទូទាត់ (Process to Payment)',
+        payment: 'ទូទាត់ប្រាក់',
         emptyCart: 'មិនទាន់មានទំនិញ ឬសេវាកម្មនៅឡើយទេ',
         cartEmptyTitle: 'កន្ត្រកទទេស្អាត',
         cartEmptySubtitle: 'សូមជ្រើសរើសទំនិញ ឬស្កេនបាកូដ',
@@ -580,6 +591,13 @@ const I18N = {
         useNewPrice: 'Use New Price',
         keepCurrentPrice: 'Keep Current Price',
         permissionDenied: 'You do not have permission for this action',
+        terminalUnauthorized: 'Terminal Not Authorized',
+        terminalUnauthorizedDesc: 'This POS terminal has been deactivated or deleted in the Back Office. Please configure an authorized Device Key to resume operations.',
+        deviceKeyRequiredDesc: 'A valid Device Key is required to communicate with the Back Office. Please configure it in Settings.',
+        deviceUnapprovedDesc: 'This Device Key is invalid or not registered in the Back Office. Please authorize this device in Back Office.',
+        configureDeviceKey: 'Configure Device Key',
+        openSettingsBtn: 'Open Connection Settings',
+        retryConnectionBtn: 'Retry Connection',
         connectionSettings: 'Back Office Connection Settings',
         backofficeUrlLabel: 'Back Office URL',
         deviceKeyLabel: 'Device API Key',
@@ -610,6 +628,10 @@ const I18N = {
         services: 'Wash & Detailing Services',
         products: 'Products & Spare Parts',
         cartTitle: 'Current Order',
+        orderDetail: 'Order Detail',
+        clearAll: 'Clear All',
+        processToPayment: 'Process to Payment',
+        payment: 'Payment',
         emptyCart: 'No items or services selected yet',
         cartEmptyTitle: 'Cart is empty',
         cartEmptySubtitle: 'Scan a barcode or choose an item',
@@ -1154,6 +1176,10 @@ class I18nManager {
         const custNameEl = document.getElementById('topbarCustomerName');
         if (custNameEl && (!window.PosApp || !window.PosApp.currentCustomer)) {
             custNameEl.textContent = this.t('generalCustomer');
+        }
+
+        if (window.PosApp && typeof window.PosApp.updateGotposCustomerCard === 'function') {
+            window.PosApp.updateGotposCustomerCard();
         }
     }
 }

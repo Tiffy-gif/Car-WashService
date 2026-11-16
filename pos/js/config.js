@@ -28,7 +28,7 @@ const POS_CONFIG_DEFAULTS = {
     // 80mm ESC/POS Thermal Printer Settings
     printerDirectEnabled: true,       // Direct silent printing without browser print window
     printerType: 'network',            // 'network', 'usb', or 'agent'
-    printerIp: '192.168.1.200',        // Network printer IP address
+    printerIp: '192.168.1.200',        // Network printer IP address                                                                                                                        
     printerPort: 9100,                 // Standard thermal printer raw port (usually 9100)
     printerAutoCut: true,              // Cut paper automatically after receipt
     printerOpenDrawer: true,           // Open RJ11 cash drawer on cash payments

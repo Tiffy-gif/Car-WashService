@@ -1,0 +1,51 @@
+{
+  "card": {
+    "outerHTML": "<div class=\"card mb-0 pos-product-card\">\n                                            <div class=\"card-body p-4\">\n                                                <div class=\"bg-body-tertiary bg-opacity-75 rounded\">\n                                                    <img src=\"./assets/pr-35-B2Unq0hU.png\" class=\"img-fluid p-4 d-block object-fit-cover\">\n                                                </div>\n                                                <div class=\"mt-3\">\n                                                    <a href=\"#!\" class=\"mb-1 d-block link link-custom fw-medium fs-16 text-truncate\">Women’s Elegant Handbag</a>\n                                                    <p class=\"text-muted small mb-0\">SKU: BG-HBG-011</p>\n                                                    <div class=\"d-flex justify-content-between align-items-end\">\n                                                        <h6 class=\"fs-lg mb-0\">$89.99</h6>\n                                                        <button type=\"button\" class=\"btn btn-primary btn-icon size-9 rounded-circle \"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" data-lucide=\"plus\" class=\"lucide lucide-plus size-4\"><path d=\"M5 12h14\"></path><path d=\"M12 5v14\"></path></svg></button>\n                                                    </div>\n                                                </div>\n                                            </div>\n                                        </div>",
+    "bg": "rgb(255, 255, 255)",
+    "color": "rgb(24, 24, 26)",
+    "border": "1px solid rgb(233, 233, 233)",
+    "borderRadius": "6px",
+    "boxShadow": "none",
+    "padding": "0px",
+    "margin": "0px",
+    "fontSize": "15px",
+    "fontWeight": "400"
+  },
+  "catTabs": {
+    "outerHTML": "<div class=\"nav flex-md-column nav-pills gap-4\" id=\"pos-category-tabs\" role=\"tablist\">\n                        <button class=\"nav-link active text-reset bg-body-secondary h-22 min-w-24 rounded avatar flex-column p-3\" id=\"cat-all-tab\" data-bs-toggle=\"pill\" data-bs-target=\"#cat-all\" type=\"button\" role=\"tab\" aria-controls=\"cat-all\" aria-selected=\"true\">\n                            <img src=\"./assets/img-14-Bq_mg9xG.png\" class=\"img-fluid size-8\">\n                            <span class=\"fw-medium fs-13 mt-2\">All</span>\n                        </button>\n                        <button class=\"nav-link text-reset bg-body-secondary h-22 min-w-24 rounded avatar flex-column p-3\" id=\"cat-clothing-tab\" data-bs-toggle=\"pill\" data-bs-target=\"#cat-clothing\" type=\"button\" role=\"tab\" aria-controls=\"cat-clothing\" aria-selected=\"false\" tabindex=\"-1\">\n                            <img src=\"./assets/img-01-BBWp8t8E.png\" class=\"img-fluid size-8\">\n                            <span class=\"fw-medium fs-13 mt-2\">Clothing</span>\n                        </button>\n                        <button class=\"nav-link text-reset bg-body-secondary h-22 min-w-24 rounded avatar flex-column p-3\" id=\"cat-footwear-tab\" data-bs-toggle=\"pill\" data-bs-target=\"#cat-footwear\" type=\"button\" role=\"tab\" aria-controls=\"cat-footwear\" aria-selected=\"false\" tabindex=\"-1\">\n                            <img src=\"./assets/img-03-oTTY_McP.png\" class=\"img-fluid size-8\">\n                            <span class=\"fw-medium fs-13 mt-2\">Footwear</span>\n                        </button>\n                        <button class=\"nav-link text-reset bg-body-secondary h-22 min-w-24 rounded avatar flex-column p-3\" id=\"cat-watches-tab\" data-bs-toggle=\"pill\" data-bs-target=\"#cat-watches\" type=\"button\" role=\"tab\" aria-controls=\"cat-watches\" aria-selected=\"false\" tabindex=\"-1\">\n                            <img src=\"./assets/img-02-ClVfz9I5.png\" class=\"img-fluid size-8\">\n                            <span class=\"fw-medium fs-13 mt-2\">Watches</span>\n                        </button>\n                        <button class=\"nav-link text-reset bg-body-secondary h-22 min-w-24 rounded avatar flex-column p-3\" id=\"cat-food-tab\" data-bs-toggle=\"pill\" data-bs-target=\"#cat-food\" type=\"button\" role=\"tab\" aria-controls=\"cat-food\" aria-selected=\"false\" tabindex=\"-1\">\n                            <img src=\"./assets/img-22-D2w1zjf6.png\" class=\"img-fluid size-8\">\n                            <span class=\"fw-medium fs-13 mt-2\">Food</span>\n                        </button>\n                        <button class=\"nav-link text-reset bg-body-secondary h-22 min-w-24 rounded avatar flex-column p-3\" id=\"cat-accessories-tab\" data-bs-toggle=\"pill\" data-bs-target=\"#cat-accessories\" type=\"button\" role=\"tab\" aria-controls=\"cat-accessories\" aria-selected=\"false\" tabindex=\"-1\">\n                            <img src=\"./assets/img-19-UVF-VI0Q.png\" class=\"img-fluid size-8\">\n                            <span class=\"fw-medium fs-13 mt-2\">Accessories</span>\n                        </button>\n                        <button class=\"nav-link text-reset bg-body-secondary h-22 min-w-24 rounded avatar flex-column p-3\" id=\"cat-electronics-tab\" data-bs-toggle=\"pill\" data-bs-target=\"#cat-electronics\" type=\"button\" role=\"tab\" aria-controls=\"cat-electronics\" aria-selected=\"false\" tabindex=\"-1\">\n                            <img src=\"./assets/img-24-Q6X8xUcA.png\" class=\"img-fluid size-8\">\n                            <span class=\"fw-medium fs-13 mt-2\">Electronics</span>\n                        </button>\n                        <button class=\"nav-link text-reset bg-body-secondary h-22 min-w-24 rounded avatar flex-column p-3\" id=\"cat-bags-tab\" data-bs-toggle=\"pill\" data-bs-target=\"#cat-bags\" type=\"button\" role=\"tab\" aria-controls=\"cat-bags\" aria-selected=\"false\" tabindex=\"-1\">\n                            <img src=\"./assets/img-08-BXmGY-HZ.png\" class=\"img-fluid size-8\">\n                            <span class=\"fw-medium fs-13 mt-2\">Bags</span>\n                        </button>\n                        <button class=\"nav-link text-reset bg-body-secondary h-22 min-w-24 rounded avatar flex-column p-3\" id=\"cat-beauty-tab\" data-bs-toggle=\"pill\" data-bs-target=\"#cat-beauty\" type=\"button\" role=\"tab\" aria-controls=\"cat-beauty\" aria-selected=\"false\" tabindex=\"-1\">\n                            <img src=\"./assets/pr-37-CrN88d3y.png\" class=\"img-fluid size-8\">\n                            <span class=\"fw-medium fs-13 mt-2\">Beauty</span>\n                        </button>\n                        <button class=\"nav-link text-reset bg-body-secondary h-22 min-w-24 rounded avatar flex-column p-3\" id=\"cat-fitness-tab\" data-bs-toggle=\"pill\" data-bs-target=\"#cat-fitness\" type=\"button\" role=\"tab\" aria-controls=\"cat-fitness\" aria-selected=\"false\" tabindex=\"-1\">\n                            <img src=\"./assets/pr-40-pfTD79Wn.png\" class=\"img-fluid size-8\">\n                            <span class=\"fw-medium fs-13 mt-2\">Fitness</span>\n                        </button>\n                    </div>",
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(24, 24, 26)",
+    "border": "0px none rgb(24, 24, 26)",
+    "borderRadius": "0px",
+    "boxShadow": "none",
+    "padding": "0px",
+    "margin": "0px",
+    "fontSize": "15px",
+    "fontWeight": "400"
+  },
+  "orderPanel": {
+    "outerHTML": "<div class=\"col-md-6 col-xl-4 col-xxl-3\">\n                                        <div class=\"card mb-0 pos-product-card\">\n                                            <div class=\"card-body p-4\">\n                                                <div class=\"bg-body-tertiary bg-opacity-75 rounded\">\n                                                    <img src=\"./assets/pr-35-B2Unq0hU.png\" class=\"img-fluid p-4 d-block object-fit-cover\">\n                                                </div>\n                                                <div class=\"mt-3\">\n                                                    <a href=\"#!\" class=\"mb-1 d-block link link-custom fw-medium fs-16 text-truncate\">Women’s Elegant Handbag</a>\n                                                    <p class=\"text-muted small mb-0\">SKU: BG-HBG-011</p>\n                                                    <div class=\"d-flex justify-content-between align-items-end\">\n                                                        <h6 class=\"fs-lg mb-0\">$89.99</h6>\n                                                        <button type=\"button\" class=\"btn btn-primary btn-icon size-9 rounded-circle \"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" data-lucide=\"plus\" class=\"lucide lucide-plus size-4\"><path d=\"M5 12h14\"></path><path d=\"M12 5v14\"></path></svg></button>\n                                                    </div>\n                                                </div>\n                                            </div>\n                                        </div>\n                                    </div>",
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(24, 24, 26)",
+    "border": "0px none rgb(24, 24, 26)",
+    "borderRadius": "0px",
+    "boxShadow": "none",
+    "padding": "0px 8px",
+    "margin": "16px 0px 0px",
+    "fontSize": "15px",
+    "fontWeight": "400"
+  },
+  "customerCard": null,
+  "plusBtn": {
+    "outerHTML": "<a href=\"#!\" class=\"mb-1 d-block link link-custom fw-medium fs-16 text-truncate\">Women’s Elegant Handbag</a>",
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(24, 24, 26)",
+    "border": "0px none rgb(24, 24, 26)",
+    "borderRadius": "0px",
+    "boxShadow": "none",
+    "padding": "0px",
+    "margin": "0px 0px 4px",
+    "fontSize": "16px",
+    "fontWeight": "500"
+  }
+}
