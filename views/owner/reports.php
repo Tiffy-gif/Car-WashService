@@ -1538,19 +1538,10 @@ include dirname(__DIR__) . '/layouts/header.php';
     .print-only {
         display: block !important;
     }
-}
+}   
 </style>
 
 <div class="reports-container">
-
-    <!-- Exchange Rate Badge -->
-    <div class="no-print" style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 14px;">
-        <span class="badge badge-slate" style="font-size: 12px; padding: 6px 12px;">
-            <i class="fa-solid fa-calendar-day mr-1"></i>
-            <?= date('d M Y') ?> &bull; 1 USD = <?= number_format($curRate) ?> KHR
-        </span>
-    </div>
-
     <!-- Print Header Only (Shows when printing) -->
     <div class="print-only" style="display: none; padding: 12px 0 16px 0; border-bottom: 2px solid #333; margin-bottom: 20px;">
         <h2 style="font-size: 20px; font-weight: 800; margin: 0 0 6px 0;">AquaGleam Car Wash - Business &amp; Operations Report</h2>

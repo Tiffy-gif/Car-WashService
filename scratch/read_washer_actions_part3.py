@@ -1,0 +1,5 @@
+with open('pos/js/app.js', 'r', encoding='utf-8') as f:
+    text = f.read()
+
+idx = text.find('static renderWasherBays')
+print(text[idx+7000:idx+10500])

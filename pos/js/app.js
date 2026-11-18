@@ -262,9 +262,9 @@ class PosApp {
                             if (m) this.validFaIcons.add(m[1]);
                         }
                     }
-                } catch (e) {}
+                } catch (e) { }
             }
-        } catch (e) {}
+        } catch (e) { }
 
         // Guarantee core standard icons
         [
@@ -297,7 +297,7 @@ class PosApp {
 
     static getValidServiceIcon(icon, category, nameEn) {
         const nameLower = (nameEn || '').toLowerCase();
-        
+
         // Full Wash check: guarantees Full Wash service always displays fa-soap icon
         if (nameLower.includes('full wash') || (nameLower.includes('exterior') && nameLower.includes('interior'))) {
             return 'fa-soap';
@@ -415,6 +415,12 @@ class PosApp {
     static _currentUpsellModalOpen = false;
     static _dismissedUpsellIds = new Set();
     static _upsellCheckTimeout = null;
+
+    // Virtual Touch Keyboard State
+    static isVirtualKeyboardOpen = false;
+    static virtualKeyboardLang = 'en'; // 'en', 'km', '123'
+    static virtualKeyboardShift = false;
+    static virtualKeyboardPos = null; // { top, left }
 
     // ========================================================
     // BACK OFFICE SETTINGS & BRANDING INTEGRATION
@@ -724,6 +730,7 @@ class PosApp {
 
         // 2. Setup Event Listeners
         this.bindEvents();
+        this.initAutoScrollbars();
 
         // 3. Monitor Online / Offline Network Status & Auto-Sync Engine
         this.setupNetworkMonitor();
@@ -771,8 +778,8 @@ class PosApp {
 
     static registerServiceWorker() {
         const isLocalhost = window.location.hostname === 'localhost' ||
-                            window.location.hostname === '127.0.0.1' ||
-                            window.location.hostname === '::1';
+            window.location.hostname === '127.0.0.1' ||
+            window.location.hostname === '::1';
         const isHttps = window.location.protocol === 'https:';
 
         if (!('serviceWorker' in navigator)) {
@@ -813,6 +820,76 @@ class PosApp {
                 window.location.reload();
             }
         });
+    }
+
+    /**
+     * Modern auto-hiding overlay scrollbars:
+     * Scrollbars remain invisible when idle / resting (matching the GotPOS clean look).
+     * When actively scrolling, wheeling, or hovering, the scrollbar displays with
+     * smooth opacity, and automatically fades out when scrolling stops.
+     */
+    static initAutoScrollbars() {
+        const scrollTimers = new WeakMap();
+
+        const triggerScrolling = (el) => {
+            if (!el || el === document || el === document.documentElement || el === document.body) return;
+            if (!(el instanceof HTMLElement)) return;
+
+            let scrollable = el;
+            if (scrollable.scrollHeight <= scrollable.clientHeight && scrollable.scrollWidth <= scrollable.clientWidth) {
+                scrollable = el.closest('.catalog-grid-wrap, .category-list-scroll, .category-vertical-sidebar, .cart-items-list, .customer-dropdown, .saved-cust-list-wrap, .washer-queue-scroll-area, .modal-body');
+            }
+            if (!scrollable) return;
+
+            scrollable.classList.add('is-scrolling');
+
+            // If the element is inside the category vertical sidebar, ensure both parent sidebar and list wrap get .is-scrolling
+            if (scrollable.classList.contains('category-vertical-sidebar')) {
+                const list = scrollable.querySelector('.category-list-scroll');
+                if (list) {
+                    list.classList.add('is-scrolling');
+                    const prevList = scrollTimers.get(list);
+                    if (prevList) clearTimeout(prevList);
+                    scrollTimers.set(list, setTimeout(() => {
+                        list.classList.remove('is-scrolling');
+                        scrollTimers.delete(list);
+                    }, 800));
+                }
+            } else if (scrollable.classList.contains('category-list-scroll')) {
+                const sidebar = scrollable.closest('.category-vertical-sidebar');
+                if (sidebar) {
+                    sidebar.classList.add('is-scrolling');
+                    const prevSidebar = scrollTimers.get(sidebar);
+                    if (prevSidebar) clearTimeout(prevSidebar);
+                    scrollTimers.set(sidebar, setTimeout(() => {
+                        sidebar.classList.remove('is-scrolling');
+                        scrollTimers.delete(sidebar);
+                    }, 800));
+                }
+            }
+
+            const prev = scrollTimers.get(scrollable);
+            if (prev) clearTimeout(prev);
+
+            const timer = setTimeout(() => {
+                scrollable.classList.remove('is-scrolling');
+                scrollTimers.delete(scrollable);
+            }, 800);
+
+            scrollTimers.set(scrollable, timer);
+        };
+
+        window.addEventListener('scroll', (e) => {
+            triggerScrolling(e.target);
+        }, { capture: true, passive: true });
+
+        window.addEventListener('wheel', (e) => {
+            triggerScrolling(e.target);
+        }, { capture: true, passive: true });
+
+        window.addEventListener('touchmove', (e) => {
+            triggerScrolling(e.target);
+        }, { capture: true, passive: true });
     }
 
     static showUpdateToast(worker) {
@@ -878,12 +955,12 @@ class PosApp {
                 if (gotDateEl) {
                     try {
                         gotDateEl.textContent = now.toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
-                    } catch(e) { gotDateEl.textContent = now.toDateString(); }
+                    } catch (e) { gotDateEl.textContent = now.toDateString(); }
                 }
                 if (gotTimeEl) {
                     try {
                         gotTimeEl.textContent = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
-                    } catch(e) { gotTimeEl.textContent = now.toTimeString().slice(0,5); }
+                    } catch (e) { gotTimeEl.textContent = now.toTimeString().slice(0, 5); }
                 }
             } catch (e) {
                 dateEl.textContent = now.toLocaleDateString();
@@ -941,65 +1018,520 @@ class PosApp {
     }
 
     static handleGlobalSearch(query) {
-        const q = (query || '').trim().toLowerCase();
+        const q = (query !== undefined ? query : (document.getElementById('posGlobalSearchInput')?.value || '')).trim().toLowerCase();
         const cards = document.querySelectorAll('#catalogGrid .pos-item-card');
+        const catalogGrid = document.getElementById('catalogGrid');
+        const clearBtn = document.getElementById('btnPosSearchClear');
+
+        if (clearBtn) {
+            clearBtn.style.display = q ? 'inline-flex' : 'none';
+        }
+
         if (!cards.length) return;
 
         let visibleCount = 0;
         cards.forEach(card => {
             if (!q) {
-                card.style.display = '';
+                card.classList.remove('is-search-hidden');
+                card.style.removeProperty('display');
                 visibleCount++;
                 return;
             }
             const nameKm = (card.querySelector('.item-name-km')?.textContent || '').toLowerCase();
             const nameEn = (card.querySelector('.item-name-en')?.textContent || '').toLowerCase();
             const badgeType = (card.querySelector('.card-tag-type')?.textContent || '').toLowerCase();
-            const svcId = card.getAttribute('data-svc-id');
-            const prodId = card.getAttribute('data-prod-id');
+            const brand = (card.getAttribute('data-brand') || '').toLowerCase();
+            const category = (card.getAttribute('data-category') || '').toLowerCase();
+            const svcId = (card.getAttribute('data-svc-id') || '').toLowerCase();
+            const prodId = (card.getAttribute('data-prod-id') || '').toLowerCase();
 
-            const matches = nameKm.includes(q) || nameEn.includes(q) || badgeType.includes(q) ||
-                            (svcId && svcId.includes(q)) || (prodId && prodId.includes(q));
+            const matches = nameKm.includes(q) || 
+                            nameEn.includes(q) || 
+                            badgeType.includes(q) || 
+                            brand.includes(q) || 
+                            category.includes(q) ||
+                            (svcId && (svcId === q || svcId.includes(q))) || 
+                            (prodId && (prodId === q || prodId.includes(q)));
+
             if (matches) {
-                card.style.display = '';
+                card.classList.remove('is-search-hidden');
+                card.style.removeProperty('display');
                 visibleCount++;
             } else {
-                card.style.display = 'none';
+                card.classList.add('is-search-hidden');
+                card.style.setProperty('display', 'none', 'important');
             }
         });
+
+        // Handle Empty State Notice inside catalog grid
+        let emptyState = document.getElementById('posCatalogSearchEmpty');
+        if (visibleCount === 0 && q) {
+            if (!emptyState && catalogGrid) {
+                emptyState = document.createElement('div');
+                emptyState.id = 'posCatalogSearchEmpty';
+                emptyState.className = 'pos-search-empty-state';
+                catalogGrid.appendChild(emptyState);
+            }
+            if (emptyState) {
+                const isKm = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km');
+                emptyState.innerHTML = `
+                    <div class="pos-search-empty-icon"><i class="fa-solid fa-magnifying-glass"></i></div>
+                    <div class="pos-search-empty-title">${isKm ? 'រកមិនឃើញទំនិញ ឬសេវាកម្ម' : 'No matching items found'}</div>
+                    <div class="pos-search-empty-desc">${isKm ? `គ្មានលទ្ធផលត្រូវគ្នានឹង "${this.escapeHtml(q)}"` : `No catalog items match "${this.escapeHtml(q)}"`}</div>
+                    <button type="button" class="pos-search-empty-btn" onclick="PosApp.clearGlobalSearch()">
+                        <i class="fa-solid fa-rotate-left"></i> ${isKm ? 'សម្អាតការស្វែងរក' : 'Clear search'}
+                    </button>
+                `;
+                emptyState.style.display = 'flex';
+            }
+        } else if (emptyState) {
+            emptyState.style.display = 'none';
+        }
+    }
+
+    static clearGlobalSearch() {
+        const input = document.getElementById('posGlobalSearchInput');
+        if (input) {
+            input.value = '';
+            this.handleGlobalSearch('');
+            this.updateVirtualKeyboardPreview();
+            input.focus();
+        }
+    }
+
+    static handleSearchEnterAction() {
+        const input = document.getElementById('posGlobalSearchInput');
+        const q = (input?.value || '').trim();
+        if (!q) return;
+
+        const visibleCards = Array.from(document.querySelectorAll('#catalogGrid .pos-item-card:not(.is-search-hidden)'));
+
+        // Check if there is an exact ID match first
+        let targetCard = visibleCards.find(c => {
+            const sId = c.getAttribute('data-svc-id');
+            const pId = c.getAttribute('data-prod-id');
+            return (sId && sId.toLowerCase() === q.toLowerCase()) || (pId && pId.toLowerCase() === q.toLowerCase());
+        });
+
+        // If no exact ID match but only 1 card is visible, select that one
+        if (!targetCard && visibleCards.length === 1) {
+            targetCard = visibleCards[0];
+        }
+
+        if (targetCard) {
+            const sId = targetCard.getAttribute('data-svc-id');
+            const pId = targetCard.getAttribute('data-prod-id');
+            const itemName = targetCard.querySelector('.item-name-km')?.textContent || 
+                             targetCard.querySelector('.item-name-en')?.textContent || 'Item';
+
+            if (sId) {
+                this.addServiceToCart(parseInt(sId));
+            } else if (pId) {
+                this.addProductToCart(parseInt(pId));
+            }
+
+            const isKm = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km');
+            this.showToastNotice(isKm ? `បានបន្ថែម "${itemName}" ទៅកន្រ្តក` : `Added "${itemName}" to cart`, 'success');
+
+            // Clear search to show full catalog again
+            this.clearGlobalSearch();
+        } else if (visibleCards.length > 1) {
+            const isKm = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km');
+            this.showToastNotice(
+                isKm ? `មាន ${visibleCards.length} មុខទំនិញស្របគ្នា សូមចុចជ្រើសរើស` : `${visibleCards.length} items found. Click to select.`,
+                'info'
+            );
+        } else {
+            const isKm = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km');
+            this.showToastNotice(
+                isKm ? `រកមិនឃើញមុខទំនិញសម្រាប់ "${q}"` : `No item found for "${q}"`,
+                'warning'
+            );
+        }
+    }
+
+    // ========================================================
+    // POS ON-SCREEN VIRTUAL TOUCH KEYBOARD
+    // ========================================================
+    static openVirtualKeyboard() {
+        const kb = document.getElementById('posVirtualKeyboard');
+        const btn = document.getElementById('btnPosVirtualKeyboard');
+        if (!kb) return;
+
+        this.isVirtualKeyboardOpen = true;
+        kb.style.display = 'block';
+        if (btn) btn.classList.add('active');
+
+        // Apply saved dragged position or default dock position
+        if (this.virtualKeyboardPos && typeof this.virtualKeyboardPos.left === 'number') {
+            kb.style.setProperty('bottom', 'auto', 'important');
+            kb.style.setProperty('transform', 'none', 'important');
+            kb.style.setProperty('left', this.virtualKeyboardPos.left + 'px', 'important');
+            kb.style.setProperty('top', this.virtualKeyboardPos.top + 'px', 'important');
+        } else {
+            kb.style.setProperty('top', 'auto', 'important');
+            kb.style.setProperty('bottom', '14px', 'important');
+            kb.style.setProperty('left', 'calc(50vw - 190px)', 'important');
+            kb.style.setProperty('transform', 'translateX(-50%)', 'important');
+        }
+
+        // Match keyboard language with app language if not in symbols mode
+        if (!this.virtualKeyboardLang || this.virtualKeyboardLang === '123') {
+            const sysLang = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km') ? 'km' : 'en';
+            this.virtualKeyboardLang = sysLang;
+        }
+
+        this.renderVirtualKeyboardKeys();
+        this.updateVirtualKeyboardPreview();
+        this.initDraggableVirtualKeyboard();
+    }
+
+    static resetVirtualKeyboardPos() {
+        const kb = document.getElementById('posVirtualKeyboard');
+        if (!kb) return;
+        this.virtualKeyboardPos = null;
+        kb.style.setProperty('top', 'auto', 'important');
+        kb.style.setProperty('bottom', '14px', 'important');
+        kb.style.setProperty('left', 'calc(50vw - 190px)', 'important');
+        kb.style.setProperty('transform', 'translateX(-50%)', 'important');
+    }
+
+    static initDraggableVirtualKeyboard() {
+        const kb = document.getElementById('posVirtualKeyboard');
+        const header = document.getElementById('posVkDragHeader');
+        if (!kb || !header || this._draggableKbInitialized) return;
+        this._draggableKbInitialized = true;
+
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+        let initialLeft = 0;
+        let initialTop = 0;
+
+        const startDrag = (clientX, clientY, target) => {
+            // Do not initiate drag if user clicked interactive buttons or preview
+            if (target.closest('button') || target.closest('input') || target.closest('.pos-vk-preview-wrap')) {
+                return false;
+            }
+
+            isDragging = true;
+            startX = clientX;
+            startY = clientY;
+
+            const rect = kb.getBoundingClientRect();
+            initialLeft = Math.round(rect.left);
+            initialTop = Math.round(rect.top);
+
+            // Switch to fixed px position smoothly without position jump
+            kb.style.setProperty('bottom', 'auto', 'important');
+            kb.style.setProperty('transform', 'none', 'important');
+            kb.style.setProperty('left', initialLeft + 'px', 'important');
+            kb.style.setProperty('top', initialTop + 'px', 'important');
+
+            kb.classList.add('is-dragging');
+            document.body.classList.add('pos-vk-dragging');
+            return true;
+        };
+
+        const moveDrag = (clientX, clientY) => {
+            if (!isDragging) return;
+            const dx = clientX - startX;
+            const dy = clientY - startY;
+
+            const rect = kb.getBoundingClientRect();
+            const minLeft = 8;
+            const maxLeft = Math.max(8, window.innerWidth - rect.width - 8);
+            const minTop = 8;
+            const maxTop = Math.max(8, window.innerHeight - rect.height - 8);
+
+            const newLeft = Math.max(minLeft, Math.min(maxLeft, initialLeft + dx));
+            const newTop = Math.max(minTop, Math.min(maxTop, initialTop + dy));
+
+            kb.style.setProperty('left', newLeft + 'px', 'important');
+            kb.style.setProperty('top', newTop + 'px', 'important');
+        };
+
+        const endDrag = () => {
+            if (!isDragging) return;
+            isDragging = false;
+            kb.classList.remove('is-dragging');
+            document.body.classList.remove('pos-vk-dragging');
+
+            const rect = kb.getBoundingClientRect();
+            PosApp.virtualKeyboardPos = {
+                left: Math.round(rect.left),
+                top: Math.round(rect.top)
+            };
+        };
+
+        // Mouse Drag Events
+        header.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            if (startDrag(e.clientX, e.clientY, e.target)) {
+                e.preventDefault();
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                e.preventDefault();
+                moveDrag(e.clientX, e.clientY);
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isDragging) endDrag();
+        });
+
+        // Touch Drag Events (Touchscreen POS Monitors / Tablets)
+        header.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            if (touch && startDrag(touch.clientX, touch.clientY, e.target)) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        window.addEventListener('touchmove', (e) => {
+            if (isDragging && e.touches.length > 0) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                moveDrag(touch.clientX, touch.clientY);
+            }
+        }, { passive: false });
+
+        window.addEventListener('touchend', () => {
+            if (isDragging) endDrag();
+        });
+
+        // Double-click header to reset position to bottom center dock
+        header.addEventListener('dblclick', (e) => {
+            if (!e.target.closest('button')) {
+                PosApp.resetVirtualKeyboardPos();
+            }
+        });
+    }
+
+    static closeVirtualKeyboard() {
+        const kb = document.getElementById('posVirtualKeyboard');
+        const btn = document.getElementById('btnPosVirtualKeyboard');
+        if (!kb) return;
+
+        this.isVirtualKeyboardOpen = false;
+        kb.style.display = 'none';
+        if (btn) btn.classList.remove('active');
+    }
+
+    static toggleVirtualKeyboard() {
+        if (this.isVirtualKeyboardOpen) {
+            this.closeVirtualKeyboard();
+        } else {
+            this.openVirtualKeyboard();
+        }
+    }
+
+    static updateVirtualKeyboardPreview() {
+        const searchInput = document.getElementById('posGlobalSearchInput');
+        const preview = document.getElementById('posVkInputPreview');
+        if (preview && searchInput) {
+            preview.textContent = searchInput.value || '';
+        }
+    }
+
+    static renderVirtualKeyboardKeys() {
+        const container = document.getElementById('posVkKeys');
+        const langLabel = document.getElementById('posVkLangLabel');
+        if (!container) return;
+
+        if (langLabel) {
+            langLabel.textContent = this.virtualKeyboardLang.toUpperCase();
+        }
+
+        let rows = [];
+
+        if (this.virtualKeyboardLang === 'en') {
+            const shift = this.virtualKeyboardShift;
+            rows = [
+                ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+                shift 
+                    ? ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P']
+                    : ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+                shift
+                    ? ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L']
+                    : ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+                [
+                    { type: 'shift', label: '<i class="fa-solid fa-arrow-up"></i>', active: shift, class: 'key-shift key-fn' },
+                    ...(shift 
+                        ? ['Z', 'X', 'C', 'V', 'B', 'N', 'M']
+                        : ['z', 'x', 'c', 'v', 'b', 'n', 'm']),
+                    { type: 'backspace', label: '<i class="fa-solid fa-delete-left"></i>', class: 'key-backspace' }
+                ],
+                [
+                    { type: 'mode_123', label: '?123', class: 'key-fn' },
+                    { type: 'space', label: 'Space', class: 'key-space' },
+                    '.',
+                    { type: 'enter', label: '<i class="fa-solid fa-magnifying-glass"></i> Search', class: 'key-enter' }
+                ]
+            ];
+        } else if (this.virtualKeyboardLang === 'km') {
+            const shift = this.virtualKeyboardShift;
+            rows = [
+                ['១', '២', '៣', '៤', '៥', '៦', '៧', '៨', '៩', '០'],
+                shift
+                    ? ['ឌ', 'ធ', 'ឈ', 'ញ', 'ឫ', 'ឭ', 'ូ', 'ី', 'ៅ', 'ភ']
+                    : ['ឆ', 'ឹ', 'េ', 'រ', 'ត', 'យ', 'ុ', 'ិ', 'ោ', 'ផ'],
+                shift
+                    ? ['ាំ', 'ស៊', 'ឍ', 'អ', 'ះ', 'គ', 'ខ', 'ឡ', 'ើ', '៌']
+                    : ['ា', 'ស', 'ដ', 'ថ', 'ង', 'ហ', '្', 'ជ', 'ក', 'ល'],
+                [
+                    { type: 'shift', label: '<i class="fa-solid fa-arrow-up"></i>', active: shift, class: 'key-shift key-fn' },
+                    ...(shift
+                        ? ['ព', 'ភ', 'ណ', 'យ', 'វ', 'ង', 'ហ']
+                        : ['ឋ', 'ខ', 'ច', 'វ', 'ប', 'ន', 'ម']),
+                    { type: 'backspace', label: '<i class="fa-solid fa-delete-left"></i>', class: 'key-backspace' }
+                ],
+                [
+                    { type: 'mode_123', label: '?123', class: 'key-fn' },
+                    { type: 'space', label: 'ដកឃ្លា (Space)', class: 'key-space' },
+                    '។',
+                    { type: 'enter', label: '<i class="fa-solid fa-magnifying-glass"></i> ស្វែងរក', class: 'key-enter' }
+                ]
+            ];
+        } else if (this.virtualKeyboardLang === '123') {
+            rows = [
+                ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+                ['@', '#', '$', '%', '&', '*', '-', '+', '=', '/'],
+                ['(', ')', '<', '>', '!', '?', '"', '\'', ':', ';'],
+                [
+                    { type: 'mode_abc', label: 'ABC', class: 'key-fn' },
+                    '_', ',', '.', '/', '\\', '~',
+                    { type: 'backspace', label: '<i class="fa-solid fa-delete-left"></i>', class: 'key-backspace' }
+                ],
+                [
+                    { type: 'mode_abc', label: 'ABC', class: 'key-fn' },
+                    { type: 'space', label: 'Space', class: 'key-space' },
+                    '-',
+                    { type: 'enter', label: '<i class="fa-solid fa-magnifying-glass"></i> Search', class: 'key-enter' }
+                ]
+            ];
+        }
+
+        let html = '';
+        rows.forEach(r => {
+            html += '<div class="pos-vk-row">';
+            r.forEach(k => {
+                if (typeof k === 'string') {
+                    html += `<button type="button" class="pos-vk-key" data-char="${this.escapeHtml(k)}">${this.escapeHtml(k)}</button>`;
+                } else {
+                    const extraClass = (k.class || '') + (k.active ? ' active' : '');
+                    html += `<button type="button" class="pos-vk-key ${extraClass}" data-action="${k.type}">${k.label}</button>`;
+                }
+            });
+            html += '</div>';
+        });
+
+        container.innerHTML = html;
+
+        // Bind Key Clicks
+        container.querySelectorAll('.pos-vk-key').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const char = btn.getAttribute('data-char');
+                const action = btn.getAttribute('data-action');
+                if (char) {
+                    this.handleVirtualKeyPress('char', char);
+                } else if (action) {
+                    this.handleVirtualKeyPress(action);
+                }
+            });
+        });
+    }
+
+    static handleVirtualKeyPress(action, charVal) {
+        const searchInput = document.getElementById('posGlobalSearchInput');
+        if (!searchInput) return;
+
+        if (action === 'char') {
+            searchInput.value += charVal;
+            if (this.virtualKeyboardShift) {
+                this.virtualKeyboardShift = false;
+                this.renderVirtualKeyboardKeys();
+            }
+            this.handleGlobalSearch(searchInput.value);
+            this.updateVirtualKeyboardPreview();
+        } else if (action === 'space') {
+            searchInput.value += ' ';
+            this.handleGlobalSearch(searchInput.value);
+            this.updateVirtualKeyboardPreview();
+        } else if (action === 'backspace') {
+            searchInput.value = searchInput.value.slice(0, -1);
+            this.handleGlobalSearch(searchInput.value);
+            this.updateVirtualKeyboardPreview();
+        } else if (action === 'shift') {
+            this.virtualKeyboardShift = !this.virtualKeyboardShift;
+            this.renderVirtualKeyboardKeys();
+        } else if (action === 'mode_123') {
+            this.virtualKeyboardLang = '123';
+            this.renderVirtualKeyboardKeys();
+        } else if (action === 'mode_abc') {
+            const sysLang = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km') ? 'km' : 'en';
+            this.virtualKeyboardLang = sysLang;
+            this.renderVirtualKeyboardKeys();
+        } else if (action === 'enter') {
+            this.handleSearchEnterAction();
+            this.updateVirtualKeyboardPreview();
+        }
     }
 
     static bindEvents() {
         // Topbar Live Clock
         this.startLiveClock();
 
+        // Language Switcher Helper Function
+        const switchLanguage = (targetLang) => {
+            const current = I18nManager.getLang();
+            const next = targetLang || (current === 'km' ? 'en' : 'km');
+            if (next !== current) {
+                I18nManager.setLang(next);
+                this.onLanguageChanged();
+            }
+        };
+
         // Language Toggle Button (Legacy/fallback)
         const btnLang = document.getElementById('btnLangToggle');
         if (btnLang) {
-            btnLang.addEventListener('click', () => {
-                const current = I18nManager.getLang();
-                const next = current === 'km' ? 'en' : 'km';
-                I18nManager.setLang(next);
-                this.onLanguageChanged();
-            });
+            btnLang.addEventListener('click', () => switchLanguage());
         }
 
-        // Language Segmented Control Buttons (ខ្មែរ / EN)
+        // Language Segmented Control Container & Buttons (ខ្មែរ / EN)
+        const langSegmentedControl = document.getElementById('langSegmentedControl');
         const btnLangKm = document.getElementById('btnLangKm');
         const btnLangEn = document.getElementById('btnLangEn');
+
         if (btnLangKm) {
-            btnLangKm.addEventListener('click', () => {
+            btnLangKm.addEventListener('click', (e) => {
+                e.stopPropagation();
                 if (I18nManager.getLang() !== 'km') {
-                    I18nManager.setLang('km');
-                    this.onLanguageChanged();
+                    switchLanguage('km');
+                } else {
+                    switchLanguage('en');
                 }
             });
         }
         if (btnLangEn) {
-            btnLangEn.addEventListener('click', () => {
+            btnLangEn.addEventListener('click', (e) => {
+                e.stopPropagation();
                 if (I18nManager.getLang() !== 'en') {
-                    I18nManager.setLang('en');
-                    this.onLanguageChanged();
+                    switchLanguage('en');
+                } else {
+                    switchLanguage('km');
+                }
+            });
+        }
+        if (langSegmentedControl) {
+            langSegmentedControl.addEventListener('click', (e) => {
+                if (!e.target.closest('.lang-seg-btn')) {
+                    switchLanguage();
                 }
             });
         }
@@ -1067,13 +1599,107 @@ class PosApp {
             });
         }
 
-        // POS Global Search Bar (Real-time product filtering)
+        // POS Global Search Bar & Virtual Keyboard Events
         const posGlobalSearch = document.getElementById('posGlobalSearchInput');
+        const btnPosSearchClear = document.getElementById('btnPosSearchClear');
+        const btnPosVirtualKeyboard = document.getElementById('btnPosVirtualKeyboard');
+        const posVkCloseBtn = document.getElementById('posVkCloseBtn');
+        const posVkLangToggle = document.getElementById('posVkLangToggle');
+        const posVkClearBtn = document.getElementById('posVkClearBtn');
+
         if (posGlobalSearch) {
             posGlobalSearch.addEventListener('input', (e) => {
                 this.handleGlobalSearch(e.target.value);
+                this.updateVirtualKeyboardPreview();
+            });
+            posGlobalSearch.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.handleSearchEnterAction();
+                    this.updateVirtualKeyboardPreview();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    if (this.isVirtualKeyboardOpen) {
+                        this.closeVirtualKeyboard();
+                    } else {
+                        this.clearGlobalSearch();
+                        this.updateVirtualKeyboardPreview();
+                    }
+                }
             });
         }
+
+        if (btnPosSearchClear) {
+            btnPosSearchClear.addEventListener('click', () => {
+                this.clearGlobalSearch();
+                this.updateVirtualKeyboardPreview();
+            });
+        }
+
+        if (btnPosVirtualKeyboard) {
+            btnPosVirtualKeyboard.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleVirtualKeyboard();
+            });
+        }
+
+        if (posVkCloseBtn) {
+            posVkCloseBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.closeVirtualKeyboard();
+            });
+        }
+
+        if (posVkLangToggle) {
+            posVkLangToggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.virtualKeyboardLang = (this.virtualKeyboardLang === 'km') ? 'en' : 'km';
+                this.virtualKeyboardShift = false;
+                this.renderVirtualKeyboardKeys();
+            });
+        }
+
+        if (posVkClearBtn) {
+            posVkClearBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.clearGlobalSearch();
+                this.updateVirtualKeyboardPreview();
+            });
+        }
+
+        const posVkResetPosBtn = document.getElementById('posVkResetPosBtn');
+        if (posVkResetPosBtn) {
+            posVkResetPosBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.resetVirtualKeyboardPos();
+            });
+        }
+
+        // Initialize drag & drop support for Virtual Touch Keyboard
+        this.initDraggableVirtualKeyboard();
+
+        // Quick Category / Search Chips for Rapid Touch Typing
+        document.querySelectorAll('#posVkQuickChips .pos-vk-chip').forEach(chip => {
+            chip.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const term = chip.getAttribute('data-search') || '';
+                if (posGlobalSearch) {
+                    posGlobalSearch.value = term;
+                    this.handleGlobalSearch(term);
+                    this.updateVirtualKeyboardPreview();
+                }
+            });
+        });
+
+        // Click outside virtual keyboard to dismiss
+        document.addEventListener('click', (e) => {
+            if (this.isVirtualKeyboardOpen &&
+                !e.target.closest('#posVirtualKeyboard') &&
+                !e.target.closest('#btnPosVirtualKeyboard') &&
+                !e.target.closest('#posGlobalSearchInput')) {
+                this.closeVirtualKeyboard();
+            }
+        });
 
         // Cart Action Pills (Clear, Saved/Queue, Discount)
         document.getElementById('btnCartPillClear')?.addEventListener('click', () => this.clearCart());
@@ -1164,6 +1790,54 @@ class PosApp {
                 } else if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
                     e.preventDefault();
                     this.applyDiscountFromModal();
+                }
+            });
+        }
+
+        // Modal backdrop click and keyboard handling for Billing History Modal
+        const modalBilling = document.getElementById('modalBillingHistory');
+        if (modalBilling) {
+            modalBilling.addEventListener('click', (e) => {
+                if (e.target === modalBilling) {
+                    this.closeBillingHistoryModal();
+                }
+            });
+            modalBilling.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    this.closeBillingHistoryModal();
+                }
+            });
+        }
+
+        // Modal backdrop click and keyboard handling for Queue Modal
+        const modalQ = document.getElementById('modalQueue');
+        if (modalQ) {
+            modalQ.addEventListener('click', (e) => {
+                if (e.target === modalQ) {
+                    this.closeQueueModal();
+                }
+            });
+            modalQ.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    this.closeQueueModal();
+                }
+            });
+        }
+
+        // Modal backdrop click and keyboard handling for Appointment Modal
+        const modalAppt = document.getElementById('modalAppointment');
+        if (modalAppt) {
+            modalAppt.addEventListener('click', (e) => {
+                if (e.target === modalAppt) {
+                    this.closeAppointmentModal();
+                }
+            });
+            modalAppt.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    this.closeAppointmentModal();
                 }
             });
         }
@@ -2083,6 +2757,13 @@ class PosApp {
         // URL hash change listener for tab switching
         window.addEventListener('hashchange', () => {
             const h = (window.location.hash || '').replace(/^#/, '');
+            if (h === 'appointments') {
+                this.openAppointmentModal();
+                if (window.location.hash !== '#pos') {
+                    history.replaceState(null, '', '#pos');
+                }
+                return;
+            }
             if (h && h !== this.currentView && document.getElementById(`view${h.charAt(0).toUpperCase() + h.slice(1)}`)) {
                 this.switchView(h);
             }
@@ -2329,28 +3010,28 @@ class PosApp {
         document.getElementById('btnCloseLongWaitModal')?.addEventListener('click', closeLongWait);
         document.getElementById('btnContinueAnyway')?.addEventListener('click', closeLongWait);
         document.getElementById('btnOfferBookAppointment')?.addEventListener('click', () => {
-            console.log('btnOfferBookAppointment clicked! Switching to appointments view...');
+            console.log('btnOfferBookAppointment clicked! Opening appointment modal...');
             document.getElementById('modalLongWaitWarning')?.classList.remove('open');
             this._dismissedOver45Key = this.getCartFingerprint();
-            this.switchView('appointments');
+            this.openAppointmentModal();
+            this.toggleModalApptBookingForm(true);
             const firstSvc = this.cart.find(it => it.type === 'service');
             if (firstSvc) {
-                const sel = document.getElementById('apptServiceSelect');
+                const sel = document.getElementById('modalApptService');
                 if (sel) sel.value = firstSvc.service_id || firstSvc.id;
             }
             if (this.currentCustomer?.plate) {
-                const pIn = document.getElementById('apptPlateInput');
+                const pIn = document.getElementById('modalApptPlate');
                 if (pIn) pIn.value = this.currentCustomer.plate;
             }
             if (this.currentCustomer?.name) {
-                const nIn = document.getElementById('apptCustomerName');
+                const nIn = document.getElementById('modalApptCustName');
                 if (nIn) nIn.value = this.currentCustomer.name;
             }
             if (this.currentCustomer?.phone) {
-                const phIn = document.getElementById('apptCustomerPhone');
+                const phIn = document.getElementById('modalApptCustPhone');
                 if (phIn) phIn.value = this.currentCustomer.phone;
             }
-            this.loadAppointmentSlots();
         });
 
         // 7. Appointments View Event Handlers
@@ -2524,7 +3205,7 @@ class PosApp {
 
                 // Background sync customers list only if staff has customer access
                 if (typeof PosStorage !== 'undefined' && PosStorage.getSessionToken() && this.canAccessCustomerList()) {
-                    PosApi.syncCustomers().catch(() => {});
+                    PosApi.syncCustomers().catch(() => { });
                 }
             } else {
                 this.setOnlineStatus(false);
@@ -2694,7 +3375,7 @@ class PosApp {
                 PosStorage.setUser(user);
                 this.isDeviceAuthorized = true;
                 this.hideDeviceLockedModal();
-                try { localStorage.setItem('carwash_pos_has_connected', 'true'); } catch (e) {}
+                try { localStorage.setItem('carwash_pos_has_connected', 'true'); } catch (e) { }
                 if (res.device) {
                     PosConfig.save({
                         deviceUid: res.device.device_uid || 'POS-TERMINAL-01',
@@ -2952,7 +3633,7 @@ class PosApp {
                 // Update services, prices, products automatically every time staff logs in
                 await this.refreshCatalogSilently(false);
                 if (this.canAccessCustomerList()) {
-                    await PosApi.syncCustomers().catch(() => {});
+                    await PosApi.syncCustomers().catch(() => { });
                 }
 
                 this.renderLoggedInState();
@@ -3138,7 +3819,7 @@ class PosApp {
     static async handleLogout(isIdle = false) {
         try {
             await PosApi.staffLogout();
-        } catch (e) {}
+        } catch (e) { }
         this.redirectToLogin(isIdle ? 'idle_timeout' : 'logged_out');
     }
 
@@ -3271,7 +3952,7 @@ class PosApp {
         const userFullNameEl = document.getElementById('userFullName');
         const userRoleBadgeEl = document.getElementById('userRoleBadge');
         if (userFullNameEl) userFullNameEl.textContent = cleanName;
-        if (userRoleBadgeEl) userRoleBadgeEl.innerHTML = `${roleName} <i class="fa-solid fa-chevron-down" style="font-size: 8px; margin-left: 2px;"></i>`;
+        if (userRoleBadgeEl) userRoleBadgeEl.innerHTML = `${roleName} <i class="fa-solid fa-chevron-down user-pill-caret"></i>`;
 
         const menuUserFull = document.getElementById('menuUserFullName');
         const menuUserRole = document.getElementById('menuUserRoleBadge');
@@ -3280,7 +3961,7 @@ class PosApp {
 
         const userNameEl = document.getElementById('userName');
         if (userNameEl && !userFullNameEl) {
-            userNameEl.innerHTML = `<span class="user-fullname">${this.escapeHtml(cleanName)}</span><span class="user-role-badge">${this.escapeHtml(roleName)} <i class="fa-solid fa-chevron-down" style="font-size: 8px; margin-left: 2px;"></i></span>`;
+            userNameEl.innerHTML = `<span class="user-fullname">${this.escapeHtml(cleanName)}</span><span class="user-role-badge">${this.escapeHtml(roleName)} <i class="fa-solid fa-chevron-down user-pill-caret"></i></span>`;
         }
 
         const userPill = document.getElementById('userPill');
@@ -3311,12 +3992,45 @@ class PosApp {
         if (dropName) dropName.textContent = cleanName;
         if (dropRole) dropRole.textContent = roleName;
 
+        const curRole = (this.currentUser.role || '').toLowerCase();
+        const isManagerOrAdmin = ['manager', 'owner', 'admin', 'system_admin'].includes(curRole);
+        const isWorkerRole = (curRole === 'washer' || curRole === 'mechanic' || curRole === 'technical');
         const hasShift = !!(this.activeShift || PosStorage.getCurrentShift());
-        const endShiftBtn = document.getElementById('userMenuEndShift');
-        const spotAuditBtn = document.getElementById('userMenuSpotAudit');
 
-        if (endShiftBtn) endShiftBtn.style.display = hasShift ? 'flex' : 'none';
-        if (spotAuditBtn) spotAuditBtn.style.display = hasShift ? 'flex' : 'none';
+        // 1. End Shift: Strictly for Cashier, Manager, Owner when an active cash shift is running
+        // Washers and Mechanics NEVER handle cash drawers or shifts
+        const canEndShift = !isWorkerRole && hasShift && (curRole === 'cashier' || isManagerOrAdmin);
+        const endShiftBtn = document.getElementById('userMenuEndShift');
+        if (endShiftBtn) {
+            endShiftBtn.style.setProperty('display', canEndShift ? 'flex' : 'none', 'important');
+        }
+
+        // 2. Spot Audit: Manager/Owner supervisory tool to audit register cash drawer
+        const canSpotAudit = !isWorkerRole && hasShift && isManagerOrAdmin;
+        const spotAuditBtn = document.getElementById('userMenuSpotAudit');
+        if (spotAuditBtn) {
+            spotAuditBtn.style.setProperty('display', canSpotAudit ? 'flex' : 'none', 'important');
+        }
+
+        // 3. Settings: POS hardware, printer & connection configs (Owner, Admin, Manager)
+        const canSettings = isManagerOrAdmin || this.hasPermission('settings.view') || this.hasPermission('settings.manage');
+        const settingsBtn = document.getElementById('userMenuSettings');
+        if (settingsBtn) {
+            settingsBtn.style.setProperty('display', canSettings && !isWorkerRole ? 'flex' : 'none', 'important');
+        }
+
+        // 4. Backoffice: Administrative management link (Owner, Admin, Manager)
+        const backofficeItem = document.getElementById('userMenuBackoffice');
+        if (backofficeItem) {
+            backofficeItem.style.setProperty('display', isManagerOrAdmin ? 'flex' : 'none', 'important');
+        }
+
+        // 5. Divider above Logout: Hide divider if all items above it are hidden
+        const menuDivider = document.querySelector('#userMenuDropdown .menu-divider');
+        if (menuDivider) {
+            const hasAnyAbove = canEndShift || canSpotAudit || (canSettings && !isWorkerRole) || isManagerOrAdmin;
+            menuDivider.style.display = hasAnyAbove ? 'block' : 'none';
+        }
     }
 
     /**
@@ -3366,8 +4080,7 @@ class PosApp {
         const curRoleForHeader = (this.currentUser?.role || '').toLowerCase();
         const btnBo = document.getElementById('btnHeaderBackoffice');
         if (btnBo) {
-            const isManagerOrAdmin = ['manager', 'owner', 'admin', 'system_admin'].includes(curRoleForHeader) || this.hasPermission('dashboard.view') || this.hasPermission('orders.list');
-            btnBo.style.display = isManagerOrAdmin ? 'inline-flex' : 'none';
+            btnBo.style.display = 'none';
         }
 
         const mainNav = document.getElementById('mainNav');
@@ -3396,6 +4109,20 @@ class PosApp {
         if (tabOrders) tabOrders.style.display = canOrdersAccess ? '' : 'none';
         if (tabOil) tabOil.style.display = canOilAccess ? '' : 'none';
         if (tabClose) tabClose.style.display = canCloseDayAccess ? '' : 'none';
+
+        // Only show "Back to Register" for staff who actually have register access (Cashier, Owner, Manager)
+        const btnWasherBack = document.getElementById('btnWasherBackToPos');
+        if (btnWasherBack) {
+            btnWasherBack.style.setProperty('display', canPosAccess ? 'inline-flex' : 'none', 'important');
+        }
+        const btnQueueBack = document.getElementById('btnQueueBackToPos');
+        if (btnQueueBack) {
+            btnQueueBack.style.setProperty('display', canPosAccess ? 'inline-flex' : 'none', 'important');
+        }
+        const btnMechanicBack = document.getElementById('btnMechanicBackToPos');
+        if (btnMechanicBack) {
+            btnMechanicBack.style.setProperty('display', canPosAccess ? 'inline-flex' : 'none', 'important');
+        }
 
         // Check specialized worker screens (Washer tablet & Technical tablet)
         if (curRole === 'washer' || (canWasherDuty && !canPosAccess && !canCloseDayAccess)) {
@@ -3427,8 +4154,12 @@ class PosApp {
             if (canPosAccess) {
                 let savedHash = (window.location.hash || '').replace(/^#/, '');
                 if (savedHash === 'oil-service' || savedHash === 'oil_service') savedHash = 'oil';
-                const savedTab = savedHash || sessionStorage.getItem('carwash_pos_active_tab') || 'pos';
+                const isApptHash = (savedHash === 'appointments');
+                const savedTab = isApptHash ? 'pos' : (savedHash || sessionStorage.getItem('carwash_pos_active_tab') || 'pos');
                 this.switchView(savedTab);
+                if (isApptHash) {
+                    setTimeout(() => this.openAppointmentModal(), 350);
+                }
             } else if (canQueueAccess) {
                 this.switchView('queue');
             } else if (canOrdersAccess) {
@@ -3468,7 +4199,34 @@ class PosApp {
     static switchView(viewName) {
         if (!viewName) viewName = 'pos';
         if (viewName === 'oil-service' || viewName === 'oil_service') viewName = 'oil';
+        if (viewName === 'appointments') {
+            this.switchView('pos');
+            setTimeout(() => this.openAppointmentModal(), 150);
+            return;
+        }
+
+        // Strict role-based screen isolation & security guard
+        const curRole = (this.currentUser?.role || '').toLowerCase();
+        const isSupervisor = (curRole === 'owner' || curRole === 'admin' || curRole === 'manager');
+
+        if (curRole === 'washer') {
+            // Washers are strictly locked to their Washer Command Center
+            viewName = 'washer';
+        } else if (curRole === 'technical' || curRole === 'mechanic') {
+            // Mechanics are strictly locked to their Technical Duty Station
+            viewName = 'mechanic';
+        } else if (curRole === 'cashier') {
+            // Cashiers manage the front desk (Register, Queue Cockpit, Orders, Oil, Shift Close)
+            // They do not run worker tablets; if navigated to washer/mechanic, route to queue cockpit
+            if (viewName === 'washer' || viewName === 'mechanic') {
+                viewName = 'queue';
+            }
+        }
+
         this.currentView = viewName;
+        if (viewName !== 'pos') {
+            this.closeVirtualKeyboard();
+        }
         try {
             sessionStorage.setItem('carwash_pos_active_tab', viewName);
             if (window.location.hash !== '#' + viewName) {
@@ -3513,8 +4271,6 @@ class PosApp {
             this.renderOilReminders();
         } else if (viewName === 'close') {
             this.renderDailyClose();
-        } else if (viewName === 'appointments') {
-            this.renderAppointmentsScreen();
         }
     }
 
@@ -3949,6 +4705,12 @@ class PosApp {
             sidebar.querySelectorAll('.category-pill:not(.pictures-toggle-pill)').forEach(p => p.classList.remove('active'));
             allBtn.classList.add('active');
             this.selectedCategory = 'all';
+            const searchInput = document.getElementById('posGlobalSearchInput');
+            if (searchInput && searchInput.value) {
+                searchInput.value = '';
+                const clearBtn = document.getElementById('btnPosSearchClear');
+                if (clearBtn) clearBtn.style.display = 'none';
+            }
             this.renderCatalog();
         });
         if (targetContainer !== sidebar) {
@@ -4048,6 +4810,12 @@ class PosApp {
                 sidebar.querySelectorAll('.category-pill:not(.pictures-toggle-pill)').forEach(p => p.classList.remove('active'));
                 btn.classList.add('active');
                 this.selectedCategory = catId;
+                const searchInput = document.getElementById('posGlobalSearchInput');
+                if (searchInput && searchInput.value) {
+                    searchInput.value = '';
+                    const clearBtn = document.getElementById('btnPosSearchClear');
+                    if (clearBtn) clearBtn.style.display = 'none';
+                }
                 this.renderCatalog();
             });
 
@@ -4125,6 +4893,7 @@ class PosApp {
                 html += `
                     <div class="pos-item-card card-picture-mode"
                          data-svc-id="${svc.id}"
+                         data-category="${this.escapeHtml(svc.category || '')}"
                          onclick="PosApp.addServiceToCart(${svc.id})"
                          onmousedown="PosApp.handleCardPressStart(event, 'svc_${svc.id}')"
                          onmouseup="PosApp.handleCardPressEnd(event)"
@@ -4173,7 +4942,10 @@ class PosApp {
                     : `<i class="fa-solid ${svcIcon}"></i>`;
 
                 html += `
-                    <div class="pos-item-card compact-mode" onclick="PosApp.addServiceToCart(${svc.id})">
+                    <div class="pos-item-card compact-mode"
+                         data-svc-id="${svc.id}"
+                         data-category="${this.escapeHtml(svc.category || '')}"
+                         onclick="PosApp.addServiceToCart(${svc.id})">
                         <div class="compact-card-badges">
                             <span class="item-duration-badge"><i class="fa-regular fa-clock"></i> ${svc.duration_min || 20}m</span>
                             <span class="service-wait-time-badge" data-service-id="${svc.id}" style="display: ${waitDisplay};"><i class="fa-regular fa-clock"></i> ${svcWaitText || ''}</span>
@@ -4239,6 +5011,8 @@ class PosApp {
                 html += `
                     <div class="pos-item-card card-picture-mode card-product"
                          data-prod-id="${prod.id}"
+                         data-category="${this.escapeHtml(prod.category || '')}"
+                         data-brand="${this.escapeHtml(prod.brand || '')}"
                          onclick="PosApp.addProductToCart(${prod.id})"
                          onmousedown="PosApp.handleCardPressStart(event, ${prod.id})"
                          onmouseup="PosApp.handleCardPressEnd(event)"
@@ -4286,7 +5060,11 @@ class PosApp {
                     : `<i class="fa-solid ${prodIcon}"></i>`;
 
                 html += `
-                    <div class="pos-item-card compact-mode" onclick="PosApp.addProductToCart(${prod.id})">
+                    <div class="pos-item-card compact-mode"
+                         data-prod-id="${prod.id}"
+                         data-category="${this.escapeHtml(prod.category || '')}"
+                         data-brand="${this.escapeHtml(prod.brand || '')}"
+                         onclick="PosApp.addProductToCart(${prod.id})">
                         <div class="compact-card-badges">
                             ${stockTag}
                             <span class="item-badge ${isSpare ? 'spare' : 'product'}">${isSpare ? 'Part' : 'Product'}</span>
@@ -4322,9 +5100,15 @@ class PosApp {
 
         grid.innerHTML = html;
         this.updateCatalogCartBadges();
+
+        // Re-apply active search filter if search input has text
+        const searchInput = document.getElementById('posGlobalSearchInput');
+        if (searchInput && searchInput.value.trim()) {
+            this.handleGlobalSearch(searchInput.value);
+        }
     }
 
-    
+
     static updateCatalogCartBadges() {
         const inCartSvcIds = new Set(
             (this.cart || [])
@@ -4340,8 +5124,8 @@ class PosApp {
         document.querySelectorAll('#catalogGrid .pos-item-card').forEach(card => {
             const svcId = card.getAttribute('data-svc-id');
             const prodId = card.getAttribute('data-prod-id');
-            const isInCart = (svcId && inCartSvcIds.has(String(svcId))) || 
-                             (prodId && inCartProdIds.has(String(prodId)));
+            const isInCart = (svcId && inCartSvcIds.has(String(svcId))) ||
+                (prodId && inCartProdIds.has(String(prodId)));
             card.classList.toggle('in-cart', isInCart);
         });
     }
@@ -4544,6 +5328,13 @@ class PosApp {
         document.getElementById('cartLoyaltyRewardStatusBadge')?.setAttribute('style', 'display: none;');
         document.querySelectorAll('.disc-btn').forEach(b => b.classList.remove('active'));
         document.querySelector('.disc-btn[data-disc="0"]')?.classList.add('active');
+        const orderIdEl = document.getElementById('gotposOrderIdDisplay');
+        if (orderIdEl) {
+            orderIdEl.setAttribute('data-i18n', 'newOrder');
+            orderIdEl.textContent = (window.I18nManager && typeof window.I18nManager.t === 'function')
+                ? window.I18nManager.t('newOrder')
+                : 'New Order';
+        }
         this.renderCart();
     }
 
@@ -4559,10 +5350,877 @@ class PosApp {
     }
 
     // ========================================================
+    // BILLING HISTORY POPUP MODAL (Matches User Reference Design)
+    // ========================================================
+    static billingHistoryOrders = [];
+    static billingHistoryFilter = {
+        search: '',
+        method: 'all',
+        page: 1,
+        pageSize: 9
+    };
+
+    static async openBillingHistoryModal() {
+        const modal = document.getElementById('modalBillingHistory');
+        if (!modal) return;
+
+        this.billingHistoryFilter.search = '';
+        this.billingHistoryFilter.method = 'all';
+        this.billingHistoryFilter.page = 1;
+        this.billingHistoryFilter.pageSize = 9;
+
+        const searchInp = document.getElementById('billingHistorySearchInput');
+        if (searchInp) searchInp.value = '';
+
+        document.querySelectorAll('.billing-filter-item').forEach(b => {
+            if (b.getAttribute('data-method') === 'all') b.classList.add('active');
+            else b.classList.remove('active');
+        });
+
+        const dropdown = document.getElementById('billingFilterDropdown');
+        if (dropdown) dropdown.style.display = 'none';
+
+        modal.classList.add('open');
+
+        const tbody = document.getElementById('billingHistoryTableBody');
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2.5rem; color: #94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Loading invoices...</td></tr>`;
+        }
+
+        try {
+            const todayStr = new Date().toISOString().substring(0, 10);
+            const res = await PosApi.getTodayOrders('', todayStr);
+            if (res && res.success && Array.isArray(res.orders)) {
+                this.billingHistoryOrders = res.orders;
+            } else {
+                throw new Error(res?.message || 'Failed to fetch orders');
+            }
+        } catch (e) {
+            console.warn('Could not load orders from API for billing history modal, using local fallback', e);
+            this.billingHistoryOrders = PosStorage.getSyncedOrders() || [];
+        }
+
+        this.renderBillingHistoryTable();
+    }
+
+    static closeBillingHistoryModal() {
+        const modal = document.getElementById('modalBillingHistory');
+        if (modal) modal.classList.remove('open');
+        const dropdown = document.getElementById('billingFilterDropdown');
+        if (dropdown) dropdown.style.display = 'none';
+    }
+
+    static toggleBillingHistoryFilterMenu() {
+        const dropdown = document.getElementById('billingFilterDropdown');
+        if (!dropdown) return;
+        dropdown.style.display = (dropdown.style.display === 'none' || !dropdown.style.display) ? 'block' : 'none';
+    }
+
+    static setBillingHistoryMethodFilter(method) {
+        this.billingHistoryFilter.method = method || 'all';
+        this.billingHistoryFilter.page = 1;
+
+        document.querySelectorAll('.billing-filter-item').forEach(b => {
+            if (b.getAttribute('data-method') === method) b.classList.add('active');
+            else b.classList.remove('active');
+        });
+
+        const dropdown = document.getElementById('billingFilterDropdown');
+        if (dropdown) dropdown.style.display = 'none';
+
+        this.renderBillingHistoryTable();
+    }
+
+    static handleBillingHistorySearch(query) {
+        this.billingHistoryFilter.search = (query || '').trim().toLowerCase();
+        this.billingHistoryFilter.page = 1;
+        this.renderBillingHistoryTable();
+    }
+
+    static goToBillingHistoryPage(pageNum) {
+        this.billingHistoryFilter.page = pageNum;
+        this.renderBillingHistoryTable();
+    }
+
+    static toggleSelectAllBilling(checked) {
+        const cbs = document.querySelectorAll('#billingHistoryTableBody .billing-checkbox');
+        cbs.forEach(cb => { cb.checked = checked; });
+    }
+
+    static renderBillingHistoryTable() {
+        const tbody = document.getElementById('billingHistoryTableBody');
+        const infoEl = document.getElementById('billingHistoryFooterInfo');
+        const paginationEl = document.getElementById('billingHistoryPagination');
+        if (!tbody) return;
+
+        let list = this.billingHistoryOrders || [];
+
+        // Apply Search filter
+        const s = this.billingHistoryFilter.search;
+        if (s) {
+            list = list.filter(ord => {
+                const num = (ord.order_number || '').toLowerCase();
+                const cust = (ord.customer_name || '').toLowerCase();
+                const plate = (ord.plate_number || '').toLowerCase();
+                const total = (ord.total_usd ? ord.total_usd.toString() : '');
+                return num.includes(s) || cust.includes(s) || plate.includes(s) || total.includes(s);
+            });
+        }
+
+        // Apply Payment Method filter
+        const m = this.billingHistoryFilter.method;
+        if (m && m !== 'all') {
+            list = list.filter(ord => {
+                const meth = (ord.payment_method || 'cash').toLowerCase();
+                return meth.includes(m);
+            });
+        }
+
+        const totalCount = list.length;
+        const pageSize = this.billingHistoryFilter.pageSize || 9;
+        const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+        if (this.billingHistoryFilter.page > totalPages) {
+            this.billingHistoryFilter.page = totalPages;
+        }
+        const currentPage = Math.max(1, this.billingHistoryFilter.page);
+
+        if (totalCount === 0) {
+            const noMsg = (window.I18nManager && typeof window.I18nManager.t === 'function')
+                ? window.I18nManager.t('noInvoicesFound')
+                : 'No invoices found matching your search';
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2.5rem; color: #94a3b8;">${noMsg}</td></tr>`;
+            if (infoEl) infoEl.textContent = 'Showing 0 Results';
+            if (paginationEl) paginationEl.innerHTML = '';
+            return;
+        }
+
+        const startIdx = (currentPage - 1) * pageSize;
+        const pageItems = list.slice(startIdx, startIdx + pageSize);
+
+        let html = '';
+        pageItems.forEach(ord => {
+            const num = ord.order_number || `#${ord.id || ''}`;
+            const cust = this.formatCustomerName(ord.customer_name) || 'Walk-in Guest';
+            const plate = (ord.plate_number || '').trim();
+            const rawMethod = (ord.payment_method || 'cash').toLowerCase();
+            let methodLabel = 'Cash';
+            if (rawMethod === 'cash') methodLabel = 'Cash';
+            else if (rawMethod === 'aba') methodLabel = 'ABA';
+            else if (rawMethod === 'card') methodLabel = 'Card';
+            else if (rawMethod === 'khqr') methodLabel = 'KHQR';
+            else if (rawMethod === 'bank') methodLabel = 'Bank';
+            else methodLabel = rawMethod.charAt(0).toUpperCase() + rawMethod.slice(1);
+
+            // Format date & time e.g. "16 Nov 2026  10:45 AM"
+            let dtStr = ord.created_at || ord.paid_at || '';
+            let formattedDt = dtStr;
+            try {
+                if (dtStr) {
+                    const d = new Date(dtStr.replace(' ', 'T'));
+                    if (!isNaN(d.getTime())) {
+                        const day = d.getDate();
+                        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                        const month = months[d.getMonth()];
+                        const year = d.getFullYear();
+                        let hours = d.getHours();
+                        const minutes = d.getMinutes().toString().padStart(2, '0');
+                        const ampm = hours >= 12 ? 'PM' : 'AM';
+                        hours = hours % 12;
+                        hours = hours ? hours : 12;
+                        formattedDt = `${day} ${month} ${year}  ${hours}:${minutes} ${ampm}`;
+                    }
+                }
+            } catch (e) {}
+
+            const amountNum = parseFloat(ord.total_usd || ord.total_amount || 0);
+
+            html += `
+                <tr>
+                    <td style="text-align: center;">
+                        <input type="checkbox" class="billing-checkbox" data-order-number="${this.escapeHtml(num)}">
+                    </td>
+                    <td>
+                        <div class="billing-inv-number">#${this.escapeHtml(num)}</div>
+                    </td>
+                    <td>
+                        <div class="billing-cust-name">${this.escapeHtml(cust)}</div>
+                        ${plate && !/^(walk[\s\-_]?in|none|n\/a|-)$/i.test(plate) ? `<div class="billing-cust-sub">${this.escapeHtml(plate)}</div>` : ''}
+                    </td>
+                    <td>
+                        <div class="billing-pay-method">${this.escapeHtml(methodLabel)}</div>
+                    </td>
+                    <td>
+                        <div class="billing-datetime">${this.escapeHtml(formattedDt)}</div>
+                    </td>
+                    <td class="billing-amount">
+                        $${amountNum.toFixed(2)}
+                    </td>
+                    <td class="billing-action-cell">
+                        <button type="button" class="btn-billing-dots" onclick="PosApp.reprintReceipt('${this.escapeHtml(num)}')" title="Reprint Receipt">
+                            <i class="fa-solid fa-ellipsis-vertical"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+        tbody.innerHTML = html;
+
+        // Render Footer Info
+        const displayStart = startIdx + 1;
+        const displayEnd = Math.min(startIdx + pageSize, totalCount);
+        if (infoEl) {
+            infoEl.textContent = `Showing ${displayStart}-${displayEnd} of ${totalCount} Results`;
+        }
+
+        // Render Pagination Controls
+        if (paginationEl) {
+            let pagHtml = '';
+            const prevDisabled = currentPage <= 1 ? 'disabled' : '';
+            pagHtml += `<button type="button" class="btn-billing-page" ${prevDisabled} onclick="PosApp.goToBillingHistoryPage(${currentPage - 1})">&lt; Previous</button>`;
+
+            for (let i = 1; i <= totalPages; i++) {
+                if (totalPages > 6) {
+                    if (i !== 1 && i !== totalPages && Math.abs(i - currentPage) > 1) {
+                        if (i === 2 || i === totalPages - 1) pagHtml += `<span style="padding: 0 4px; color: #94a3b8;">...</span>`;
+                        continue;
+                    }
+                }
+                const activeCls = i === currentPage ? 'active' : '';
+                pagHtml += `<button type="button" class="btn-billing-page ${activeCls}" onclick="PosApp.goToBillingHistoryPage(${i})">${i}</button>`;
+            }
+
+            const nextDisabled = currentPage >= totalPages ? 'disabled' : '';
+            pagHtml += `<button type="button" class="btn-billing-page ${nextDisabled} onclick="PosApp.goToBillingHistoryPage(${currentPage + 1})">Next &gt;</button>`;
+
+            paginationEl.innerHTML = pagHtml;
+        }
+    }
+
+    // ========================================================
+    // LIVE BAY & QUEUE COCKPIT POPUP MODAL METHODS
+    // ========================================================
+    static async openQueueModal() {
+        const modal = document.getElementById('modalQueue');
+        if (!modal) return;
+        modal.classList.add('open');
+        await this.refreshQueueModal();
+    }
+
+    static closeQueueModal() {
+        const modal = document.getElementById('modalQueue');
+        if (modal) modal.classList.remove('open');
+    }
+
+    static openFullQueueFromModal() {
+        this.closeQueueModal();
+        this.switchView('queue');
+    }
+
+    static async openChooseBayFromModal(orderId, plateNumber) {
+        if (!this.currentBaysData || !this.currentBaysData.bays) {
+            await this.fetchBaysAndQueue();
+        }
+        await this.openChooseBayModal(orderId, plateNumber);
+    }
+
+    static async handleAssignBayOneTapFromModal(bayId, orderId, plate, bayName) {
+        await this.handleAssignBayOneTap(bayId, orderId, plate, bayName);
+        const modal = document.getElementById('modalQueue');
+        if (modal && modal.classList.contains('open')) {
+            await this.refreshQueueModal();
+        }
+    }
+
+    static async refreshQueueModal() {
+        const baysGrid = document.getElementById('modalBaysGrid');
+        const tbody = document.getElementById('modalQueueTableBody');
+        const summaryText = document.getElementById('modalQueueSummaryText');
+        const countBadge = document.getElementById('modalQueueCountBadge');
+        const capacitySummary = document.getElementById('modalBaysCapacitySummary');
+
+        if (baysGrid) {
+            baysGrid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 1.2rem; color: #94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Loading bays...</div>';
+        }
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: #94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Loading waiting queue...</td></tr>';
+        }
+
+        try {
+            const res = await PosApi.getBaysAndQueue();
+            if (res && res.success) {
+                this.currentBaysData = res;
+                const bays = res.bays || [];
+                const washQ = res.wash_queue || [];
+                const techQ = res.technical_queue || [];
+                const allQueue = [...washQ, ...techQ];
+                const totalWaiting = res.total_waiting ?? washQ.length;
+
+                if (countBadge) countBadge.textContent = totalWaiting;
+
+                // Bay Statistics
+                const freeBays = bays.filter(b => b.status === 'free').length;
+                const busyBays = bays.filter(b => b.status !== 'free').length;
+
+                if (capacitySummary) {
+                    capacitySummary.innerHTML = `<i class="fa-solid fa-circle-check text-success"></i> <span><strong>${freeBays}</strong> Free &bull; <strong>${busyBays}</strong> In Service</span>`;
+                }
+
+                if (summaryText) {
+                    const template = (window.I18nManager && typeof window.I18nManager.t === 'function')
+                        ? window.I18nManager.t('baysFreeSummary')
+                        : '{free} Bays Free • {waiting} Vehicles Waiting';
+                    summaryText.textContent = template.replace('{free}', freeBays).replace('{waiting}', totalWaiting);
+                }
+
+                // Next waiting vehicle without a bay assigned
+                const nextWaitingCar = allQueue.find(q => (!q.bay_id || q.bay_id == 0) && (q.status === 'waiting' || !q.status || q.status === 'pending')) || null;
+
+                // Render Bays Grid (4 Bays)
+                let bayHtml = '';
+                bays.forEach(bay => {
+                    const isFree = (bay.status === 'free');
+                    const isWash = (bay.bay_type === 'wash');
+                    const bayName = bay.bay_name || `Bay ${bay.bay_number || bay.id}`;
+                    const typeLabel = isWash ? 'Wash Bay' : 'Oil / Tech';
+
+                    const freeLabel = (window.I18nManager && typeof window.I18nManager.t === 'function')
+                        ? window.I18nManager.t('free')
+                        : 'FREE';
+                    const inUseLabel = (window.I18nManager && typeof window.I18nManager.t === 'function')
+                        ? window.I18nManager.t('busy')
+                        : 'IN USE';
+
+                    let freeActionHtml = '';
+                    if (isFree) {
+                        if (nextWaitingCar) {
+                            const nextPlate = (nextWaitingCar.plate_number || 'Next').trim();
+                            const nextOrderId = nextWaitingCar.order_id || nextWaitingCar.id;
+                            freeActionHtml = `
+                                <button type="button" class="btn btn-success btn-sm btn-bay-onetap-assign"
+                                    style="margin-top: 6px; padding: 4px 8px; font-size: 0.73rem; font-weight: 700; width: 100%; border-radius: 6px; background: #16a34a; border-color: #16a34a; color: #ffffff; display: flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; transition: all 0.15s ease;"
+                                    title="Assign next waiting vehicle (${this.escapeHtml(nextPlate)}) to ${this.escapeHtml(bayName)}"
+                                    onclick="event.stopPropagation(); PosApp.handleAssignBayOneTapFromModal(${bay.id}, ${nextOrderId}, '${this.escapeHtml(nextPlate)}', '${this.escapeHtml(bayName)}')">
+                                    <i class="fa-solid fa-play" style="font-size: 0.65rem;"></i>
+                                    <span>Assign: <strong>${this.escapeHtml(nextPlate)}</strong></span>
+                                </button>
+                            `;
+                        } else {
+                            freeActionHtml = `<div class="modal-bay-detail" style="color: #16a34a; font-weight: 600; margin-top: 4px;"><i class="fa-solid fa-check"></i> Clean &amp; Ready</div>`;
+                        }
+                    }
+
+                    bayHtml += `
+                        <div class="modal-bay-card ${isFree ? 'is-free' : 'is-busy'}">
+                            <div class="modal-bay-header">
+                                <span class="modal-bay-num">${this.escapeHtml(bayName)}</span>
+                                <span class="modal-bay-pill ${isFree ? 'free' : 'busy'}">${isFree ? freeLabel : inUseLabel}</span>
+                            </div>
+                            <div class="modal-bay-body">
+                                ${isFree ? `
+                                    <div style="color: #16a34a; font-weight: 700; font-size: 0.8rem; display: flex; align-items: center; gap: 4px;">
+                                        <i class="fa-solid fa-circle-check"></i> <span>Ready</span>
+                                    </div>
+                                    <div class="modal-bay-detail">${typeLabel} Available</div>
+                                    ${freeActionHtml}
+                                ` : `
+                                    <div class="modal-bay-plate">${this.escapeHtml(bay.plate_number || 'Vehicle')}</div>
+                                    <div class="modal-bay-detail">${this.escapeHtml(bay.customer_name || 'Walk-in')} &bull; ${bay.in_bay_minutes || 0}m</div>
+                                `}
+                            </div>
+                        </div>
+                    `;
+                });
+                if (baysGrid) baysGrid.innerHTML = bayHtml;
+
+                // Render Queue Table
+                if (allQueue.length === 0) {
+                    const noMsg = (window.I18nManager && typeof window.I18nManager.t === 'function')
+                        ? window.I18nManager.t('noVehiclesInQueue')
+                        : 'No vehicles waiting in queue right now';
+                    if (tbody) {
+                        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 2.2rem; color: #94a3b8;"><i class="fa-solid fa-car-side" style="margin-right: 6px; font-size: 1.1rem;"></i> ${noMsg}</td></tr>`;
+                    }
+                } else {
+                    let qHtml = '';
+                    allQueue.forEach((item, idx) => {
+                        const posLabel = idx === 0 ? '1st (Next)' : (idx === 1 ? '2nd' : `${idx + 1}th`);
+                        const plate = (item.plate_number || 'Walk-in').trim();
+                        const cust = this.formatCustomerName(item.customer_name) || 'Walk-in Guest';
+                        const svc = item.service_names || item.services || 'Standard Wash';
+                        const st = item.status || 'waiting';
+                        const isWaiting = (!item.bay_id || item.bay_id == 0) && (st === 'waiting' || st === 'pending' || !st);
+
+                        let statusBadge = '<span class="status-badge waiting"><i class="fa-solid fa-clock"></i> Waiting</span>';
+                        if (st === 'in_progress' || st === 'in_wash') {
+                            const bayLabel = item.bay_name ? ` (${item.bay_name})` : '';
+                            statusBadge = `<span class="status-badge in-progress"><i class="fa-solid fa-shower"></i> In Wash${bayLabel}</span>`;
+                        } else if (st === 'qc' || st === 'ready') {
+                            statusBadge = '<span class="status-badge paid"><i class="fa-solid fa-circle-check"></i> Ready</span>';
+                        }
+
+                        let actionBtnHtml = '';
+                        if (isWaiting) {
+                            actionBtnHtml = `
+                                <button type="button" class="btn btn-primary btn-sm btn-modal-assign-bay"
+                                    style="font-size: 0.76rem; font-weight: 700; padding: 4px 10px; background: #0284c7; border-color: #0284c7; color: #ffffff; border-radius: 6px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;"
+                                    title="Assign ${this.escapeHtml(plate)} to a bay"
+                                    onclick="PosApp.openChooseBayFromModal(${item.order_id || item.id}, '${this.escapeHtml(plate)}')">
+                                    <i class="fa-solid fa-warehouse"></i> <span>Assign Bay</span>
+                                </button>
+                            `;
+                        } else {
+                            actionBtnHtml = `
+                                <button type="button" class="btn btn-outline btn-sm"
+                                    style="font-size: 0.75rem; padding: 4px 9px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;"
+                                    onclick="PosApp.openFullQueueFromModal()">
+                                    <i class="fa-solid fa-sliders"></i> <span>Manage</span>
+                                </button>
+                            `;
+                        }
+
+                        qHtml += `
+                            <tr>
+                                <td><span style="font-weight: 800; font-size: 0.8rem; color: #0284c7;">${posLabel}</span></td>
+                                <td><span class="plate-pill"><i class="fa-solid fa-car-side" style="font-size: 0.72rem; opacity: 0.75; margin-right: 4px;"></i> ${this.escapeHtml(plate)}</span></td>
+                                <td><div style="font-weight: 650; font-size: 0.85rem;">${this.escapeHtml(cust)}</div></td>
+                                <td><div style="font-size: 0.82rem; color: #475569; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${this.escapeHtml(svc)}</div></td>
+                                <td>${statusBadge}</td>
+                                <td style="text-align: right;">
+                                    ${actionBtnHtml}
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    if (tbody) tbody.innerHTML = qHtml;
+                }
+            } else {
+                throw new Error(res?.message || 'Failed to fetch queue');
+            }
+        } catch (e) {
+            console.warn('Queue modal fetch error:', e);
+            if (baysGrid) baysGrid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 1.2rem; color: #ef4444;"><i class="fa-solid fa-triangle-exclamation"></i> Failed to fetch live bays</div>';
+            if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: #ef4444;"><i class="fa-solid fa-triangle-exclamation"></i> Failed to load waiting queue</td></tr>';
+        }
+    }
+
+    // ========================================================
+    // APPOINTMENTS & SCHEDULE POPUP MODAL METHODS
+    // ========================================================
+    static modalApptState = {
+        date: new Date().toISOString().split('T')[0],
+        search: '',
+        appointments: []
+    };
+
+    static formatSlotTime(timeStr) {
+        if (!timeStr) return '--:--';
+        try {
+            const parts = timeStr.split(':');
+            if (parts.length >= 2) {
+                let h = parseInt(parts[0], 10);
+                const m = parts[1];
+                const ampm = h >= 12 ? 'PM' : 'AM';
+                h = h % 12;
+                h = h ? h : 12;
+                return `${h}:${m} ${ampm}`;
+            }
+        } catch (e) {}
+        return timeStr.slice(0, 5);
+    }
+
+    static async openAppointmentModal() {
+        const modal = document.getElementById('modalAppointment');
+        if (!modal) return;
+        modal.classList.add('open');
+
+        // Set default date to today
+        const todayStr = new Date().toISOString().split('T')[0];
+        this.modalApptState.date = todayStr;
+        this.modalApptState.search = '';
+
+        const dateInput = document.getElementById('modalApptViewDate');
+        if (dateInput) dateInput.value = todayStr;
+
+        const searchInput = document.getElementById('modalApptSearchInput');
+        if (searchInput) searchInput.value = '';
+
+        const drawer = document.getElementById('modalApptBookingDrawer');
+        if (drawer) drawer.style.display = 'none';
+
+        // Set pills
+        document.getElementById('btnModalApptToday')?.classList.add('active');
+        document.getElementById('btnModalApptTomorrow')?.classList.remove('active');
+
+        // Populate services in drawer
+        this.populateModalApptServices();
+
+        await this.refreshAppointmentModal();
+    }
+
+    static closeAppointmentModal() {
+        const modal = document.getElementById('modalAppointment');
+        if (modal) modal.classList.remove('open');
+        const drawer = document.getElementById('modalApptBookingDrawer');
+        if (drawer) drawer.style.display = 'none';
+    }
+
+    static openFullAppointmentsFromModal() {
+        this.closeAppointmentModal();
+    }
+
+    static async setModalApptDate(which) {
+        let targetDate = new Date();
+        if (which === 'tomorrow') {
+            targetDate.setDate(targetDate.getDate() + 1);
+            document.getElementById('btnModalApptTomorrow')?.classList.add('active');
+            document.getElementById('btnModalApptToday')?.classList.remove('active');
+        } else {
+            document.getElementById('btnModalApptToday')?.classList.add('active');
+            document.getElementById('btnModalApptTomorrow')?.classList.remove('active');
+        }
+        const dateStr = targetDate.toISOString().split('T')[0];
+        this.modalApptState.date = dateStr;
+        const dateInput = document.getElementById('modalApptViewDate');
+        if (dateInput) dateInput.value = dateStr;
+
+        await this.refreshAppointmentModal();
+    }
+
+    static async handleModalApptDateChange(newDate) {
+        if (!newDate) return;
+        this.modalApptState.date = newDate;
+
+        const todayStr = new Date().toISOString().split('T')[0];
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomStr = tomorrow.toISOString().split('T')[0];
+
+        document.getElementById('btnModalApptToday')?.classList.toggle('active', newDate === todayStr);
+        document.getElementById('btnModalApptTomorrow')?.classList.toggle('active', newDate === tomStr);
+
+        await this.refreshAppointmentModal();
+    }
+
+    static handleModalApptSearch(query) {
+        this.modalApptState.search = (query || '').trim().toLowerCase();
+        this.renderModalAppointmentTable();
+    }
+
+    static async refreshAppointmentModal() {
+        const tbody = document.getElementById('modalAppointmentTableBody');
+        const summaryText = document.getElementById('modalApptSummaryText');
+
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: #94a3b8;"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading appointments...</td></tr>';
+        }
+
+        try {
+            const date = this.modalApptState.date || new Date().toISOString().split('T')[0];
+            const res = await PosApi.getAppointments(date);
+            const appts = (res && res.success && Array.isArray(res.appointments)) ? res.appointments : [];
+            this.modalApptState.appointments = appts;
+            this.renderModalAppointmentTable();
+        } catch (e) {
+            console.warn('Failed to load appointments for modal:', e);
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: #ef4444;"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Failed to load appointments.</td></tr>';
+            }
+        }
+    }
+
+    static renderModalAppointmentTable() {
+        const tbody = document.getElementById('modalAppointmentTableBody');
+        const summaryText = document.getElementById('modalApptSummaryText');
+        if (!tbody) return;
+
+        const appts = this.modalApptState.appointments || [];
+        const search = this.modalApptState.search;
+
+        let filtered = appts;
+        if (search) {
+            filtered = appts.filter(a => {
+                const name = (a.customer_name || '').toLowerCase();
+                const plate = (a.plate_number || '').toLowerCase();
+                const phone = (a.customer_phone || '').toLowerCase();
+                const svc = (a.service_name || '').toLowerCase();
+                return name.includes(search) || plate.includes(search) || phone.includes(search) || svc.includes(search);
+            });
+        }
+
+        const totalCount = appts.length;
+        const arrivedCount = appts.filter(a => a.status === 'arrived' || a.status === 'in_progress' || a.status === 'completed').length;
+
+        if (summaryText) {
+            const tmpl = (window.I18nManager && typeof window.I18nManager.t === 'function')
+                ? window.I18nManager.t('apptsScheduledSummary')
+                : '{total} Scheduled • {arrived} Checked In';
+            summaryText.textContent = tmpl.replace('{total}', totalCount).replace('{arrived}', arrivedCount);
+        }
+
+        if (filtered.length === 0) {
+            const noMsg = search
+                ? `No appointments matching "${this.escapeHtml(search)}"`
+                : ((window.I18nManager && typeof window.I18nManager.t === 'function')
+                    ? window.I18nManager.t('noApptsForDate')
+                    : 'No appointments scheduled for this date');
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 2.2rem; color: #94a3b8;"><i class="fa-solid fa-calendar-xmark mr-1" style="font-size: 1.1rem;"></i> ${noMsg}</td></tr>`;
+            return;
+        }
+
+        let html = '';
+        filtered.forEach(appt => {
+            const timeFormatted = this.formatSlotTime(appt.start_time || appt.appointment_time || '');
+            const plate = (appt.plate_number || 'Walk-in').trim();
+            const cust = this.formatCustomerName(appt.customer_name) || 'Walk-in Guest';
+            const phone = (appt.customer_phone || '').trim();
+            const svc = appt.service_name || 'Car Wash';
+            const price = parseFloat(appt.service_price || 0);
+            const isArrived = (appt.status === 'arrived' || appt.status === 'in_progress' || appt.status === 'completed');
+
+            let statusBadge = '<span class="status-badge waiting"><i class="fa-solid fa-clock"></i> Booked</span>';
+            if (appt.status === 'arrived') {
+                statusBadge = '<span class="status-badge paid"><i class="fa-solid fa-check"></i> Arrived</span>';
+            } else if (appt.status === 'in_progress' || appt.status === 'in_wash') {
+                statusBadge = '<span class="status-badge in-progress"><i class="fa-solid fa-shower"></i> In Wash</span>';
+            } else if (appt.status === 'completed') {
+                statusBadge = '<span class="status-badge paid"><i class="fa-solid fa-circle-check"></i> Completed</span>';
+            }
+
+            const checkInBtnLabel = (window.I18nManager && typeof window.I18nManager.t === 'function')
+                ? window.I18nManager.t('checkInAndCart')
+                : 'Check-in & Cart';
+
+            let actionHtml = '';
+            if (!isArrived) {
+                actionHtml = `
+                    <button type="button" class="btn btn-primary btn-sm btn-appt-load-cart"
+                        onclick="PosApp.handleApptCheckInFromModal(${appt.id})"
+                        style="font-size: 0.75rem; padding: 4px 10px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;">
+                        <i class="fa-solid fa-flag-checkered"></i> <span>${checkInBtnLabel}</span>
+                    </button>
+                `;
+            } else {
+                actionHtml = `
+                    <button type="button" class="btn btn-outline btn-sm"
+                        onclick="PosApp.closeAppointmentModal(); PosApp.openQueueModal();"
+                        style="font-size: 0.75rem; padding: 4px 8px; border-radius: 6px;">
+                        <i class="fa-solid fa-warehouse"></i> <span>View Queue</span>
+                    </button>
+                `;
+            }
+
+            html += `
+                <tr>
+                    <td><div style="font-weight: 700; color: #0f172a; font-size: 0.85rem;"><i class="fa-regular fa-clock" style="color: #64748b; font-size: 0.78rem; margin-right: 4px;"></i>${timeFormatted}</div></td>
+                    <td><span class="plate-pill"><i class="fa-solid fa-car-side" style="font-size: 0.72rem; opacity: 0.75; margin-right: 4px;"></i>${this.escapeHtml(plate)}</span></td>
+                    <td>
+                        <div style="font-weight: 650; font-size: 0.85rem;">${this.escapeHtml(cust)}</div>
+                        ${phone ? `<div style="font-size: 0.75rem; color: #64748b;"><i class="fa-solid fa-phone" style="font-size: 0.68rem; margin-right: 3px;"></i>${this.escapeHtml(phone)}</div>` : ''}
+                    </td>
+                    <td>
+                        <div style="font-size: 0.82rem; color: #1e293b; font-weight: 600;">${this.escapeHtml(svc)}</div>
+                        ${price > 0 ? `<div style="font-size: 0.75rem; color: #059669;">$${price.toFixed(2)}</div>` : ''}
+                    </td>
+                    <td>${statusBadge}</td>
+                    <td style="text-align: right;">${actionHtml}</td>
+                </tr>
+            `;
+        });
+        tbody.innerHTML = html;
+    }
+
+    static async handleApptCheckInFromModal(apptId) {
+        await this.handleAppointmentArrived(apptId);
+        await this.refreshAppointmentModal();
+    }
+
+    static populateModalApptServices() {
+        const select = document.getElementById('modalApptService');
+        if (!select) return;
+
+        const catalog = PosStorage.getCatalog();
+        const services = catalog?.services || [];
+        const isKm = (window.I18nManager && typeof window.I18nManager.getLang === 'function') ? (window.I18nManager.getLang() === 'km') : false;
+
+        const currentVal = select.value;
+        select.innerHTML = '<option value="">' + (isKm ? '-- ជ្រើសរើសសេវាកម្ម --' : '-- Choose Service --') + '</option>';
+        services.forEach(svc => {
+            const opt = document.createElement('option');
+            opt.value = svc.id;
+            const name = isKm ? (svc.name_km || svc.name_en || 'សេវាកម្ម') : (svc.name_en || svc.name_km || 'Service');
+            const price = parseFloat(svc.price_usd || svc.base_price || 0);
+            const priceText = price > 0 ? ` ($${price.toFixed(2)})` : '';
+            opt.textContent = `${name}${priceText}`;
+            select.appendChild(opt);
+        });
+
+        if (currentVal && select.querySelector(`option[value="${currentVal}"]`)) {
+            select.value = currentVal;
+        } else if (services.length > 0) {
+            select.value = services[0].id;
+        }
+    }
+
+    static async toggleModalApptBookingForm(show) {
+        const drawer = document.getElementById('modalApptBookingDrawer');
+        if (!drawer) return;
+
+        const isCurrentlyHidden = (drawer.style.display === 'none' || !drawer.style.display);
+        const shouldShow = (typeof show === 'boolean') ? show : isCurrentlyHidden;
+
+        if (shouldShow) {
+            drawer.style.display = 'block';
+            this.populateModalApptServices();
+
+            const dateInp = document.getElementById('modalApptBookDate');
+            if (dateInp) {
+                dateInp.value = this.modalApptState.date || new Date().toISOString().split('T')[0];
+            }
+
+            // Auto-fill from active cart if customer or vehicle is selected
+            if (this.currentCustomer) {
+                const nameInp = document.getElementById('modalApptCustName');
+                const phoneInp = document.getElementById('modalApptCustPhone');
+                const plateInp = document.getElementById('modalApptPlate');
+                if (nameInp && !nameInp.value && this.currentCustomer.name && this.currentCustomer.name !== 'Walk-in Guest') {
+                    nameInp.value = this.currentCustomer.name;
+                }
+                if (phoneInp && !phoneInp.value && this.currentCustomer.phone) {
+                    phoneInp.value = this.currentCustomer.phone;
+                }
+                if (plateInp && !plateInp.value && this.currentCustomer.plate) {
+                    plateInp.value = this.currentCustomer.plate;
+                }
+            }
+
+            await this.loadModalApptSlots();
+        } else {
+            drawer.style.display = 'none';
+        }
+    }
+
+    static async handleModalBookingDateChange(newDate) {
+        if (!newDate) return;
+        await this.loadModalApptSlots();
+    }
+
+    static async loadModalApptSlots() {
+        const slotSelect = document.getElementById('modalApptSlot');
+        const dateInp = document.getElementById('modalApptBookDate');
+        const svcSelect = document.getElementById('modalApptService');
+        if (!slotSelect) return;
+
+        const date = dateInp?.value || this.modalApptState.date || new Date().toISOString().split('T')[0];
+        const svcId = parseInt(svcSelect?.value || 0);
+
+        slotSelect.innerHTML = '<option value="">Loading slots...</option>';
+
+        try {
+            const res = await PosApi.getAppointmentSlots(date, svcId);
+            if (res && res.success && Array.isArray(res.slots)) {
+                slotSelect.innerHTML = '';
+                // Note: SmartQueueEngine returns is_free (boolean) and available_capacity (number)
+                const freeSlots = res.slots.filter(s => (s.is_free !== false && (s.available_capacity === undefined || s.available_capacity > 0) && (s.available === undefined || s.available)));
+                if (freeSlots.length === 0) {
+                    slotSelect.innerHTML = '<option value="">No free slots for this date</option>';
+                    return;
+                }
+                freeSlots.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.time;
+                    const capText = (s.available_capacity !== undefined) ? ` (${s.available_capacity} free)` : '';
+                    opt.textContent = `${s.label || this.formatSlotTime(s.time)}${capText}`;
+                    slotSelect.appendChild(opt);
+                });
+            } else {
+                throw new Error(res?.message || 'Failed to load slots');
+            }
+        } catch (e) {
+            console.warn('Slot load error:', e);
+            slotSelect.innerHTML = '<option value="08:00:00">08:00 AM</option><option value="09:00:00">09:00 AM</option><option value="10:00:00">10:00 AM</option><option value="11:00:00">11:00 AM</option><option value="14:00:00">02:00 PM</option><option value="15:00:00">03:00 PM</option><option value="16:00:00">04:00 PM</option>';
+        }
+    }
+
+    static async submitModalAppointment() {
+        const nameInp = document.getElementById('modalApptCustName');
+        const phoneInp = document.getElementById('modalApptCustPhone');
+        const plateInp = document.getElementById('modalApptPlate');
+        const svcSelect = document.getElementById('modalApptService');
+        const dateInp = document.getElementById('modalApptBookDate');
+        const slotSelect = document.getElementById('modalApptSlot');
+
+        const customerName = (nameInp?.value || '').trim();
+        const customerPhone = (phoneInp?.value || '').trim();
+        const plateNumber = (plateInp?.value || '').trim().toUpperCase();
+        const serviceId = parseInt(svcSelect?.value || 0);
+        const date = dateInp?.value;
+        const timeSlot = slotSelect?.value;
+
+        if (!customerName) {
+            this.showToastNotice('Please enter customer name', 'warning');
+            nameInp?.focus();
+            return;
+        }
+        if (!plateNumber) {
+            this.showToastNotice('Please enter vehicle plate number', 'warning');
+            plateInp?.focus();
+            return;
+        }
+        if (!serviceId) {
+            this.showToastNotice('Please select a service', 'warning');
+            svcSelect?.focus();
+            return;
+        }
+        if (!timeSlot) {
+            this.showToastNotice('Please select an appointment time slot', 'warning');
+            slotSelect?.focus();
+            return;
+        }
+
+        try {
+            const payload = {
+                customer_name: customerName,
+                customer_phone: customerPhone,
+                plate_number: plateNumber,
+                service_id: serviceId,
+                appointment_date: date,
+                appointment_time: timeSlot, // Required by api/pos/index.php
+                start_time: timeSlot,       // Backward compatibility
+                vehicle_type: 'small_car'
+            };
+
+            const res = await PosApi.createAppointment(payload);
+            if (res && res.success) {
+                this.showToastNotice(`Appointment booked for ${plateNumber}!`, 'success');
+                this.playChimeSound();
+                this.toggleModalApptBookingForm(false);
+                if (nameInp) nameInp.value = '';
+                if (phoneInp) phoneInp.value = '';
+                if (plateInp) plateInp.value = '';
+
+                // Switch modal view date to the booked date so the cashier immediately sees the new booking
+                this.modalApptState.date = date;
+                const viewDateInp = document.getElementById('modalApptViewDate');
+                if (viewDateInp) viewDateInp.value = date;
+
+                await this.refreshAppointmentModal();
+
+
+            } else {
+                throw new Error(res?.message || 'Failed to book appointment');
+            }
+        } catch (e) {
+            console.error('Submit appointment error:', e);
+            this.showToastNotice(e.message || 'Failed to book appointment', 'danger');
+        }
+    }
+
+    // ========================================================
     // DISCOUNT POPUP MODAL METHODS
     // ========================================================
     static openDiscountModal() {
         if (!this.cart || this.cart.length === 0) {
+            this.showToastNotice(I18nManager.t('cartEmptyForDiscount') || 'Please add items to cart first', 'warning');
             return;
         }
 
@@ -4852,10 +6510,10 @@ class PosApp {
             if (cartDiscountBadge) cartDiscountBadge.style.display = 'none';
         } else {
             if (colHeaders) colHeaders.style.display = 'flex';
-            if (discBox) discBox.style.display = 'flex';
+            if (discBox) discBox.style.display = 'none';
             if (finSummary) finSummary.style.display = 'block';
-            if (methodWrap) methodWrap.style.display = 'block';
-            if (detailsAcc) detailsAcc.style.display = 'block';
+            if (methodWrap) methodWrap.style.display = 'none';
+            if (detailsAcc) detailsAcc.style.display = 'none';
             if (cartCol) cartCol.classList.remove('empty-cart');
 
             // Operational Workflow Badge & Service Crew Visibility (Tasks 2 & 5)
@@ -4941,8 +6599,17 @@ class PosApp {
         const btnCartPillDiscount = document.getElementById('btnCartPillDiscount');
         const cartDiscountBadge = document.getElementById('cartDiscountBadge');
 
+        // Dynamic GOTPOS Discount Voucher Box
+        const gotposDiscBox = document.getElementById('gotposDiscountBox');
+        const gotposDiscLabel = document.getElementById('gotposDiscountLabel');
+        const gotposBtnApply = document.getElementById('btnGotposApplyDiscount');
+        const gotposBtnRemove = document.getElementById('btnGotposRemoveDiscount');
+
         if (totals.discountUsd > 0) {
-            if (discRow) discRow.style.display = 'flex';
+            if (discRow) {
+                discRow.style.display = 'flex';
+                discRow.classList.add('is-active');
+            }
             if (discText) discText.textContent = `-$${totals.discountUsd.toFixed(2)}`;
             if (discLabel) {
                 let detail = '';
@@ -4951,7 +6618,7 @@ class PosApp {
                 } else if (this.currentDiscount.type === 'fixed') {
                     detail = ` ($${this.currentDiscount.value.toFixed(2)})`;
                 }
-                discLabel.textContent = `${I18nManager.t('discount')}${detail}`;
+                discLabel.textContent = `${I18nManager.t('discount') || 'Discount'}${detail}`;
             }
             if (btnCartPillDiscount) {
                 btnCartPillDiscount.classList.add('active');
@@ -4964,13 +6631,74 @@ class PosApp {
                     cartDiscountBadge.textContent = `$${this.currentDiscount.value}`;
                 }
             }
+
+            // Update Voucher Box State
+            let discStr = '';
+            if (this.currentDiscount.type === 'percent') {
+                discStr = `${this.currentDiscount.value}%`;
+            } else if (this.currentDiscount.type === 'fixed') {
+                discStr = `$${this.currentDiscount.value.toFixed(2)}`;
+            }
+            if (gotposDiscLabel) {
+                gotposDiscLabel.removeAttribute('data-i18n');
+                gotposDiscLabel.textContent = `${I18nManager.t('discount') || 'Discount'}: ${discStr} (-$${totals.discountUsd.toFixed(2)})`;
+            }
+            if (gotposBtnApply) {
+                gotposBtnApply.setAttribute('data-i18n', 'edit');
+                gotposBtnApply.textContent = I18nManager.t('edit') || 'Edit';
+            }
+            if (gotposBtnRemove) {
+                gotposBtnRemove.style.display = 'inline-flex';
+            }
+            if (gotposDiscBox) {
+                gotposDiscBox.classList.add('has-discount');
+            }
+
+            const btnPastelDisc = document.getElementById('btnPastelDiscount');
+            if (btnPastelDisc) {
+                btnPastelDisc.classList.add('has-discount');
+                const label = btnPastelDisc.querySelector('.pastel-label');
+                if (label) {
+                    label.removeAttribute('data-i18n');
+                    label.textContent = `${I18nManager.t('discount') || 'Discount'} (${discStr})`;
+                }
+            }
         } else {
-            if (discRow) discRow.style.display = 'none';
+            if (discRow) {
+                discRow.style.display = 'none';
+                discRow.classList.remove('is-active');
+            }
             if (btnCartPillDiscount) {
                 btnCartPillDiscount.classList.remove('active');
             }
             if (cartDiscountBadge) {
                 cartDiscountBadge.style.display = 'none';
+            }
+
+            // Reset Voucher Box State
+            if (gotposDiscLabel) {
+                gotposDiscLabel.setAttribute('data-i18n', 'addDiscount');
+                gotposDiscLabel.textContent = I18nManager.t('addDiscount') || 'Add Discount';
+            }
+            if (gotposBtnApply) {
+                gotposBtnApply.setAttribute('data-i18n', 'apply');
+                gotposBtnApply.textContent = I18nManager.t('apply') || 'Apply';
+            }
+            if (gotposBtnRemove) {
+                gotposBtnRemove.style.display = 'none';
+            }
+            if (gotposDiscBox) {
+                gotposDiscBox.classList.remove('has-discount');
+            }
+
+            const btnPastelDisc = document.getElementById('btnPastelDiscount');
+            if (btnPastelDisc) {
+                btnPastelDisc.classList.remove('has-discount');
+                const label = btnPastelDisc.querySelector('.pastel-label');
+                if (label) {
+                    label.setAttribute('data-i18n', 'discount');
+                    label.textContent = I18nManager.t('discount') || 'Discount';
+                }
             }
         }
 
@@ -5771,7 +7499,7 @@ class PosApp {
                 avatarEl.style.backgroundColor = '';
                 avatarEl.style.color = '';
             }
-            if (btnReset) btnReset.style.display = 'none';
+            if (btnReset) btnReset.style.display = 'inline-flex';
             return;
         }
 
@@ -6215,7 +7943,7 @@ class PosApp {
             const res = await PosApi.addCustomerVehicle(newCustData);
             this.selectCustomer(plate, name, phone, vtype, res.customer_id, res.vehicle_id);
             // Refresh customers cache
-            PosApi.syncCustomers().catch(() => {});
+            PosApi.syncCustomers().catch(() => { });
         } catch (e) {
             console.error('Save customer error:', e);
             // If offline, still select customer locally
@@ -6283,13 +8011,13 @@ class PosApp {
 
     static toggleFullscreen() {
         if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen().catch(() => {});
+            document.documentElement.requestFullscreen().catch(() => { });
         } else {
-            document.exitFullscreen().catch(() => {});
+            document.exitFullscreen().catch(() => { });
         }
     }
 
-    static openPaymentModal() {
+    static async openPaymentModal() {
         if (!this.isDeviceAuthorized) {
             this.handleDeviceUnauthorized(this.lastDeviceErrorCode || 'DEVICE_BLOCKED', 'This terminal is not authorized. The device key was revoked or deleted in the Back Office.');
             return;
@@ -6310,21 +8038,27 @@ class PosApp {
             return;
         }
 
-        // Validate Customer Intake (Task 1: Mandatory License Plate, No disruptive popups)
+        // Validate Customer Intake (License plate required for wash services)
+        const hasServices = (this.cart || []).some(it => it.type === 'service');
         const plateInp = document.getElementById('custPlateInput') || document.getElementById('custSearchInput');
-        const rawPlate = (plateInp?.value || this.currentCustomer?.plate || '').trim().toUpperCase();
-        if (!rawPlate || rawPlate.length < 2) {
-            const msgEl = document.getElementById('intakeValidationMsg');
-            if (msgEl) msgEl.style.display = 'flex';
-            if (plateInp) {
-                plateInp.classList.add('has-error');
-                plateInp.focus();
+        let rawPlate = (plateInp?.value || this.currentCustomer?.plate || '').trim().toUpperCase();
+
+        if (hasServices && (!rawPlate || rawPlate.length < 2 || rawPlate === 'WALK-IN')) {
+            const plateRes = await this.promptVehiclePlate(this.selectedVehicleType || 'small_car');
+            if (!plateRes || !plateRes.plate) {
+                return; // Cashier cancelled plate entry
             }
-            this.showCartToast('សូមបញ្ចូលស្លាកលេខយានយន្តជាមុន (Please enter vehicle plate number)');
-            return;
+            rawPlate = plateRes.plate;
+            if (plateInp) plateInp.value = rawPlate;
+            if (plateRes.vehicleType && plateRes.vehicleType !== this.selectedVehicleType) {
+                this.selectedVehicleType = plateRes.vehicleType;
+                this.updateVehicleTypeUI(plateRes.vehicleType);
+            }
+        } else if (!hasServices && (!rawPlate || rawPlate.length < 2)) {
+            rawPlate = 'RETAIL';
         }
 
-        // Plate is valid: Clear validation message & error highlight
+        // Clear validation message & error highlight
         const msgEl = document.getElementById('intakeValidationMsg');
         if (msgEl) msgEl.style.display = 'none';
         if (plateInp) plateInp.classList.remove('has-error');
@@ -7557,10 +9291,10 @@ class PosApp {
                 if (nextCar) {
                     const assignTitle = I18nManager.t('assignNextCar') || 'Assign Next';
                     cardContentHtml = `
-                        <div class="bay-empty-state" style="border-color: #86efac; background: #f0fdf4;">
+                        <div class="bay-empty-state" style="border: 1px solid #e2e8f0; background: #f8fafc;">
                             <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-                                <span style="font-weight: 800; color: #15803d; font-size: 0.82rem;"><i class="fa-solid fa-check-circle"></i> ${I18nManager.t('free') || 'Clean & Ready'}</span>
-                                <span style="font-size: 0.78rem; color: #166534;">${I18nManager.t('nextInLine') || 'Next'}: <strong>${this.escapeHtml(nextCar.plate_number)}</strong></span>
+                                <span style="font-weight: 700; color: #334155; font-size: 0.82rem;"><i class="fa-solid fa-circle-check" style="color: #16a34a;"></i> ${I18nManager.t('free') || 'Clean & Ready'}</span>
+                                <span style="font-size: 0.78rem; color: #64748b;">${I18nManager.t('nextInLine') || 'Next'}: <strong style="color: #0f172a;">${this.escapeHtml(nextCar.plate_number)}</strong></span>
                             </div>
                         </div>
                         <div class="bay-drop-zone-hint">
@@ -7650,9 +9384,10 @@ class PosApp {
         // Update Header Counts & Status
         const inWashCount = displayBays.filter(b => b.status !== 'free').length;
         const availCount = displayBays.filter(b => b.status === 'free').length;
+        const isKm = (I18nManager.getLang() === 'km');
         const statusCountsEl = document.getElementById('washerStatusCounts');
         if (statusCountsEl) {
-            statusCountsEl.textContent = `${inWashCount} in wash • ${availCount} available`;
+            statusCountsEl.textContent = isKm ? `${inWashCount} កំពុងលាង • ${availCount} ទំនេរ` : `${inWashCount} in wash • ${availCount} available`;
         }
 
         const countBadge = document.getElementById('washerBaysCountBadge');
@@ -7665,7 +9400,9 @@ class PosApp {
         const freeBay = displayBays.find(b => b.status === 'free');
         if (readyHint && readyText) {
             if (freeBay && nextCar) {
-                readyText.textContent = `Bay ${freeBay.bay_name || freeBay.id} ready to pull in`;
+                const rawName = freeBay.bay_name || String(freeBay.id);
+                const bName = rawName.toLowerCase().startsWith('bay') ? rawName : `Bay ${rawName}`;
+                readyText.textContent = isKm ? `${bName} រួចរាល់សម្រាប់ដាក់រថយន្តចូល` : `${bName} ready to pull in`;
                 readyHint.style.display = 'inline-flex';
             } else {
                 readyHint.style.display = 'none';
@@ -7699,20 +9436,20 @@ class PosApp {
                 bodyHtml = `
                     <div class="bay-free-body">
                         <div class="free-check-circle"><i class="fa-solid fa-check"></i></div>
-                        <div>
+                        <div class="free-info-wrap">
                             <div class="free-title">${I18nManager.t('bayCleanReady') || 'Bay is clean &amp; ready for vehicle'}</div>
                             <div class="free-subtitle">
-                                ${nextCar ? `Next in line: <b class="mono" style="color: #0f172a;">${this.escapeHtml(nextCar.plate_number)}</b> &middot; ${this.escapeHtml(nextCar.vehicle_type || 'Vehicle')}` : (I18nManager.t('noCarsWaiting') || 'No vehicles waiting in queue')}
+                                ${nextCar ? `${I18nManager.t('nextInLine') || 'Next'}: <span class="mono-plate-preview"><i class="fa-solid fa-car"></i> ${this.escapeHtml(nextCar.plate_number)}</span> &middot; ${this.escapeHtml(nextCar.vehicle_type || 'Vehicle')}` : (I18nManager.t('noCarsWaiting') || 'No vehicles waiting in queue')}
                             </div>
                         </div>
                     </div>
                 `;
 
-                const btnText = nextCar ? `${I18nManager.t('putInBay') || 'PULL IN NEXT'}: ${this.escapeHtml(nextCar.plate_number)}` : (I18nManager.t('waitingForVehicles') || 'WAITING FOR VEHICLES');
+                const btnText = nextCar ? `${I18nManager.t('assignNextCar') || 'Put Next Car'}: ${this.escapeHtml(nextCar.plate_number)}` : (I18nManager.t('waitingForVehicles') || 'Waiting for vehicles');
                 actionHtml = `
                     <div class="bay-actions-row">
-                        <button type="button" class="btn-pullin-blue" ${!nextCar || !this.isOnline ? 'disabled' : ''} onclick="PosApp.handleWasherAssignBay(${bay.id}, ${nextCar ? nextCar.order_id : 0}, '${nextCar ? this.escapeHtml(nextCar.plate_number) : ''}', '${this.escapeHtml(bay.bay_name)}')">
-                            <i class="fa-solid fa-right-to-bracket mr-1"></i> ${btnText}
+                        <button type="button" class="btn-pullin-action ${nextCar ? 'btn-pullin-ready' : 'btn-pullin-empty'}" ${!nextCar || !this.isOnline ? 'disabled' : ''} onclick="PosApp.handleWasherAssignBay(${bay.id}, ${nextCar ? nextCar.order_id : 0}, '${nextCar ? this.escapeHtml(nextCar.plate_number) : ''}', '${this.escapeHtml(bay.bay_name)}')">
+                            <i class="fa-solid ${nextCar ? 'fa-play' : 'fa-clock'} mr-1"></i> ${btnText}
                         </button>
                     </div>
                 `;
@@ -7722,14 +9459,14 @@ class PosApp {
                     rightMeta = `
                         <div class="timer-box">
                             <div class="done-badge"><i class="fa-solid fa-flag-checkered"></i> Done</div>
-                            <div class="timer-sub">Handover ready</div>
+                            <div class="timer-sub">${isKm ? 'ត្រៀមប្រគល់ជូនជាង' : 'Handover ready'}</div>
                         </div>
                     `;
                 } else {
                     rightMeta = `
                         <div class="timer-box">
-                            <div class="timer-clock mono">${duration}m</div>
-                            <div class="timer-sub">of 25 min target</div>
+                            <div class="timer-clock mono"><i class="fa-regular fa-clock mr-1"></i>${duration}m</div>
+                            <div class="timer-sub">${isKm ? 'នៃគោលដៅ ២៥ នាទី' : 'of 25 min target'}</div>
                         </div>
                     `;
                 }
@@ -7737,7 +9474,7 @@ class PosApp {
                 bodyHtml = `
                     <div class="bay-occupied-body">
                         <div class="plate-meta-group">
-                            <div class="plate-badge-dark mono">${this.escapeHtml(plate)}</div>
+                            <div class="plate-badge-dark mono"><i class="fa-solid fa-car mr-1"></i>${this.escapeHtml(plate)}</div>
                             <div class="vehicle-info">
                                 <div class="vehicle-car">${this.escapeHtml(vehicleCar)}</div>
                                 <div class="vehicle-service" title="${this.escapeHtml(service)}">${this.escapeHtml(service)}</div>
@@ -7776,7 +9513,7 @@ class PosApp {
                     actionHtml = `
                         <div class="bay-actions-row">
                             <button type="button" class="btn-handover-purple" onclick="PosApp.openWasherFinishPrompt(${bay.id}, ${bay.current_order_id || 0}, '${this.escapeHtml(plate)}', '${this.escapeHtml(bay.bay_name)}', 1)">
-                                <i class="fa-solid fa-paper-plane mr-1"></i> HANDOVER TO TECH BAY 4
+                                <i class="fa-solid fa-paper-plane mr-1"></i> ${I18nManager.t('handoverToTech') || 'Handover to Tech (Bay 4)'}
                             </button>
                             <button type="button" class="btn-crew-sub" title="Wash Notes">
                                 <i class="fa-solid fa-clipboard"></i>
@@ -7787,7 +9524,7 @@ class PosApp {
                     actionHtml = `
                         <div class="bay-actions-row">
                             <button type="button" class="btn-complete-green" onclick="PosApp.openWasherFinishPrompt(${bay.id}, ${bay.current_order_id || 0}, '${this.escapeHtml(plate)}', '${this.escapeHtml(bay.bay_name)}', 0)">
-                                <i class="fa-solid fa-circle-check mr-1"></i> COMPLETE WASH &amp; QC
+                                <i class="fa-solid fa-circle-check mr-1"></i> ${I18nManager.t('completeWashQc') || 'Complete Wash & QC'}
                             </button>
                             <button type="button" class="btn-crew-sub" title="Crew Assigned">
                                 <i class="fa-solid fa-user-group mr-1"></i> 2
@@ -7798,9 +9535,7 @@ class PosApp {
             }
 
             html += `
-                <article class="bay-article card ${borderClass}" id="washerBayCard-${bay.id}">
-                    <span class="bay-accent-stripe ${accentClass}"></span>
-                    
+                <article class="bay-article ${borderClass}" id="washerBayCard-${bay.id}">
                     <div class="bay-top-row">
                         <div class="bay-id-group">
                             <div class="bay-tile ${tileClass}">${this.escapeHtml(String(bay.id))}</div>
@@ -7842,6 +9577,10 @@ class PosApp {
             if (res && res.success) {
                 await this.fetchBaysAndQueue();
                 await this.renderJobQueue();
+                const modalQueue = document.getElementById('modalQueue');
+                if (modalQueue && modalQueue.classList.contains('open')) {
+                    await this.refreshQueueModal();
+                }
             } else {
                 if (res?.error === 'PAYMENT_REQUIRED') {
                     this.showAppAlert(`Payment Required: Upfront payment is mandatory before vehicle ${plate} can enter service.`);
@@ -7858,6 +9597,10 @@ class PosApp {
                                 this.showToastNotice(`${plate} assigned to ${bayName} (Electronic receipt issued)`, 'success');
                                 await this.fetchBaysAndQueue();
                                 await this.renderJobQueue();
+                                const modalQueue = document.getElementById('modalQueue');
+                                if (modalQueue && modalQueue.classList.contains('open')) {
+                                    await this.refreshQueueModal();
+                                }
                                 return;
                             }
                         }
@@ -8087,10 +9830,14 @@ class PosApp {
         this.openWasherFinishPrompt(bayId, orderId, plate, bayName, 0, 'washer');
     }
 
-    static openChooseBayModal(orderId, plateNumber) {
+    static async openChooseBayModal(orderId, plateNumber) {
         if (!this.isOnline) {
             this.showAppAlert(I18nManager.t('offlineAssignDisabled') || 'Offline: cannot assign bay while disconnected.');
             return;
+        }
+
+        if (!this.currentBaysData || !this.currentBaysData.bays) {
+            await this.fetchBaysAndQueue();
         }
 
         const qcList = this.currentBaysData?.qc_queue || [];
@@ -8147,6 +9894,10 @@ class PosApp {
     static async handleChooseBaySelect(bayId, orderId, plate, bayName) {
         document.getElementById('modalChooseBay')?.classList.remove('open');
         await this.handleAssignBayOneTap(bayId, orderId, plate, bayName);
+        const modalQueue = document.getElementById('modalQueue');
+        if (modalQueue && modalQueue.classList.contains('open')) {
+            await this.refreshQueueModal();
+        }
     }
 
     // ========================================================
@@ -8432,6 +10183,30 @@ class PosApp {
         this.renderJobQueue();
     }
 
+    static queueSearchQuery = '';
+
+    static filterQueueRealtime(query) {
+        this.queueSearchQuery = (query || '').trim().toLowerCase();
+        const rows = document.querySelectorAll('.queue-list-table tbody tr');
+        const cards = document.querySelectorAll('.queue-grid .queue-card');
+
+        if (!this.queueSearchQuery) {
+            rows.forEach(r => r.style.display = '');
+            cards.forEach(c => c.style.display = '');
+            return;
+        }
+
+        const q = this.queueSearchQuery;
+        rows.forEach(r => {
+            const text = (r.textContent || '').toLowerCase();
+            r.style.display = text.includes(q) ? '' : 'none';
+        });
+        cards.forEach(c => {
+            const text = (c.textContent || '').toLowerCase();
+            c.style.display = text.includes(q) ? '' : 'none';
+        });
+    }
+
     static async handleCompletePickup(orderNumber, plateNumber = '') {
         try {
             await this.updateJobStatus(orderNumber, 'paid');
@@ -8608,18 +10383,18 @@ class PosApp {
                 badgeClass = 'finishing-pad';
                 badgeIcon = 'fa-sparkles';
                 statusText = I18nManager.t('finishingPadQc') || 'FINISHING PAD (QC)';
-                positionBadgeHtml = `<span class="queue-pos-badge qc" style="background: #e0e7ff; color: #4338ca; border: 1px solid #c7d2fe; font-weight: 700;"><i class="fa-solid fa-sparkles"></i> Finishing Pad (QC)</span>`;
+                positionBadgeHtml = `<span class="queue-pos-badge qc"><i class="fa-solid fa-sparkles"></i> Finishing Pad (QC)</span>`;
             } else if (isInBay && isMechanicalWorking) {
-                badgeClass = 'washing';
+                badgeClass = 'working';
                 badgeIcon = 'fa-wrench';
                 statusText = I18nManager.t('statusInService') || 'IN SERVICE';
-                positionBadgeHtml = `<span class="queue-pos-badge" style="background: #ffedd5; color: #ea580c; border: 1px solid #fed7aa; font-weight: 700;"><i class="fa-solid fa-wrench"></i> ${this.escapeHtml(assignedBay?.bay_name || 'Oil Change Bay')}</span>`;
+                positionBadgeHtml = `<span class="queue-pos-badge in-bay"><i class="fa-solid fa-wrench"></i> ${this.escapeHtml(assignedBay?.bay_name || 'Oil Change Bay')}</span>`;
             } else if (isInBay || status === 'washing') {
                 badgeClass = 'washing';
                 badgeIcon = 'fa-spinner fa-spin';
                 statusText = I18nManager.t('statusWashing') || 'WASHING';
                 const bName = assignedBay?.bay_name || (assignedBayId ? ('Bay ' + assignedBayId) : 'Wash Bay');
-                positionBadgeHtml = `<span class="queue-pos-badge" style="background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-weight: 700;"><i class="fa-solid fa-shower"></i> ${this.escapeHtml(bName)}</span>`;
+                positionBadgeHtml = `<span class="queue-pos-badge in-bay"><i class="fa-solid fa-shower"></i> ${this.escapeHtml(bName)}</span>`;
             } else if (status === 'finished') {
                 badgeClass = isPaidStatus ? 'finished badge-ready-pickup' : 'finished badge-ready-to-pay';
                 badgeIcon = 'fa-circle-check';
@@ -8648,20 +10423,20 @@ class PosApp {
             let nextActionBtn = '';
             if (isAtFinishingPad) {
                 nextActionBtn = `
-                    <button type="button" class="btn btn-primary btn-sm btn-qc-pass" style="background: #0284c7; border-color: #0284c7; font-weight: 700;" data-action="pass-qc" data-order-number="${this.escapeHtml(ord.order_number)}" data-order-id="${ord.id || 0}" data-plate="${this.escapeHtml(ord.plate_number)}">
+                    <button type="button" class="btn btn-sm btn-action-assign" data-action="pass-qc" data-order-number="${this.escapeHtml(ord.order_number)}" data-order-id="${ord.id || 0}" data-plate="${this.escapeHtml(ord.plate_number)}">
                         <i class="fa-solid fa-clipboard-check"></i> ${I18nManager.t('passQcHandover') || 'Pass QC & Handover'}
                     </button>
                 `;
             } else if (isInBay && isMechanicalWorking) {
                 nextActionBtn = `
-                    <button type="button" class="btn btn-outline btn-sm" style="border-color: #ea580c; color: #ea580c; font-weight: 700;" data-action="finish-bay-prompt" data-bay-id="${assignedBayId}" data-order-id="${ord.id || 0}" data-plate="${this.escapeHtml(ord.plate_number)}" data-role="technical" data-bay-name="${this.escapeHtml(assignedBay?.bay_name || 'Oil Change Bay')}">
+                    <button type="button" class="btn btn-outline btn-sm" style="border-color: #cbd5e1; color: #334155; font-weight: 700;" data-action="finish-bay-prompt" data-bay-id="${assignedBayId}" data-order-id="${ord.id || 0}" data-plate="${this.escapeHtml(ord.plate_number)}" data-role="technical" data-bay-name="${this.escapeHtml(assignedBay?.bay_name || 'Oil Change Bay')}">
                         <i class="fa-solid fa-check"></i> ${I18nManager.t('finishService') || 'Finish Service'}
                     </button>
                 `;
             } else if (isInBay || status === 'washing') {
                 const bName = assignedBay?.bay_name || (assignedBayId ? ('Bay ' + assignedBayId) : 'Wash Bay');
                 nextActionBtn = `
-                    <button type="button" class="btn btn-outline btn-sm" style="border-color: var(--success); color: var(--success); font-weight: 700;" data-action="finish-bay-prompt" data-bay-id="${assignedBayId || ''}" data-order-id="${ord.id || 0}" data-order-number="${this.escapeHtml(ord.order_number)}" data-plate="${this.escapeHtml(ord.plate_number)}" data-role="washer" data-bay-name="${this.escapeHtml(bName)}">
+                    <button type="button" class="btn btn-outline btn-sm" style="border-color: #bbf7d0; color: #166534; font-weight: 700; background: #ffffff;" data-action="finish-bay-prompt" data-bay-id="${assignedBayId || ''}" data-order-id="${ord.id || 0}" data-order-number="${this.escapeHtml(ord.order_number)}" data-plate="${this.escapeHtml(ord.plate_number)}" data-role="washer" data-bay-name="${this.escapeHtml(bName)}">
                         <i class="fa-solid fa-check"></i> ${I18nManager.t('finishWash') || 'Finish'}
                     </button>
                 `;
@@ -8669,7 +10444,7 @@ class PosApp {
                 if (!ord.arrived_at && !qItem) {
                     // Requirement 1: Customer arrived button
                     nextActionBtn = `
-                        <button type="button" class="btn btn-outline btn-sm" style="color: #16a34a; border-color: #86efac; font-weight: 700;" data-action="customer-arrived" data-order-number="${this.escapeHtml(ord.order_number)}" data-order-id="${ord.id || 0}" data-plate="${this.escapeHtml(ord.plate_number)}">
+                        <button type="button" class="btn btn-outline btn-sm" style="color: #334155; border-color: #cbd5e1; font-weight: 700;" data-action="customer-arrived" data-order-number="${this.escapeHtml(ord.order_number)}" data-order-id="${ord.id || 0}" data-plate="${this.escapeHtml(ord.plate_number)}">
                             <i class="fa-solid fa-car-side"></i> ${I18nManager.t('customerArrived') || 'Customer Arrived'}
                         </button>
                     `;
@@ -8682,7 +10457,7 @@ class PosApp {
                     `;
                 }
             } else if (status === 'washing') {
-                nextActionBtn = `<button type="button" class="btn btn-outline btn-sm" style="border-color: var(--success); color: var(--success); font-weight: 700;" data-action="finish-job" data-order-number="${this.escapeHtml(ord.order_number)}"><i class="fa-solid fa-check"></i> ${I18nManager.t('finishWash') || 'Finish'}</button>`;
+                nextActionBtn = `<button type="button" class="btn btn-outline btn-sm" style="border-color: #bbf7d0; color: #166534; font-weight: 700; background: #ffffff;" data-action="finish-job" data-order-number="${this.escapeHtml(ord.order_number)}"><i class="fa-solid fa-check"></i> ${I18nManager.t('finishWash') || 'Finish'}</button>`;
             } else if (status === 'finished') {
                 nextActionBtn = isPaidStatus
                     ? `
@@ -8724,15 +10499,15 @@ class PosApp {
                 ` : ''}
 
                 ${(!isCancelled && !isCashier) ? `
-                    <button type="button" class="btn btn-outline btn-sm btn-queue-action text-danger" style="color: #dc2626; border-color: #fecaca;" data-action="cancel-order" data-order-number="${this.escapeHtml(ord.order_number)}" title="Cancel Order">
-                        <i class="fa-solid fa-ban"></i> <span>${I18nManager.t('cancelBtn') || 'Cancel'}</span>
+                    <button type="button" class="btn btn-icon-round text-danger" data-action="cancel-order" data-order-number="${this.escapeHtml(ord.order_number)}" title="${I18nManager.t('cancelBtn') || 'Cancel'}">
+                        <i class="fa-solid fa-ban"></i>
                     </button>
                 ` : ''}
 
                 <button type="button" class="btn btn-icon-round" data-action="reprint-receipt" data-order-number="${this.escapeHtml(ord.order_number)}" title="Reprint Receipt">
                     <i class="fa-solid fa-print"></i>
                 </button>
-                <button type="button" class="btn btn-icon-round text-primary" data-action="print-ticket" data-order-number="${this.escapeHtml(ord.order_number)}" title="Print Washer Ticket">
+                <button type="button" class="btn btn-icon-round" data-action="print-ticket" data-order-number="${this.escapeHtml(ord.order_number)}" title="Print Washer Ticket">
                     <i class="fa-solid fa-ticket"></i>
                 </button>
             `;
@@ -8741,9 +10516,9 @@ class PosApp {
             let posCellHtml = positionBadgeHtml;
             if (!posCellHtml) {
                 if (status === 'finished') {
-                    posCellHtml = `<span class="queue-pos-badge" style="background: #dcfce7; color: #166534; border: 1px solid #86efac; font-size: 0.78rem; padding: 0.25rem 0.6rem;"><i class="fa-solid fa-flag-checkered"></i> Done</span>`;
+                    posCellHtml = `<span class="queue-pos-badge done"><i class="fa-solid fa-flag-checkered"></i> Done</span>`;
                 } else if (status === 'paid') {
-                    posCellHtml = `<span class="queue-pos-badge pos-sub"><i class="fa-solid fa-check"></i> Paid</span>`;
+                    posCellHtml = `<span class="queue-pos-badge paid"><i class="fa-solid fa-check"></i> Paid</span>`;
                 } else {
                     posCellHtml = `<span class="queue-pos-badge pos-sub">#${idx + 1}</span>`;
                 }
@@ -8760,14 +10535,14 @@ class PosApp {
                         ${posCellHtml}
                     </td>
                     <td class="col-plate">
-                        <div style="display: flex; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 0.35rem;">
                             ${isWaitingToAssign ? `<i class="fa-solid fa-grip-vertical queue-drag-handle" title="${I18nManager.t('dragDropToAssign') || 'Drag to assign bay'}"></i>` : ''}
                             <span class="queue-list-plate"><i class="fa-solid fa-car"></i> ${this.escapeHtml(ord.plate_number || 'N/A')}</span>
                         </div>
                     </td>
                     <td class="col-info">
-                        <div style="font-weight: 800; color: var(--text-main); font-size: 0.92rem;">${this.formatCustomerName(ord.customer_name)}</div>
-                        <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
+                        <div style="font-weight: 800; color: var(--text-main); font-size: 0.86rem; line-height: 1.2;">${this.formatCustomerName(ord.customer_name)}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 1px;">
                             <span>#${this.escapeHtml(ord.order_number)}</span>
                             ${ord.vehicle_type ? ` &bull; <span>${this.escapeHtml(ord.vehicle_type)}</span>` : ''}
                         </div>
@@ -8778,20 +10553,22 @@ class PosApp {
                         </div>
                     </td>
                     <td class="col-status">
-                        <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start; white-space: nowrap;">
-                            <span class="queue-badge ${badgeClass}" style="white-space: nowrap !important;"><i class="fa-solid ${badgeIcon}"></i> <span style="white-space: nowrap !important;">${statusText}</span></span>
+                        <div style="display: flex; flex-direction: column; gap: 2px; align-items: flex-start; white-space: nowrap;">
+                            <span class="queue-badge ${badgeClass}" style="white-space: nowrap !important; font-size: 0.72rem !important; padding: 2px 7px !important;"><i class="fa-solid ${badgeIcon}"></i> <span>${statusText}</span></span>
                             ${pendingBadgeHtml}
                             ${receiptPendingBadge}
                         </div>
                     </td>
                     <td class="col-financial">
-                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
-                            <div style="font-weight: 900; font-size: 0.98rem; color: ${isUnpaid ? '#ea580c' : 'var(--text-main)'};">$${totalNum.toFixed(2)}</div>
-                            <div style="font-size: 0.75rem; color: var(--text-muted);">${totalKhrVal.toLocaleString()} ៛</div>
-                            <span class="queue-payment-pill ${isPaidStatus ? 'is-paid' : 'is-unpaid'}" style="margin-top: 2px; font-size: 0.72rem; padding: 2px 7px;">
-                                <i class="fa-solid ${isPaidStatus ? 'fa-circle-check' : 'fa-circle-exclamation'}"></i>
-                                <span>${isPaidStatus ? (I18nManager.t('statusPaid') || 'Paid') : (I18nManager.t('statusUnpaid') || 'Unpaid')}</span>
-                            </span>
+                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 1px;">
+                            <div style="display: flex; align-items: center; gap: 0.35rem;">
+                                <span style="font-weight: 850; font-size: 0.92rem; color: #0f172a;">$${totalNum.toFixed(2)}</span>
+                                <span class="queue-payment-pill ${isPaidStatus ? 'is-paid' : 'is-unpaid'}" style="font-size: 0.68rem; padding: 1px 6px;">
+                                    <i class="fa-solid ${isPaidStatus ? 'fa-circle-check' : 'fa-circle-exclamation'}"></i>
+                                    <span>${isPaidStatus ? (I18nManager.t('statusPaid') || 'Paid') : (I18nManager.t('statusUnpaid') || 'Unpaid')}</span>
+                                </span>
+                            </div>
+                            <div style="font-size: 0.72rem; color: var(--text-muted);">${totalKhrVal.toLocaleString()} ៛</div>
                         </div>
                     </td>
                     <td class="col-actions">
@@ -8806,13 +10583,13 @@ class PosApp {
                 ? `draggable="true" data-draggable-vehicle="true" data-order-id="${ord.id || 0}" data-order-number="${this.escapeHtml(ord.order_number)}" data-plate="${this.escapeHtml(ord.plate_number || '')}" class="queue-card queue-card-draggable ${isCancelled ? 'is-cancelled' : ''} ${isReadyToPay ? 'is-ready-to-pay' : ''}" title="${I18nManager.t('dragDropToAssign') || 'Drag to assign bay'}"`
                 : `class="queue-card ${isCancelled ? 'is-cancelled' : ''} ${isReadyToPay ? 'is-ready-to-pay' : ''}"`;
 
-            // Build Legacy Grid Card HTML (for toggle switch)
+            // Build Modern Compact Grid Card HTML
             gridCardsHtml += `
                 <div ${draggableCardAttrs}>
-                    <!-- Section 1: Vehicle Plate & Queue Position -->
-                    <div class="queue-card-section queue-section-plate">
+                    <!-- Row 1: Vehicle Plate & Queue Position -->
+                    <div class="queue-card-header">
                         <div class="queue-plate-wrap">
-                            ${isWaitingToAssign ? `<i class="fa-solid fa-grip-vertical queue-drag-handle" style="margin-right: 0.35rem;"></i>` : '<i class="fa-solid fa-car-side queue-plate-icon"></i>'}
+                            ${isWaitingToAssign ? `<i class="fa-solid fa-grip-vertical queue-drag-handle" style="margin-right: 0.25rem;"></i>` : '<i class="fa-solid fa-car-side queue-plate-icon"></i>'}
                             <span class="queue-card-plate">${this.escapeHtml(ord.plate_number || 'N/A')}</span>
                         </div>
                         <div class="queue-pos-wrap">
@@ -8820,52 +10597,54 @@ class PosApp {
                         </div>
                     </div>
 
-                    <!-- Section 2: Order Status & Synchronization Badges -->
-                    <div class="queue-card-section queue-section-status">
-                        <div class="queue-status-badges" style="display: flex; flex-wrap: wrap; gap: 4px;">
-                            <span class="queue-badge ${badgeClass}" style="white-space: nowrap !important;"><i class="fa-solid ${badgeIcon}"></i> <span style="white-space: nowrap !important;">${statusText}</span></span>
-                            ${pendingBadgeHtml}
-                            ${receiptPendingBadge}
+                    <!-- Row 2: Customer Name, Status & Financials -->
+                    <div class="queue-card-body-row">
+                        <div class="queue-card-cust-info">
+                            <div class="queue-customer-name" title="${this.escapeHtml(ord.customer_name || 'Walk-in')}">${this.formatCustomerName(ord.customer_name)}</div>
+                            <div class="queue-order-sub">
+                                <span>#${this.escapeHtml(ord.order_number)}</span>
+                                ${!isAtFinishingPad ? `&bull; <span class="queue-badge ${badgeClass}" style="padding: 1px 5px !important; font-size: 0.68rem !important;"><i class="fa-solid ${badgeIcon}"></i> <span>${statusText}</span></span>` : ''}
+                                ${pendingBadgeHtml}
+                                ${receiptPendingBadge}
+                            </div>
+                        </div>
+                        <div class="queue-card-fin-info">
+                            <div class="queue-amount-usd">$${totalNum.toFixed(2)}</div>
+                            <span class="queue-payment-pill ${isPaidStatus ? 'is-paid' : 'is-unpaid'}">
+                                <i class="fa-solid ${isPaidStatus ? 'fa-circle-check' : 'fa-circle-exclamation'}"></i>
+                                <span>${isPaidStatus ? (I18nManager.t('statusPaid') || 'Paid') : (I18nManager.t('statusUnpaid') || 'Unpaid')}</span>
+                            </span>
                         </div>
                     </div>
 
-                    <!-- Section 3: Customer Name & Order Number -->
-                    <div class="queue-card-section queue-section-customer">
-                        <div class="queue-customer-meta">
-                            <i class="fa-solid fa-user-circle queue-meta-icon"></i>
-                            <span class="queue-customer-name">${this.formatCustomerName(ord.customer_name)}</span>
-                        </div>
-                        <div class="queue-order-meta">
-                            <i class="fa-solid fa-hashtag queue-meta-icon"></i>
-                            <span class="queue-order-number">${this.escapeHtml(ord.order_number)}</span>
-                        </div>
+                    <!-- Row 3: Selected Services (Compact) -->
+                    <div class="queue-card-services-row">
+                        ${servicesChipsHtml}
                     </div>
 
-                    <!-- Section 4: Selected Services -->
-                    <div class="queue-card-section queue-section-services">
-                        <div class="queue-section-label">
-                            <i class="fa-solid fa-spray-can-sparkles"></i> <span>${I18nManager.t('services') || 'Services'}</span>
+                    <!-- Row 4: Action Buttons (Bottom Bar) -->
+                    <div class="queue-card-footer">
+                        <div class="queue-card-primary-action">
+                            ${nextActionBtn}
+                            ${(!isCancelled && isUnpaid && status !== 'finished') ? `
+                                <button type="button" class="btn btn-sm btn-queue-pay ${isReadyToPay ? 'is-ready-to-pay' : ''}" data-action="pay-order" data-order-number="${this.escapeHtml(ord.order_number)}">
+                                    <i class="fa-solid fa-dollar-sign"></i> <span>${I18nManager.t('payOrder') || (isReadyToPay ? 'Pay / Checkout' : 'Pay Order')}</span>
+                                </button>
+                            ` : ''}
                         </div>
-                        <div class="queue-services-chips">
-                            ${servicesChipsHtml}
+                        <div class="queue-card-icon-actions">
+                            ${(!isCancelled && !isCashier) ? `
+                                <button type="button" class="btn btn-icon-round text-danger" data-action="cancel-order" data-order-number="${this.escapeHtml(ord.order_number)}" title="${I18nManager.t('cancelBtn') || 'Cancel'}">
+                                    <i class="fa-solid fa-ban"></i>
+                                </button>
+                            ` : ''}
+                            <button type="button" class="btn btn-icon-round" data-action="reprint-receipt" data-order-number="${this.escapeHtml(ord.order_number)}" title="Reprint Receipt">
+                                <i class="fa-solid fa-print"></i>
+                            </button>
+                            <button type="button" class="btn btn-icon-round" data-action="print-ticket" data-order-number="${this.escapeHtml(ord.order_number)}" title="Print Washer Ticket">
+                                <i class="fa-solid fa-ticket"></i>
+                            </button>
                         </div>
-                    </div>
-
-                    <!-- Section 6: Payment Status & Total Amount -->
-                    <div class="queue-card-section queue-section-financial">
-                        <div class="queue-payment-pill ${isPaidStatus ? 'is-paid' : 'is-unpaid'}">
-                            <i class="fa-solid ${isPaidStatus ? 'fa-circle-check' : 'fa-circle-exclamation'}"></i>
-                            <span>${isPaidStatus ? (I18nManager.t('statusPaid') || 'Paid') : (I18nManager.t('statusUnpaid') || 'Unpaid')}</span>
-                        </div>
-                        <div class="queue-financial-amounts">
-                            <span class="queue-amount-usd">$${totalNum.toFixed(2)}</span>
-                            <span class="queue-amount-khr">${totalKhrVal.toLocaleString()} ៛</span>
-                        </div>
-                    </div>
-
-                    <!-- Section 7: Action Buttons -->
-                    <div class="queue-card-section queue-section-actions">
-                        ${actionButtonsHtml}
                     </div>
                 </div>
             `;
@@ -8898,7 +10677,7 @@ class PosApp {
             grid.innerHTML = gridCardsHtml;
         }
 
-        // Requirement 8: Event delegation instead of inline onclick text
+        // Event delegation for queue card / table action buttons
         grid.onclick = (e) => {
             const btn = e.target.closest('[data-action]');
             if (!btn) return;
@@ -9920,7 +11699,7 @@ class PosApp {
         this.closeDaySubmit();
     }
 
-        static handleMileageChange(val) {
+    static handleMileageChange(val) {
         const mileage = parseInt(val);
         const reminderBox = document.getElementById('cartOilReminderBox');
         const nextMileageInput = document.getElementById('cartNextOilMileageInput');
@@ -10223,7 +12002,7 @@ class PosApp {
         };
     }
 
-        // ========================================================
+    // ========================================================
     // WASHER DUTY SCREEN (Requirement 13)
     // ========================================================
     // WASHER DUTY SCREEN (Requirement 3: show 3 bays and waiting list)
@@ -10233,6 +12012,14 @@ class PosApp {
         if (!grid) return;
 
         const user = this.currentUser || PosStorage.getUser();
+
+        // Control "Back to Register" visibility: only visible for Cashiers / Managers / Owners
+        const curRole = (user?.role || this.currentUser?.role || '').toLowerCase();
+        const canPos = (this.hasPermission('pos.access') || this.hasPermission('pos.create_order')) && curRole !== 'washer' && curRole !== 'technical' && curRole !== 'mechanic';
+        const btnWasherBack = document.getElementById('btnWasherBackToPos');
+        if (btnWasherBack) {
+            btnWasherBack.style.setProperty('display', canPos ? 'inline-flex' : 'none', 'important');
+        }
 
         // Requirement 3: Fetch bays and queue to populate the 3 bays board & waiting list
         await this.fetchBaysAndQueue(true);
@@ -10257,21 +12044,25 @@ class PosApp {
 
         // Render Washer Waiting List
         const washQueue = this.currentBaysData?.wash_queue || [];
+        const isKm = (I18nManager.getLang() === 'km');
         const wBadge = document.getElementById('washerWaitingBadge');
-        if (wBadge) wBadge.textContent = `${washQueue.length} vehicles`;
+        if (wBadge) wBadge.textContent = isKm ? `${washQueue.length} គ្រឿង` : `${washQueue.length} vehicles`;
 
         // Calculate Average Wait
         const avgWaitBadge = document.getElementById('washerAvgWaitBadge');
         if (avgWaitBadge) {
             const avgWait = washQueue.length ? Math.round(washQueue.reduce((s, q) => s + (parseInt(q.wait_minutes) || 0), 0) / washQueue.length) : 0;
-            avgWaitBadge.textContent = `Avg wait: ${avgWait} min`;
+            avgWaitBadge.textContent = isKm ? `រង់ចាំមធ្យម៖ ${avgWait} នាទី` : `Avg wait: ${avgWait} min`;
         }
 
         if (washQueue.length === 0) {
             grid.innerHTML = `
-                <div style="display:flex; height:100%; min-height:180px; flex-direction:column; align-items:center; justify-content:center; color:#94a3b8; padding: 2.5rem 0;">
-                    <i class="fa-solid fa-car-side" style="font-size:2.2rem; margin-bottom:0.5rem; color:#cbd5e1;"></i>
-                    <span style="font-size:0.875rem; font-weight:700;">${I18nManager.t('noCarsWaiting') || 'Queue is empty'}</span>
+                <div class="washer-queue-empty-state">
+                    <div class="washer-empty-icon-wrap">
+                        <i class="fa-solid fa-car-side"></i>
+                    </div>
+                    <div class="washer-empty-title">${I18nManager.t('noCarsWaiting') || 'Queue is empty'}</div>
+                    <div class="washer-empty-subtitle">New arrivals admitted at the register will appear here automatically</div>
                 </div>
             `;
             return;
@@ -10303,27 +12094,33 @@ class PosApp {
             let actionBtn = '';
             if (firstFreeBay) {
                 const btnClass = isNext ? 'btn-first' : 'btn-sub';
+                const rawName = firstFreeBay.bay_name || String(firstFreeBay.id);
+                const bName = rawName.toLowerCase().startsWith('bay') ? rawName : `Bay ${rawName}`;
+                const pullText = isKm ? `ដាក់ចូល ${bName}` : `Pull into ${bName}`;
                 actionBtn = `
                     <button type="button" class="btn-queue-pull ${btnClass}" ${!this.isOnline ? 'disabled title="Offline"' : ''} onclick="PosApp.handleWasherAssignBay(${firstFreeBay.id}, ${item.order_id}, '${this.escapeHtml(item.plate_number)}', '${this.escapeHtml(firstFreeBay.bay_name)}')">
-                        <i class="fa-solid fa-arrow-left mr-1"></i> Pull into Free ${this.escapeHtml(firstFreeBay.bay_name)}
+                        <i class="fa-solid fa-arrow-left mr-1"></i> ${pullText}
                     </button>
                 `;
             }
 
-            const vehicleCar = item.vehicle_type ? (item.vehicle_type.toUpperCase() + (item.customer_name ? ' • ' + item.customer_name : '')) : (item.customer_name || 'Walk-in Customer');
+            const customerName = item.customer_name || 'Walk-in Guest';
+            const vehicleCar = (item.vehicle_type || 'Vehicle').toUpperCase();
 
             html += `
                 <div class="queue-item-card ${cardClass}">
                     <div class="queue-item-top">
                         <div class="queue-id-plate-group">
-                            <div class="queue-pos-circle ${posClass}">${i + 1}</div>
-                            <div>
-                                <div class="queue-plate-text mono">${this.escapeHtml(item.plate_number)}</div>
-                                <div class="queue-car-text">${this.escapeHtml(vehicleCar)}</div>
+                            <span class="queue-pos-badge ${posClass}">${isNext ? '<i class="fa-solid fa-bolt"></i> 1st (Next)' : `#${i + 1}`}</span>
+                            <div class="plate-badge-dark mono-mini">
+                                <i class="fa-solid fa-car mr-1"></i>${this.escapeHtml(item.plate_number)}
+                            </div>
+                            <div class="queue-customer-info">
+                                <div class="queue-customer-name">${this.escapeHtml(customerName)}</div>
+                                <div class="queue-vehicle-type">${this.escapeHtml(vehicleCar)}</div>
                             </div>
                         </div>
                         <div class="queue-tags-col">
-                            ${isNext ? '<span class="star-next-pill"><i class="fa-solid fa-star"></i> Next in line</span>' : ''}
                             <span class="wait-time-pill ${waitClass}">
                                 <i class="fa-regular fa-clock"></i> <span>${waitMin}m wait</span>
                             </span>
@@ -10402,6 +12199,20 @@ class PosApp {
         const user = PosStorage.getUser();
         if (!user) return;
 
+        const isKm = (I18nManager.currentLocale === 'km');
+        const curRole = (user.role || '').toLowerCase();
+        const canPosAccess = user.permissions?.includes('pos.access') || ['owner', 'admin', 'manager', 'cashier'].includes(curRole);
+
+        // Role-based visibility for "Back to Register" button
+        const btnBack = document.getElementById('btnMechanicBackToPos');
+        if (btnBack) {
+            if (!canPosAccess || curRole === 'mechanic' || curRole === 'washer' || curRole === 'technical') {
+                btnBack.style.setProperty('display', 'none', 'important');
+            } else {
+                btnBack.style.removeProperty('display');
+            }
+        }
+
         try {
             const res = await PosApi.getTechnicalJobs(user.id);
             if (res && res.success) {
@@ -10416,6 +12227,33 @@ class PosApp {
                 if (handoverBadge) handoverBadge.textContent = handoverCars.length;
                 const activeBadge = document.getElementById('techActiveBadge');
                 if (activeBadge) activeBadge.textContent = activeJobs.length;
+
+                // Update Live Summary Pill in Section Header
+                const liveSummary = document.getElementById('mechanicLiveSummary');
+                const statusCountsPill = document.getElementById('mechanicStatusCountsPill');
+                if (liveSummary) {
+                    if (activeJobs.length > 0) {
+                        const inServiceTxt = isKm 
+                            ? `${activeJobs.length} កំពុងលើកស្ទូច • ${handoverCars.length} ក្នុងជួរ`
+                            : `${activeJobs.length} on hoist &bull; ${handoverCars.length} in queue`;
+                        liveSummary.innerHTML = inServiceTxt;
+                        if (statusCountsPill) {
+                            statusCountsPill.className = 'queue-bay-capacity-pill is-busy';
+                            const iconEl = statusCountsPill.querySelector('i');
+                            if (iconEl) iconEl.className = 'fa-solid fa-gear fa-spin mr-1';
+                        }
+                    } else {
+                        const freeTxt = isKm 
+                            ? (handoverCars.length > 0 ? `ស្ទូចទំនេរ • ${handoverCars.length} ក្នុងជួរ` : 'ស្ទូចទំនេរ &bull; ត្រៀមរួចរាល់')
+                            : (handoverCars.length > 0 ? `Hoist Standby &bull; ${handoverCars.length} in queue` : 'Hoist Ready &bull; Standby');
+                        liveSummary.innerHTML = freeTxt;
+                        if (statusCountsPill) {
+                            statusCountsPill.className = 'queue-bay-capacity-pill';
+                            const iconEl = statusCountsPill.querySelector('i');
+                            if (iconEl) iconEl.className = 'fa-solid fa-circle-check text-success mr-1';
+                        }
+                    }
+                }
 
                 // Auto-select tab if default
                 if (activeJobs.length > 0 && handoverCars.length === 0 && this.currentMechanicTab === 'queue') {
@@ -10442,6 +12280,15 @@ class PosApp {
                 if (liftCol) {
                     if (!primaryJob) {
                         // Bay 4 Free / Ready State
+                        const bayTitle = isKm ? 'បន្ទប់ទី ៤ • បន្ទប់ជួសជុល & បច្ចេកទេស' : 'Bay 4 &bull; Technical Service Bay';
+                        const baySub = isKm ? 'ស្ទូចត្រៀមរួចរាល់ • ទំនេរ' : 'Hoist Ready &bull; Standby';
+                        const bayChip = isKm ? 'បន្ទប់ទំនេរ' : 'Bay Available';
+                        const noActiveTitle = isKm ? 'មិនមានយានយន្តនៅលើស្ទូចទេ' : 'No Active Vehicle on Hoist';
+                        const noActiveDesc = isKm 
+                            ? 'បន្ទប់ទី ៤ ស្អាត និងស្ថិតក្នុងស្ថានភាពរួចរាល់។ សូមទាញយានយន្តពីជួរផ្ទេរចេញពីកន្លែងលាង ដើម្បីចាប់ផ្តើមការងារ។'
+                            : 'Bay 4 is clean and standing by for vehicle maintenance. Pull incoming vehicles from the wash handover queue to start service.';
+                        const refreshTxt = isKm ? 'ផ្ទុកទិន្នន័យឡើងវិញ' : 'Refresh Station';
+
                         liftCol.innerHTML = `
                             <article class="lift-hero-card border-free">
                                 <span class="lift-accent-stripe accent-free"></span>
@@ -10449,39 +12296,45 @@ class PosApp {
                                     <div class="lift-id-group">
                                         <div class="lift-tile tile-free">4</div>
                                         <div class="lift-title-box">
-                                            <div class="title">Technical Service Bay</div>
-                                            <div class="subtitle sub-free"><i class="fa-solid fa-circle-check"></i> Hoist Ready &bull; Standby</div>
+                                            <div class="title">${bayTitle}</div>
+                                            <div class="subtitle sub-free"><i class="fa-solid fa-circle-check"></i> ${baySub}</div>
                                         </div>
                                     </div>
                                     <span class="lift-chip chip-free">
-                                        <i class="fa-solid fa-check"></i> Bay Available
+                                        <i class="fa-solid fa-check"></i> ${bayChip}
                                     </span>
                                 </div>
 
                                 <div class="lift-free-box">
-                                    <div class="lift-free-circle"><i class="fa-solid fa-car-side"></i></div>
+                                    <div class="lift-free-circle"><i class="fa-solid fa-wrench"></i></div>
                                     <div>
-                                        <div class="lift-free-title">No Active Vehicle on Hoist</div>
-                                        <div class="lift-free-subtitle">Bay is ready for vehicle servicing. Pull a car from the wash handover queue to start.</div>
+                                        <div class="lift-free-title">${noActiveTitle}</div>
+                                        <div class="lift-free-subtitle">${noActiveDesc}</div>
                                     </div>
                                 </div>
 
-                                <div style="background: #f8fafc; border-radius: 0.85rem; border: 1.5px solid var(--border); padding: 1.5rem; text-align: center; color: var(--text-muted); font-size: 0.95rem;">
+                                <div>
                                     ${handoverCars.length > 0 ? `
-                                        <div style="font-weight: 800; color: var(--text-main); font-size: 1.05rem; margin-bottom: 0.6rem;">
-                                            <i class="fa-solid fa-car-wash" style="color: #0284c7;"></i> ${handoverCars.length} vehicle(s) ready in wash handover
+                                        <div class="handover-callout-card">
+                                            <div class="handover-callout-text">
+                                                <i class="fa-solid fa-car-wash" style="color: #0284c7;"></i>
+                                                ${isKm ? `មានយានយន្ត ${handoverCars.length} គ្រឿង ផ្ទេរពីកន្លែងលាងរង់ចាំការជួសជុល` : `${handoverCars.length} vehicle(s) ready in wash handover queue`}
+                                            </div>
+                                            <button type="button" class="btn-pullin-blue" style="max-width: 320px; margin: 0 auto;" onclick="PosApp.switchMechanicTab('queue')">
+                                                <i class="fa-solid fa-arrow-right"></i> <span>${isKm ? 'មើលជួរផ្ទេរពីកន្លែងលាង' : 'View Wash Handover Queue'}</span>
+                                            </button>
                                         </div>
-                                        <button type="button" class="btn-pullin-blue" style="max-width: 340px; margin: 0 auto;" onclick="PosApp.switchMechanicTab('queue')">
-                                            <i class="fa-solid fa-arrow-right"></i> View Wash Handover Queue
-                                        </button>
                                     ` : `
-                                        <div><i class="fa-solid fa-circle-check text-success mr-1"></i> Ready for next incoming vehicle.</div>
+                                        <div class="lift-ready-indicator">
+                                            <i class="fa-solid fa-circle-check text-success mr-1"></i>
+                                            <span>${isKm ? 'រួចរាល់សម្រាប់ទទួលយានយន្តបន្ទាប់។' : 'Ready for next incoming vehicle.'}</span>
+                                        </div>
                                     `}
                                 </div>
 
                                 <div class="lift-actions-row">
-                                    <button type="button" class="btn-hoist-sub" style="flex: 1; justify-content: center; padding: 1.1rem; font-size: 1rem;" onclick="PosApp.renderMechanicScreen()">
-                                        <i class="fa-solid fa-rotate"></i> Refresh Station
+                                    <button type="button" class="btn-hoist-sub" style="flex: 1; justify-content: center; padding: 0.95rem; font-size: 0.95rem;" onclick="PosApp.renderMechanicScreen()">
+                                        <i class="fa-solid fa-rotate"></i> <span>${refreshTxt}</span>
                                     </button>
                                 </div>
                             </article>
@@ -10508,7 +12361,7 @@ class PosApp {
                                 <div style="display: flex; gap: 0.5rem; margin-bottom: 0.65rem; overflow-x: auto; padding-bottom: 2px;">
                                     ${activeJobs.map((j, i) => `
                                         <button type="button" class="btn btn-sm ${i === this.selectedActiveJobIndex ? 'btn-primary' : 'btn-outline'}" style="font-weight: 800; white-space: nowrap; border-radius: 9999px; padding: 4px 12px;" onclick="PosApp.selectActiveJob(${i})">
-                                            <i class="fa-solid fa-car mr-1"></i> ${this.escapeHtml(j.order?.plate_number || `Job #${i+1}`)} (${this.escapeHtml(j.order?.bay_name || 'Bay')})
+                                            <i class="fa-solid fa-car mr-1"></i> ${this.escapeHtml(j.order?.plate_number || `Job #${i + 1}`)} (${this.escapeHtml(j.order?.bay_name || 'Bay')})
                                         </button>
                                     `).join('')}
                                 </div>
@@ -10518,7 +12371,7 @@ class PosApp {
                         // Tasks stage tiles
                         let tasksHtml = '';
                         if (tasks.length === 0) {
-                            tasksHtml = `<div style="grid-column: 1 / -1; padding: 0.75rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">Standard service procedure in progress</div>`;
+                            tasksHtml = `<div style="grid-column: 1 / -1; padding: 0.75rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">${isKm ? 'នីតិវិធីជួសជុលស្តង់ដារកំពុងដំណើរការ' : 'Standard service procedure in progress'}</div>`;
                         } else {
                             tasks.forEach((t, idx) => {
                                 const isDone = (t.status === 'completed');
@@ -10529,13 +12382,13 @@ class PosApp {
                                 if (!isDone) {
                                     clickAction = isWorking ? `onclick="PosApp.handleFinishTechTask(${t.id})"` : `onclick="PosApp.handleStartTechTask(${t.id})"`;
                                 } else {
-                                    clickAction = `onclick="PosApp.showToastNotice('Task already completed', 'info')"`;
+                                    clickAction = `onclick="PosApp.showToastNotice('${isKm ? 'ភារកិច្ចនេះបានបញ្ចប់រួចរាល់ហើយ' : 'Task already completed'}', 'info')"`;
                                 }
 
                                 // Clean up task title for concise display
                                 let cleanTitle = t.title || 'Technical Procedure';
-                                if (/engine oil change/i.test(cleanTitle)) cleanTitle = 'Drain & Refill Engine Oil';
-                                else if (/safety inspection/i.test(cleanTitle)) cleanTitle = 'Multi-Point Inspection';
+                                if (/engine oil change/i.test(cleanTitle)) cleanTitle = isKm ? 'បង្ហូរ & ប្តូរប្រេងម៉ាស៊ីន' : 'Drain & Refill Engine Oil';
+                                else if (/safety inspection/i.test(cleanTitle)) cleanTitle = isKm ? 'ត្រួតពិនិត្យសុវត្ថិភាព' : 'Multi-Point Inspection';
 
                                 tasksHtml += `
                                     <button type="button" class="btn-stage-tile ${stageClass}" ${clickAction} title="${this.escapeHtml(t.title)} (Lane: ${t.lane || 'Lane 1'})">
@@ -10545,6 +12398,19 @@ class PosApp {
                                 `;
                             });
                         }
+
+                        const bayTitle = isKm ? 'បន្ទប់ទី ៤ • បន្ទប់ជួសជុល & បច្ចេកទេស' : `${this.escapeHtml(ord.bay_name || 'Technical Service Bay')}`;
+                        const hoistSub = isKm ? 'ស្ទូចយានយន្តទី ១ • កម្ពស់ ១.៨៥ម' : 'Vehicle Hoist 1 &bull; Elevated 1.85m';
+                        const inServiceTxt = isKm ? 'កំពុងជួសជុល' : 'In Service';
+                        const custName = this.escapeHtml(ord.customer_name || (isKm ? 'ភ្ញៀវទូទៅ' : 'Walk-in Guest'));
+                        const vehType = this.escapeHtml(ord.vehicle_type || 'Car');
+                        const targetTimerTxt = isKm ? 'នៃគោលដៅ ៣០ នាទី' : 'of 30m target';
+                        const stagesTitle = isKm ? 'ដំណាក់កាលអនុវត្តការងារ (ចុចដើម្បីបន្ត)' : 'Procedural Execution Stages (Tap to Progress)';
+                        const oilDispensedTxt = isKm ? 'ប្រេងម៉ាស៊ីនចាក់រួច៖' : 'Engine Oil Dispensed:';
+                        const partsPendingTxt = isKm ? 'រង់ចាំគ្រឿងបន្លាស់' : 'Parts Pending';
+                        const reqPartsTxt = isKm ? 'ស្នើសុំគ្រឿងបន្លាស់ / ប្រេង' : 'Request Spare / Oil';
+                        const completeBtnTxt = isKm ? 'បញ្ចប់ការងារ &amp; បញ្ជូនទៅ QC' : 'COMPLETE SERVICE &amp; HANDOVER TO QC';
+                        const notesBtnTxt = isKm ? 'កំណត់ចំណាំ' : 'Notes';
 
                         liftCol.innerHTML = `
                             ${jobSwitcherHtml}
@@ -10556,35 +12422,37 @@ class PosApp {
                                     <div class="lift-id-group">
                                         <div class="lift-tile">${bayNum}</div>
                                         <div class="lift-title-box">
-                                            <div class="title">${this.escapeHtml(ord.bay_name || 'Technical Service Bay')}</div>
-                                            <div class="subtitle"><i class="fa-solid fa-shield-halved"></i> Vehicle Hoist 1 &bull; Elevated 1.85m</div>
+                                            <div class="title">${bayTitle}</div>
+                                            <div class="subtitle"><i class="fa-solid fa-shield-halved"></i> ${hoistSub}</div>
                                         </div>
                                     </div>
                                     <span class="lift-chip" id="liftChip">
-                                        <i class="fa-solid fa-gear fa-spin"></i> In Service
+                                        <i class="fa-solid fa-gear fa-spin"></i> ${inServiceTxt}
                                     </span>
                                 </div>
 
                                 <!-- Big Bold Vehicle Block -->
                                 <div class="vehicle-block">
                                     <div class="plate-meta-group">
-                                        <div class="plate-badge-dark mono" id="liftPlate">${this.escapeHtml(ord.plate_number)}</div>
+                                        <div class="plate-badge-dark mono" id="liftPlate">
+                                            <i class="fa-solid fa-car mr-1"></i>${this.escapeHtml(ord.plate_number)}
+                                        </div>
                                         <div class="vehicle-info">
-                                            <div class="vehicle-car" id="liftCar">${this.escapeHtml(ord.customer_name || 'Walk-in Customer')} (${this.escapeHtml(ord.vehicle_type || 'Car')})</div>
+                                            <div class="vehicle-car" id="liftCar">${custName} (${vehType})</div>
                                             <div class="vehicle-service" id="liftSvc">${this.escapeHtml(ord.service_names || 'Technical Service')} &bull; #${this.escapeHtml(ord.order_number)}</div>
                                         </div>
                                     </div>
                                     <div class="timer-box">
                                         <div class="timer-clock mono" id="liftTimer">--:--</div>
-                                        <div class="timer-sub">of 30m target</div>
+                                        <div class="timer-sub">${targetTimerTxt}</div>
                                     </div>
                                 </div>
 
                                 <!-- Big Tactile 4-Stage Task Buttons -->
                                 <div class="stage-buttons-box">
                                     <div class="stage-buttons-header">
-                                        <span>Procedural Execution Stages (Tap to Progress)</span>
-                                        <span id="stageProgressTxt" style="color: #0284c7; font-weight: 900;">${doneTasks} of ${totalTasks} Completed (${taskPercent}%)</span>
+                                        <span>${stagesTitle}</span>
+                                        <span id="stageProgressTxt" style="color: #0284c7; font-weight: 800;">${doneTasks} / ${totalTasks} ${isKm ? 'បានបញ្ចប់' : 'Completed'} (${taskPercent}%)</span>
                                     </div>
                                     <div class="stage-buttons-grid">
                                         ${tasksHtml}
@@ -10595,7 +12463,7 @@ class PosApp {
                                 <div class="quick-controls-row">
                                     <div class="fluid-pill">
                                         <i class="fa-solid fa-oil-can" style="color: #ea580c; font-size: 1.25rem;"></i>
-                                        <span>Engine Oil Dispensed:</span>
+                                        <span>${oilDispensedTxt}</span>
                                         <div class="fluid-adjuster">
                                             <button type="button" class="btn-big-step" onclick="PosApp.handleAdjustOil(-0.1)">-</button>
                                             <strong class="mono" id="oilVolDisplay" style="color: #c2410c; min-width: 4rem; text-align: center; font-size: 1.15rem;">${(this.activeOilLiters || 4.2).toFixed(1)} L</strong>
@@ -10605,7 +12473,7 @@ class PosApp {
 
                                     <button type="button" class="btn-parts-pill" onclick="PosApp.openRequestPartsModal(${ord.id}, '${this.escapeHtml(ord.plate_number)}')">
                                         <i class="fa-solid fa-boxes-stacked" style="color: #0284c7; font-size: 1.1rem;"></i>
-                                        <span id="partsCountText">Warehouse Parts: ${ord.has_pending_parts_request ? 'Parts Pending' : 'Request Spare / Oil'}</span>
+                                        <span id="partsCountText">${isKm ? 'គ្រឿងបន្លាស់ឃ្លាំង' : 'Warehouse Parts'}: ${ord.has_pending_parts_request ? partsPendingTxt : reqPartsTxt}</span>
                                     </button>
                                 </div>
 
@@ -10613,10 +12481,10 @@ class PosApp {
                                 <div class="lift-actions-row">
                                     <button type="button" class="btn-complete-green" onclick="PosApp.handleFinishTechJob(${ord.id}, '${this.escapeHtml(ord.plate_number)}')">
                                         <i class="fa-solid fa-circle-check" style="font-size: 1.35rem;"></i>
-                                        <span>COMPLETE SERVICE &amp; HANDOVER TO QC</span>
+                                        <span>${completeBtnTxt}</span>
                                     </button>
-                                    <button type="button" class="btn-hoist-sub" onclick="PosApp.openEditRepairNotesModal(${ord.id}, '${this.escapeHtml(ord.order_number)}', '${this.escapeHtml(ord.plate_number)}', '${this.escapeHtml(ord.repair_notes || '')}')" title="Repair Notes">
-                                        <i class="fa-solid fa-file-lines"></i> Notes
+                                    <button type="button" class="btn-hoist-sub" onclick="PosApp.openEditRepairNotesModal(${ord.id}, '${this.escapeHtml(ord.order_number)}', '${this.escapeHtml(ord.plate_number)}', '${this.escapeHtml(ord.repair_notes || '')}')" title="${notesBtnTxt}">
+                                        <i class="fa-solid fa-file-lines"></i> <span>${notesBtnTxt}</span>
                                     </button>
                                 </div>
                             </article>
@@ -10641,30 +12509,35 @@ class PosApp {
                     let queueHtml = '';
                     if (handoverCars.length === 0) {
                         queueHtml = `
-                            <div style="background: white; border: 2px dashed var(--border); border-radius: 1rem; padding: 2.5rem 1.5rem; text-align: center; color: var(--text-muted);">
-                                <div style="width: 56px; height: 56px; border-radius: 50%; background: #e0f2fe; color: #0284c7; display: inline-flex; align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 0.85rem;">
+                            <div class="empty-state-modern">
+                                <div class="empty-icon-circle blue">
                                     <i class="fa-solid fa-soap"></i>
                                 </div>
-                                <div style="font-weight: 800; font-size: 1.05rem; color: var(--text-main); margin-bottom: 0.25rem;">No Cars Waiting from Wash</div>
-                                <div style="font-size: 0.85rem;">Vehicles moving from wash to technical service will arrive here automatically.</div>
+                                <div class="empty-title">${isKm ? 'មិនទាន់មានយានយន្តផ្ទេរពីកន្លែងលាងទេ' : 'No Cars Waiting from Wash'}</div>
+                                <div class="empty-desc">${isKm ? 'យានយន្តដែលលាងរួចហើយត្រូវជួសជុល ឬប្តូរប្រេង នឹងបង្ហាញនៅទីនេះដោយស្វ័យប្រវត្តិ។' : 'Vehicles moving from wash to technical service will arrive here automatically.'}</div>
                             </div>
                         `;
                     } else {
                         handoverCars.forEach(car => {
+                            const cName = this.escapeHtml(car.customer_name || (isKm ? 'ភ្ញៀវទូទៅ' : 'Walk-in Guest'));
+                            const vType = this.escapeHtml(car.vehicle_type || 'Car');
+                            const pullBtnTxt = isKm ? 'ទាញឡើងលើស្ទូចបន្ទប់ទី ៤' : 'PULL ONTO BAY 4 LIFT';
+                            const readyTxt = isKm ? 'លាងរួចរាល់ • ត្រៀម' : 'Wash Finished &bull; Ready';
+
                             queueHtml += `
                                 <div class="queue-card card-shadow">
                                     <div class="queue-card-top">
-                                        <span class="queue-plate-dark mono">${this.escapeHtml(car.plate_number)}</span>
+                                        <span class="queue-plate-dark mono"><i class="fa-solid fa-car mr-1"></i>${this.escapeHtml(car.plate_number)}</span>
                                         <span class="queue-origin-badge">
-                                            <i class="fa-solid fa-water"></i> Wash Finished &bull; Ready
+                                            <i class="fa-solid fa-water"></i> ${readyTxt}
                                         </span>
                                     </div>
                                     <div>
-                                        <div class="queue-car-title">${this.escapeHtml(car.customer_name || 'Walk-in Customer')} &bull; ${this.escapeHtml(car.vehicle_type || 'Car')}</div>
+                                        <div class="queue-car-title">${cName} &bull; ${vType}</div>
                                         <div class="queue-car-svc">${this.escapeHtml(car.service_names || 'Technical Service')}</div>
                                     </div>
                                     <button type="button" class="btn-pullin-blue" onclick="PosApp.handleReceiveFromWash(${car.id}, '${this.escapeHtml(car.plate_number)}')">
-                                        <i class="fa-solid fa-arrow-down-to-bracket"></i> PULL ONTO BAY 4 LIFT
+                                        <i class="fa-solid fa-arrow-down-to-bracket"></i> <span>${pullBtnTxt}</span>
                                     </button>
                                 </div>
                             `;
@@ -10674,19 +12547,27 @@ class PosApp {
                     // Inspection HTML
                     let chkHtml = '';
                     if (primaryJobChecklists.length === 0) {
+                        const noInspectTitle = isKm 
+                            ? (primaryJob ? 'មិនតម្រូវឱ្យមានការត្រួតពិនិត្យទេ' : 'មិនមានយានយន្តនៅលើស្ទូចទេ')
+                            : (primaryJob ? 'No Inspection Items Required' : 'No Vehicle on Hoist');
+                        const noInspectDesc = isKm
+                            ? (primaryJob ? 'សេវាកម្មនេះមិនតម្រូវឱ្យមានការត្រួតពិនិត្យចំណុចសុវត្ថិភាពទេ។' : 'សូមទាញយានយន្តឡើងលើស្ទូច ដើម្បីធ្វើការត្រួតពិនិត្យសុវត្ថិភាព។')
+                            : (primaryJob ? 'This service does not require safety inspection checklist items.' : 'Pull a vehicle onto the hoist to perform its safety inspection.');
+
                         chkHtml = `
-                            <div style="background: white; border: 2px dashed var(--border); border-radius: 1rem; padding: 2.5rem 1.5rem; text-align: center; color: var(--text-muted);">
-                                <div style="width: 56px; height: 56px; border-radius: 50%; background: #f1f5f9; color: #94a3b8; display: inline-flex; align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 0.85rem;">
+                            <div class="empty-state-modern">
+                                <div class="empty-icon-circle slate">
                                     <i class="fa-solid fa-clipboard-check"></i>
                                 </div>
-                                <div style="font-weight: 800; font-size: 1.05rem; color: var(--text-main); margin-bottom: 0.25rem;">${primaryJob ? 'No Inspection Items Required' : 'No Vehicle on Hoist'}</div>
-                                <div style="font-size: 0.85rem;">${primaryJob ? 'This service does not require safety inspection checklist items.' : 'Pull a vehicle onto the hoist to perform its safety inspection.'}</div>
+                                <div class="empty-title">${noInspectTitle}</div>
+                                <div class="empty-desc">${noInspectDesc}</div>
                             </div>
                         `;
                     } else {
+                        const passAllTxt = isKm ? 'ជាប់ទាំងអស់គ្រប់ចំណុចត្រួតពិនិត្យ' : 'PASS ALL INSPECTION POINTS';
                         chkHtml += `
                             <button type="button" class="btn-pass-all" onclick="PosApp.handleQuickPassAllChecklist(${primaryJobOrder.id})">
-                                <i class="fa-solid fa-check-double"></i> PASS ALL INSPECTION POINTS (${passedChk}/${totalChk})
+                                <i class="fa-solid fa-check-double"></i> <span>${passAllTxt} (${passedChk}/${totalChk})</span>
                             </button>
                         `;
                         primaryJobChecklists.forEach(ci => {
@@ -10704,19 +12585,19 @@ class PosApp {
                                             ${ci.is_mandatory ? '<span style="color: #ef4444; font-weight: 900;" title="Mandatory">*</span>' : ''}
                                         </div>
                                         <div class="inspect-item-spec">
-                                            ${this.escapeHtml(ci.notes || 'Standard Spec & Calibration')}
+                                            ${this.escapeHtml(ci.notes || (isKm ? 'ស្តង់ដារលក្ខណៈបច្ចេកទេស' : 'Standard Spec & Calibration'))}
                                             ${ci.measurement_value ? ` &bull; <strong>${this.escapeHtml(ci.measurement_value)}</strong>` : ''}
                                         </div>
                                     </div>
                                     <div class="inspect-status-group">
                                         <button type="button" class="btn-chk-big ${isPassed ? 'active-pass' : ''}" onclick="PosApp.handleQuickSetChecklist(${ci.id}, 'pass', ${primaryJobOrder.id})">
-                                            <i class="fa-solid fa-check"></i> PASS
+                                            <i class="fa-solid fa-check"></i> <span>${isKm ? 'ជាប់' : 'PASS'}</span>
                                         </button>
                                         <button type="button" class="btn-chk-big ${isCaution ? 'active-caution' : ''}" onclick="PosApp.handleQuickSetChecklist(${ci.id}, 'caution', ${primaryJobOrder.id})">
-                                            <i class="fa-solid fa-triangle-exclamation"></i> WARN
+                                            <i class="fa-solid fa-triangle-exclamation"></i> <span>${isKm ? 'ប្រយ័ត្ន' : 'WARN'}</span>
                                         </button>
                                         <button type="button" class="btn-chk-big ${isFailed ? 'active-fail' : ''}" onclick="PosApp.handleQuickSetChecklist(${ci.id}, 'fail', ${primaryJobOrder.id})">
-                                            <i class="fa-solid fa-xmark"></i> FAIL
+                                            <i class="fa-solid fa-xmark"></i> <span>${isKm ? 'ធ្លាក់' : 'FAIL'}</span>
                                         </button>
                                     </div>
                                 </div>
@@ -10728,29 +12609,37 @@ class PosApp {
                     let compHtml = '';
                     if (completedJobs.length === 0) {
                         compHtml = `
-                            <div style="background: white; border: 2px dashed var(--border); border-radius: 1rem; padding: 2.5rem 1.5rem; text-align: center; color: var(--text-muted);">
-                                <div style="font-weight: 800; font-size: 1.05rem; color: var(--text-main); margin-bottom: 0.25rem;">No Completed Jobs Today</div>
-                                <div style="font-size: 0.85rem;">Finished technical jobs will be listed here.</div>
+                            <div class="empty-state-modern">
+                                <div class="empty-icon-circle slate">
+                                    <i class="fa-solid fa-clock-rotate-left"></i>
+                                </div>
+                                <div class="empty-title">${isKm ? 'មិនទាន់មានការងារបញ្ចប់ថ្ងៃនេះទេ' : 'No Completed Jobs Today'}</div>
+                                <div class="empty-desc">${isKm ? 'យានយន្តដែលបានជួសជុល និងត្រួតពិនិត្យរួចរាល់ នឹងបង្ហាញនៅទីនេះ។' : 'Finished technical jobs will be listed here.'}</div>
                             </div>
                         `;
                     } else {
                         completedJobs.forEach(cj => {
+                            const sentTxt = parseInt(cj.is_mixed) === 1 
+                                ? (isKm ? 'បញ្ជូនទៅកន្លែងលាង' : 'Sent to Wash')
+                                : (isKm ? 'រួចរាល់សម្រាប់ប្រគល់ជូន' : 'Ready for Pickup');
+                            const cName = this.escapeHtml(cj.customer_name || (isKm ? 'ភ្ញៀវទូទៅ' : 'Walk-in'));
+
                             compHtml += `
                                 <div style="background: white; border: 1.5px solid var(--border); border-left: 5px solid #16a34a; border-radius: 10px; padding: 0.9rem 1.1rem; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;">
                                     <div>
                                         <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-                                            <span class="mono" style="font-weight: 900; font-size: 1.1rem; color: var(--text-main);">${this.escapeHtml(cj.plate_number)}</span>
+                                            <span class="mono" style="font-weight: 900; font-size: 1.1rem; color: var(--text-main);"><i class="fa-solid fa-car mr-1"></i>${this.escapeHtml(cj.plate_number)}</span>
                                             <span style="font-size: 0.8rem; color: var(--text-muted);">#${this.escapeHtml(cj.order_number)}</span>
                                             <span class="badge" style="background: #dcfce7; color: #166534; font-size: 0.75rem; font-weight: 800; padding: 2px 8px; border-radius: 9999px;">
-                                                <i class="fa-solid fa-circle-check"></i> ${parseInt(cj.is_mixed) === 1 ? 'Sent to Wash' : 'Ready for Pickup'}
+                                                <i class="fa-solid fa-circle-check"></i> ${sentTxt}
                                             </span>
                                         </div>
                                         <div style="font-size: 0.85rem; color: var(--text-muted);">
-                                            ${this.escapeHtml(cj.service_names || 'Technical Service')} &bull; Customer: <strong>${this.escapeHtml(cj.customer_name || 'Walk-in')}</strong>
+                                            ${this.escapeHtml(cj.service_names || 'Technical Service')} &bull; ${isKm ? 'អតិថិជន' : 'Customer'}: <strong>${cName}</strong>
                                         </div>
                                     </div>
                                     <div style="text-align: right; flex-shrink: 0;">
-                                        <div style="font-size: 0.85rem; font-weight: 800; color: #16a34a;"><i class="fa-solid fa-check"></i> Done</div>
+                                        <div style="font-size: 0.85rem; font-weight: 800; color: #16a34a;"><i class="fa-solid fa-check"></i> ${isKm ? 'រួចរាល់' : 'Done'}</div>
                                         <div style="font-size: 0.75rem; color: var(--text-muted);">${(cj.finished_at || cj.updated_at || '').substring(11, 16)}</div>
                                     </div>
                                 </div>
@@ -10758,24 +12647,28 @@ class PosApp {
                         });
                     }
 
+                    const tabQueueTxt = isKm ? 'ជួរផ្ទេរពីលាង' : 'Wash Queue';
+                    const tabInspectTxt = isKm ? 'ត្រួតពិនិត្យ' : 'Inspection';
+                    const tabCompTxt = isKm ? 'បានបញ្ចប់' : 'Completed';
+
                     rightCol.innerHTML = `
                         <!-- Tab Header -->
                         <div class="right-tab-header">
                             <button type="button" class="tab-btn ${this.currentMechanicTab === 'queue' ? 'active' : ''}" id="tabBtnQueue" onclick="PosApp.switchMechanicTab('queue')">
                                 <i class="fa-solid fa-list-ol"></i>
-                                <span>Wash Queue</span>
+                                <span>${tabQueueTxt}</span>
                                 <span class="tab-badge" id="queueBadge">${handoverCars.length}</span>
                             </button>
                             <button type="button" class="tab-btn ${this.currentMechanicTab === 'inspection' ? 'active' : ''}" id="tabBtnInspection" onclick="PosApp.switchMechanicTab('inspection')">
                                 <i class="fa-solid fa-shield-halved"></i>
-                                <span>Inspection</span>
+                                <span>${tabInspectTxt}</span>
                                 <span class="tab-badge" id="inspectBadge" style="${isInspectionComplete ? 'background:#dcfce7; color:#15803d;' : ''}">
                                     ${totalChk > 0 ? `${passedChk}/${totalChk}` : '0/0'}
                                 </span>
                             </button>
                             <button type="button" class="tab-btn ${this.currentMechanicTab === 'completed' ? 'active' : ''}" id="tabBtnCompleted" onclick="PosApp.switchMechanicTab('completed')">
                                 <i class="fa-solid fa-clock-rotate-left"></i>
-                                <span>Completed</span>
+                                <span>${tabCompTxt}</span>
                                 <span class="tab-badge" id="completedBadge">${completedJobs.length}</span>
                             </button>
                         </div>
@@ -10800,7 +12693,7 @@ class PosApp {
         } catch (e) {
             console.warn('Technical screen fetch error:', e);
             if (liftCol) {
-                liftCol.innerHTML = `<div style="text-align: center; padding: 2rem; color: var(--danger);">Failed to load technical jobs. Please check connection.</div>`;
+                liftCol.innerHTML = `<div style="text-align: center; padding: 2rem; color: var(--danger);">${isKm ? 'មិនអាចទាញយកទិន្នន័យការងារបច្ចេកទេសបានទេ។ សូមពិនិត្យការតភ្ជាប់អ៊ីនធឺណិត។' : 'Failed to load technical jobs. Please check connection.'}</div>`;
             }
         }
     }
@@ -11829,7 +13722,7 @@ class PosApp {
 
         const restoreFullscreen = () => {
             if (this.wasFullscreenPreferred && !this.isFullscreen()) {
-                this.enterFullscreen().catch(() => {});
+                this.enterFullscreen().catch(() => { });
             }
         };
 
@@ -13394,11 +15287,57 @@ class PosApp {
         this._currentUpsellModalOpen = true;
 
         const isKm = (I18nManager.getLang() === 'km');
-        const titleEl = document.getElementById('upsellModalTitle');
-        const msgEl = document.getElementById('upsellModalMessage');
+        const isAddon = (offer.action_type === 'add_service');
 
-        if (titleEl) titleEl.textContent = isKm ? (offer.title_km || offer.title) : offer.title;
-        if (msgEl) msgEl.textContent = isKm ? (offer.message_km || offer.message) : offer.message;
+        const tagEl = document.getElementById('upsellModalTag');
+        const msgEl = document.getElementById('upsellModalMessage');
+        const subtextEl = document.getElementById('upsellModalSubtext');
+        const targetNameEl = document.getElementById('upsellTargetName');
+        const actionBadgeEl = document.getElementById('upsellActionBadge');
+        const priceUsdEl = document.getElementById('upsellPromoPriceUsd');
+        const priceKhrEl = document.getElementById('upsellPromoPriceKhr');
+        const hintEl = document.getElementById('upsellFlowHintText');
+        const acceptTextEl = document.getElementById('upsellAcceptBtnText');
+
+        if (tagEl) {
+            tagEl.textContent = isKm ? (isAddon ? '✨ ការផ្តល់ជូនបន្ថែមពិសេស' : '✨ កញ្ចប់ដំឡើងពិសេស') : (isAddon ? 'Special Add-On Offer' : 'Special Upgrade Offer');
+        }
+        if (msgEl) {
+            msgEl.textContent = isKm ? (offer.message_km || offer.message || offer.title_km) : (offer.message || offer.title);
+        }
+        if (targetNameEl) {
+            targetNameEl.textContent = isKm ? (offer.target_name_km || offer.target_name) : (offer.target_name || offer.target_name_km);
+        }
+        if (actionBadgeEl) {
+            actionBadgeEl.textContent = isAddon ? (isKm ? '+ បន្ថែមសេវា' : '+ ADD-ON') : (isKm ? '⟳ ដំឡើងកញ្ចប់' : '⟳ UPGRADE');
+            actionBadgeEl.style.background = isAddon ? '#ecfdf5' : '#f5f3ff';
+            actionBadgeEl.style.color = isAddon ? '#059669' : '#7c3aed';
+            actionBadgeEl.style.borderColor = isAddon ? '#a7f3d0' : '#ddd6fe';
+        }
+        if (subtextEl) {
+            const desc = isKm ? (offer.description_km || offer.description) : (offer.description || offer.description_km);
+            subtextEl.textContent = desc || (isKm ? 'ការផ្តល់ជូនពិសេសពីហាង' : 'Special promotional offer.');
+        }
+
+        const priceUsd = Number(offer.offer_price_usd !== undefined ? offer.offer_price_usd : 5.00);
+        const rateKhr = 4100;
+        const priceKhr = offer.offer_price_khr || Math.round(priceUsd * rateKhr);
+        if (priceUsdEl) {
+            priceUsdEl.textContent = (isAddon ? '+$' : '$') + priceUsd.toFixed(2);
+        }
+        if (priceKhrEl) {
+            priceKhrEl.textContent = `(${priceKhr.toLocaleString()} ៛)`;
+        }
+        if (hintEl) {
+            if (isAddon) {
+                hintEl.textContent = isKm ? 'លាងរថយន្តខាងក្រៅមុន រួចបាញ់ក្រមួន Wax & ប៉ូលា។ សេវាទាំងពីរស្ថិតក្នុងកន្ត្រកតែមួយ។' : 'Wash exterior first, then crew applies wax & polish. Both items stay in order.';
+            } else {
+                hintEl.textContent = isKm ? 'ដំឡើងសេវាក្នុងកន្ត្រកទៅកញ្ចប់ពេញលេញក្នុងតម្លៃពិសេស។' : 'Replaces the basic item in your cart with this full premium package.';
+            }
+        }
+        if (acceptTextEl) {
+            acceptTextEl.textContent = isKm ? (isAddon ? `យល់ព្រមបន្ថែម (+$${priceUsd.toFixed(2)})` : `យល់ព្រមដំឡើង ($${priceUsd.toFixed(2)})`) : (isAddon ? `Add to Cart (+$${priceUsd.toFixed(2)})` : `Upgrade ($${priceUsd.toFixed(2)})`);
+        }
 
         modal.classList.add('open');
     }
@@ -13551,7 +15490,7 @@ class PosApp {
         const todayStr = new Date().toISOString().split('T')[0];
         const dateInput = document.getElementById('apptBookingDate');
         const viewDateInput = document.getElementById('apptViewDate');
-        
+
         if (dateInput && !dateInput.value) {
             dateInput.value = todayStr;
             dateInput.min = todayStr;
@@ -13988,9 +15927,10 @@ class PosApp {
             // Refresh wait times from back office
             await this.fetchWaitTimes();
 
-            // Refresh appointments list if viewing appointments screen
-            if (this.currentView === 'appointments') {
-                await this.loadAppointmentsList();
+            // Refresh appointment modal if currently open
+            const modalAppt = document.getElementById('modalAppointment');
+            if (modalAppt && modalAppt.classList.contains('open')) {
+                await this.refreshAppointmentModal();
             }
 
             this.lastSyncSuccessTime = Date.now();

@@ -149,7 +149,7 @@ if (Auth::mustChangePin() && $view !== 'change_pin') {
 
 // 4b. Handle Owner / Admin Backup Download & Creation
 if ($action === 'download_backup') {
-    Auth::requirePermission('backup.manage');
+                                                                                                                Auth::requirePermission('backup.manage');
     require_once __DIR__ . '/core/Backup.php';
     $specificFile = trim((string)($_GET['file'] ?? ''));
     if ($specificFile !== '') {

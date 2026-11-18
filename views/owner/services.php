@@ -178,6 +178,9 @@ foreach ($serviceCategories as $sc) {
 
 // Fetch services with category filter
 $catFilter = $_GET['cat'] ?? 'all';
+if (isset($action) && $action === 'save_service' && !empty($category)) {
+    $catFilter = $category;
+}
 $sSql = "SELECT * FROM services WHERE 1=1";
 $params = [];
 if ($catFilter !== 'all') {
@@ -826,9 +829,16 @@ function openNewServiceModal() {
     document.getElementById('name_km').value = '';
     document.getElementById('description').value = '';
 
-    const defaultCat = (Array.isArray(serviceCategoriesList) && serviceCategoriesList.length > 0)
+    // Automatically pre-select the currently active category tab if filtered
+    const activeCatFilter = <?= json_encode($catFilter) ?>;
+    let targetCat = null;
+    if (activeCatFilter && activeCatFilter !== 'all' && Array.isArray(serviceCategoriesList)) {
+        targetCat = serviceCategoriesList.find(c => c.code === activeCatFilter || String(c.id) === String(activeCatFilter));
+    }
+
+    const defaultCat = targetCat || ((Array.isArray(serviceCategoriesList) && serviceCategoriesList.length > 0)
         ? serviceCategoriesList[0]
-        : { id: '', code: 'wash', name_en: 'Car Wash & Detailing', name_km: 'លាងសម្អាត & ថែទាំរថយន្ត', icon: 'fa-shower', color: '#0284c7' };
+        : { id: '', code: 'wash', name_en: 'Car Wash & Detailing', name_km: 'លាងសម្អាត & ថែទាំរថយន្ត', icon: 'fa-shower', color: '#0284c7' });
     const defaultCatName = (<?= json_encode(Language::current()) ?> === 'km' && defaultCat.name_km) ? defaultCat.name_km : defaultCat.name_en;
     selectCategoryChoice(defaultCat.code, defaultCat.id, defaultCatName, defaultCat.icon, defaultCat.color);
     selectIconChoice(defaultCat.icon || 'fa-shower');

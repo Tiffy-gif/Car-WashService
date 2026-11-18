@@ -18,7 +18,7 @@ $message = null;
 $messageType = 'success';
 $activeTab = $_GET['tab'] ?? 'shop';
 
-$validTabs = ['shop', 'receipt', 'money', 'payment', 'bays', 'oil', 'loyalty', 'performance', 'telegram', 'sync', 'system', 'history'];
+$validTabs = ['shop', 'receipt', 'money', 'payment', 'bays', 'oil', 'loyalty', 'upsell', 'performance', 'telegram', 'sync', 'system', 'history'];
 if (!in_array($activeTab, $validTabs, true)) {
     $activeTab = 'shop';
 }
@@ -327,6 +327,93 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         $messageType = $changed > 0 ? 'success' : 'info';
     }
 
+    // 5c. Save Upsell Global Control
+    elseif ($action === 'save_upsell_global') {
+        $enableUpsell = !empty($_POST['enable_upsell_offers']) ? '1' : '0';
+        $changed = update_setting($pdo, 'enable_upsell_offers', $enableUpsell, $userId, $userName);
+        $message = $changed ? "Upsell global settings updated successfully!" : "No changes made to global upsell settings.";
+        $messageType = $changed ? 'success' : 'info';
+    }
+
+    // 5d. Save Upsell Rule (Create / Update)
+    elseif ($action === 'save_upsell_rule') {
+        $ruleId = (int)($_POST['rule_id'] ?? 0);
+        $name = trim((string)($_POST['rule_name'] ?? ''));
+        $triggerServiceId = !empty($_POST['trigger_service_id']) ? (int)$_POST['trigger_service_id'] : null;
+        $triggerVehicleType = !empty($_POST['trigger_vehicle_type']) ? trim((string)$_POST['trigger_vehicle_type']) : null;
+        $offerServiceId = !empty($_POST['offer_service_id']) ? (int)$_POST['offer_service_id'] : null;
+        $actionType = in_array(($_POST['action_type'] ?? ''), ['add_service', 'upgrade_service'], true) ? $_POST['action_type'] : 'add_service';
+        $offerPriceUsd = ($_POST['offer_price_usd'] !== '') ? max(0, (float)$_POST['offer_price_usd']) : 5.00;
+        $headlineEn = trim((string)($_POST['offer_headline_en'] ?? ''));
+        $headlineKm = trim((string)($_POST['offer_headline_km'] ?? ''));
+        $descEn = trim((string)($_POST['offer_description_en'] ?? ''));
+        $descKm = trim((string)($_POST['offer_description_km'] ?? ''));
+        $isActive = !empty($_POST['is_active']) ? 1 : 0;
+
+        if ($name === '') {
+            $message = "Rule name is required.";
+            $messageType = 'danger';
+        } elseif (!$offerServiceId) {
+            $message = "Target offer service is required.";
+            $messageType = 'danger';
+        } else {
+            if ($ruleId > 0) {
+                $stmt = $pdo->prepare("UPDATE upsell_rules SET 
+                    name = ?, trigger_service_id = ?, trigger_vehicle_type = ?, 
+                    offer_service_id = ?, action_type = ?, offer_price_usd = ?, 
+                    offer_headline_en = ?, offer_headline_km = ?, 
+                    offer_description_en = ?, offer_description_km = ?, 
+                    is_active = ? 
+                    WHERE id = ?");
+                $stmt->execute([
+                    $name, $triggerServiceId, $triggerVehicleType,
+                    $offerServiceId, $actionType, $offerPriceUsd,
+                    $headlineEn, $headlineKm,
+                    $descEn, $descKm,
+                    $isActive, $ruleId
+                ]);
+                $message = "Upsell rule updated successfully!";
+            } else {
+                $ruleUid = 'UPSELL-' . strtoupper(bin2hex(random_bytes(4)));
+                $stmt = $pdo->prepare("INSERT INTO upsell_rules (
+                    rule_uid, name, trigger_service_id, trigger_category, trigger_vehicle_type,
+                    offer_service_id, action_type, offer_price_usd,
+                    offer_headline_en, offer_headline_km, offer_description_en, offer_description_km,
+                    is_active, created_at
+                ) VALUES (?, ?, ?, 'wash', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())");
+                $stmt->execute([
+                    $ruleUid, $name, $triggerServiceId, $triggerVehicleType,
+                    $offerServiceId, $actionType, $offerPriceUsd,
+                    $headlineEn, $headlineKm,
+                    $descEn, $descKm,
+                    $isActive
+                ]);
+                $message = "New upsell rule created successfully!";
+            }
+            $messageType = 'success';
+        }
+    }
+
+    // 5e. Toggle Upsell Rule Status
+    elseif ($action === 'toggle_upsell_rule') {
+        $ruleId = (int)($_POST['rule_id'] ?? 0);
+        if ($ruleId > 0) {
+            $pdo->prepare("UPDATE upsell_rules SET is_active = (1 - is_active) WHERE id = ?")->execute([$ruleId]);
+            $message = "Upsell rule status updated successfully!";
+            $messageType = 'success';
+        }
+    }
+
+    // 5f. Delete Upsell Rule
+    elseif ($action === 'delete_upsell_rule') {
+        $ruleId = (int)($_POST['rule_id'] ?? 0);
+        if ($ruleId > 0) {
+            $pdo->prepare("DELETE FROM upsell_rules WHERE id = ?")->execute([$ruleId]);
+            $message = "Upsell rule deleted successfully!";
+            $messageType = 'success';
+        }
+    }
+
     // 6. Save Telegram
     elseif ($action === 'save_telegram') {
         $token = trim($_POST['telegram_bot_token'] ?? '');
@@ -483,6 +570,35 @@ while ($r = $sStmt->fetch()) {
     $settings[$r['setting_key']] = $r['setting_value'];
 }
 
+// Fetch Services and Upsell Rules for Upsell Management Tab
+$allServices = [];
+$allUpsellRules = [];
+$upsellStats = ['total_rules' => 0, 'active_rules' => 0];
+$upsellLogStats = ['shown' => 0, 'accepted' => 0, 'declined' => 0, 'rate' => 0];
+try {
+    $allServices = $pdo->query("SELECT id, name_en, name_km, category FROM services WHERE is_active = 1 ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC);
+    $allUpsellRules = $pdo->query("
+        SELECT ur.*, s1.name_en AS trigger_service_name, s2.name_en AS offer_service_name 
+        FROM upsell_rules ur 
+        LEFT JOIN services s1 ON ur.trigger_service_id = s1.id 
+        LEFT JOIN services s2 ON ur.offer_service_id = s2.id 
+        ORDER BY ur.id DESC
+    ")->fetchAll(PDO::FETCH_ASSOC);
+    
+    $upStatStmt = $pdo->query("SELECT COUNT(*) as total_rules, SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_rules FROM upsell_rules");
+    $upsellStats = $upStatStmt->fetch(PDO::FETCH_ASSOC) ?: $upsellStats;
+    
+    $logStmt = $pdo->query("SELECT COUNT(*) as total, SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) as accepted, SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) as declined FROM upsell_logs");
+    $lData = $logStmt->fetch(PDO::FETCH_ASSOC);
+    if ($lData && $lData['total'] > 0) {
+        $upsellLogStats['shown'] = (int)$lData['total'];
+        $upsellLogStats['accepted'] = (int)$lData['accepted'];
+        $upsellLogStats['declined'] = (int)$lData['declined'];
+        $upsellLogStats['rate'] = round(($upsellLogStats['accepted'] / max(1, $upsellLogStats['shown'])) * 100, 1);
+    }
+} catch (Throwable $e) {}
+
+
 // Fetch recent change history (latest 30)
 $historyList = [];
 try {
@@ -598,20 +714,23 @@ require_once dirname(__DIR__) . '/layouts/header.php';
     <button type="button" class="btn btn-sm <?= ($activeTab === 'loyalty') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('loyalty')">
         <i class="fa-solid fa-award mr-1" style="color: #f59e0b;"></i> 6. Loyalty &amp; Tiers
     </button>
+    <button type="button" class="btn btn-sm <?= ($activeTab === 'upsell') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('upsell')">
+        <i class="fa-solid fa-bullseye mr-1" style="color: #8b5cf6;"></i> 7. Upsell &amp; Offers
+    </button>
     <button type="button" class="btn btn-sm <?= ($activeTab === 'performance') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('performance')">
-        <i class="fa-solid fa-gauge-high mr-1" style="color: #10b981;"></i> 7. Performance &amp; Leaderboard
+        <i class="fa-solid fa-gauge-high mr-1" style="color: #10b981;"></i> 8. Performance &amp; Leaderboard
     </button>
     <button type="button" class="btn btn-sm <?= ($activeTab === 'telegram') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('telegram')">
-        <i class="fa-brands fa-telegram mr-1" style="color: #0284c7;"></i> 8. Telegram
+        <i class="fa-brands fa-telegram mr-1" style="color: #0284c7;"></i> 9. Telegram
     </button>
     <button type="button" class="btn btn-sm <?= ($activeTab === 'sync') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('sync')">
-        <i class="fa-solid fa-cloud-arrow-up mr-1" style="color: #6366f1;"></i> 9. Cloud Sync
+        <i class="fa-solid fa-cloud-arrow-up mr-1" style="color: #6366f1;"></i> 10. Cloud Sync
         <?php if (empty($settings['cloud_api_url']) || empty($settings['cloud_api_token']) || empty($settings['cloud_api_secret'])): ?>
             <span class="badge badge-warning" style="margin-left: 4px; padding: 2px 6px; font-size: 10px;" title="Not configured">!</span>
         <?php endif; ?>
     </button>
     <button type="button" class="btn btn-sm <?= ($activeTab === 'system') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('system')">
-        <i class="fa-solid fa-sliders mr-1"></i> 10. System
+        <i class="fa-solid fa-sliders mr-1"></i> 11. System
     </button>
     <button type="button" class="btn btn-sm <?= ($activeTab === 'history') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('history')">
         <i class="fa-solid fa-clock-rotate-left mr-1"></i> Change History (<?= count($historyList) ?>)
@@ -1434,6 +1553,771 @@ $baysList = BayManager::getAllBays($pdo);
         </form>
     </div>
 </div>
+
+<!-- ======================================================== -->
+<!-- GROUP 6C: UPSELL & PROMOTION OFFERS -->
+<!-- ======================================================== -->
+<!-- GROUP 6C: UPSELL & PROMOTION OFFERS STUDIO -->
+<!-- ======================================================== -->
+<div id="tab_upsell" class="tab-pane" style="display: <?= ($activeTab === 'upsell') ? 'block' : 'none' ?>;">
+    <style>
+        .upsell-studio-header {
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4338ca 100%);
+            border-radius: 16px;
+            padding: 24px 28px;
+            color: #ffffff;
+            margin-bottom: 24px;
+            box-shadow: 0 10px 25px -5px rgba(67, 56, 202, 0.35);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .upsell-hero-title {
+            font-size: 20px;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            letter-spacing: -0.3px;
+        }
+        .upsell-hero-desc {
+            font-size: 13px;
+            color: #c7d2fe;
+            margin-top: 6px;
+            max-width: 620px;
+            line-height: 1.5;
+        }
+        .upsell-master-box {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 12px 18px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .upsell-stat-chip {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .upsell-stat-chip:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.06);
+        }
+        .upsell-rule-card {
+            background: #ffffff;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        .upsell-rule-card:hover {
+            border-color: #c7d2fe;
+            box-shadow: 0 10px 24px rgba(67, 56, 202, 0.08);
+            transform: translateY(-2px);
+        }
+        .upsell-rule-card.is-paused {
+            opacity: 0.72;
+            background: #f8fafc;
+            border-style: dashed;
+        }
+        .flow-diagram-track {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin: 14px 0;
+        }
+        .flow-node-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 8px 14px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .flow-arrow-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11.5px;
+            font-weight: 800;
+            padding: 4px 12px;
+            border-radius: 20px;
+            letter-spacing: 0.3px;
+        }
+        .flow-arrow-addon {
+            background: #ecfdf5;
+            color: #047857;
+            border: 1px solid #a7f3d0;
+        }
+        .flow-arrow-upgrade {
+            background: #f5f3ff;
+            color: #6d28d9;
+            border: 1px solid #ddd6fe;
+        }
+        .custom-radio-card {
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            background: #ffffff;
+        }
+        .custom-radio-card:hover {
+            border-color: #cbd5e1;
+        }
+        .custom-radio-card.active-addon {
+            border-color: #10b981;
+            background: #f0fdf4;
+        }
+        .custom-radio-card.active-upgrade {
+            border-color: #8b5cf6;
+            background: #f5f3ff;
+        }
+        .live-preview-box {
+            background: #1e293b;
+            border-radius: 16px;
+            padding: 20px;
+            color: #ffffff;
+            box-shadow: 0 15px 30px rgba(0,0,0,0.25);
+            position: sticky;
+            top: 20px;
+        }
+    </style>
+
+    <!-- 1. Hero Header Banner with Master Toggle -->
+    <div class="upsell-studio-header">
+        <div>
+            <div class="upsell-hero-title">
+                <span style="width: 38px; height: 38px; border-radius: 10px; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 18px;">
+                    <i class="fa-solid fa-bullseye"></i>
+                </span>
+                Smart Cross-Sell &amp; Upgrade Promotion Studio
+            </div>
+            <div class="upsell-hero-desc">
+                Increase average ticket size by prompting cashiers at checkout with smart add-on promotions (like Hydrophobic Wax) or premium upgrades when customers order basic wash packages.
+            </div>
+        </div>
+
+        <div class="upsell-master-box">
+            <div>
+                <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #c7d2fe; font-weight: 700;">
+                    Global POS Engine
+                </div>
+                <div style="font-size: 14px; font-weight: 800; color: #ffffff;">
+                    <?= (($settings['enable_upsell_offers'] ?? '1') === '1') ? '🟢 PROMOTIONS ACTIVE' : '⏸️ PROMOTIONS PAUSED' ?>
+                </div>
+            </div>
+            <form action="<?= APP_URL ?>/index.php?view=settings" method="POST" style="margin: 0;">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="save_upsell_global">
+                <input type="hidden" name="tab" value="upsell">
+                <input type="hidden" name="enable_upsell_offers" value="<?= (($settings['enable_upsell_offers'] ?? '1') === '1') ? '0' : '1' ?>">
+                <button type="submit" class="btn btn-sm" style="background: <?= (($settings['enable_upsell_offers'] ?? '1') === '1') ? '#ef4444' : '#10b981' ?>; color: #ffffff; border: none; font-weight: 800; border-radius: 8px; padding: 7px 14px;">
+                    <?= (($settings['enable_upsell_offers'] ?? '1') === '1') ? '<i class="fa-solid fa-pause mr-1"></i> Pause All' : '<i class="fa-solid fa-play mr-1"></i> Activate All' ?>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 2. Performance Metric Cards -->
+    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-bottom: 24px;">
+        <div class="upsell-stat-chip">
+            <div style="width: 48px; height: 48px; border-radius: 12px; background: #ede9fe; color: #7c3aed; display: flex; align-items: center; justify-content: center; font-size: 22px;">
+                <i class="fa-solid fa-layer-group"></i>
+            </div>
+            <div>
+                <div style="font-size: 12px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Total Campaigns</div>
+                <div style="font-size: 24px; font-weight: 900; color: var(--text-main); line-height: 1.1; margin-top: 2px;"><?= count($allUpsellRules) ?></div>
+            </div>
+        </div>
+
+        <div class="upsell-stat-chip">
+            <div style="width: 48px; height: 48px; border-radius: 12px; background: #ecfdf5; color: #059669; display: flex; align-items: center; justify-content: center; font-size: 22px;">
+                <i class="fa-solid fa-circle-check"></i>
+            </div>
+            <div>
+                <div style="font-size: 12px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Active Rules</div>
+                <div style="font-size: 24px; font-weight: 900; color: #059669; line-height: 1.1; margin-top: 2px;"><?= (int)($upsellStats['active_rules'] ?? 0) ?></div>
+            </div>
+        </div>
+
+        <div class="upsell-stat-chip">
+            <div style="width: 48px; height: 48px; border-radius: 12px; background: #eff6ff; color: #2563eb; display: flex; align-items: center; justify-content: center; font-size: 22px;">
+                <i class="fa-solid fa-cash-register"></i>
+            </div>
+            <div>
+                <div style="font-size: 12px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Offers Presented</div>
+                <div style="font-size: 24px; font-weight: 900; color: var(--text-main); line-height: 1.1; margin-top: 2px;"><?= $upsellLogStats['shown'] ?></div>
+            </div>
+        </div>
+
+        <div class="upsell-stat-chip">
+            <div style="width: 48px; height: 48px; border-radius: 12px; background: #fdf2f8; color: #db2777; display: flex; align-items: center; justify-content: center; font-size: 22px;">
+                <i class="fa-solid fa-arrow-trend-up"></i>
+            </div>
+            <div>
+                <div style="font-size: 12px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Conversion Rate</div>
+                <div style="font-size: 24px; font-weight: 900; color: #db2777; line-height: 1.1; margin-top: 2px;"><?= $upsellLogStats['rate'] ?>%</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. Campaign List Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+        <div>
+            <h2 style="font-size: 18px; font-weight: 800; color: var(--text-main); margin: 0; display: flex; align-items: center; gap: 8px;">
+                <i class="fa-solid fa-wand-magic-sparkles" style="color: #8b5cf6;"></i>Active Checkout Promotions (<?= count($allUpsellRules) ?>)
+            </h2>
+            <div style="font-size: 13px; color: var(--text-muted); margin-top: 2px;">
+                Manage the triggers, action types, and bundle pricing shown on cashier registers.
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" onclick="openNewUpsellModal()" style="padding: 10px 18px; font-weight: 800; border-radius: 10px; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);">
+            <i class="fa-solid fa-plus mr-1"></i> Create Promotion Campaign
+        </button>
+    </div>
+
+    <!-- 4. Visual Campaign Cards -->
+    <?php if (empty($allUpsellRules)): ?>
+        <div class="card" style="text-align: center; padding: 50px 20px; border-radius: 16px;">
+            <div style="width: 64px; height: 64px; border-radius: 50%; background: #f5f3ff; color: #8b5cf6; display: flex; align-items: center; justify-content: center; font-size: 28px; margin: 0 auto 16px;">
+                <i class="fa-solid fa-bullseye"></i>
+            </div>
+            <div style="font-weight: 800; font-size: 17px; color: var(--text-main);">No Promotion Campaigns Defined</div>
+            <div style="font-size: 13px; color: var(--text-muted); margin: 6px auto 18px; max-width: 420px;">
+                Set up automated add-on offers (e.g. Wash + Wax combo) or upgrades to guide cashiers in boosting ticket sales.
+            </div>
+            <button type="button" class="btn btn-primary" onclick="openNewUpsellModal()" style="padding: 10px 20px; font-weight: 800;">
+                <i class="fa-solid fa-plus mr-1"></i> Create First Campaign
+            </button>
+        </div>
+    <?php else: ?>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+            <?php foreach ($allUpsellRules as $rule): ?>
+                <?php 
+                    $isAddon = (($rule['action_type'] ?? 'add_service') === 'add_service');
+                    $isActive = !empty($rule['is_active']);
+                    $vType = $rule['trigger_vehicle_type'] ? ucwords(str_replace('_', ' ', $rule['trigger_vehicle_type'])) : 'All Vehicles';
+                    $promoPrice = (float)($rule['offer_price_usd'] ?? 5.00);
+                    $rateKhr = 4100;
+                    $promoKhr = round($promoPrice * $rateKhr);
+                ?>
+                <div class="upsell-rule-card <?= !$isActive ? 'is-paused' : '' ?>">
+                    <!-- Card Top Header -->
+                    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="width: 10px; height: 10px; border-radius: 50%; background: <?= $isActive ? '#10b981' : '#94a3b8' ?>; display: inline-block; box-shadow: <?= $isActive ? '0 0 0 4px rgba(16, 185, 129, 0.2)' : 'none' ?>;"></span>
+                            <span style="font-weight: 800; font-size: 16px; color: var(--text-main);"><?= htmlspecialchars($rule['name']) ?></span>
+                            <span style="font-family: var(--font-mono); font-size: 11px; background: #f1f5f9; color: #475569; padding: 2px 8px; border-radius: 4px; font-weight: 600; border: 1px solid #e2e8f0;">
+                                <?= htmlspecialchars($rule['rule_uid']) ?>
+                            </span>
+                        </div>
+
+                        <!-- Quick Status Switch & Actions -->
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <form action="<?= APP_URL ?>/index.php?view=settings" method="POST" style="margin: 0;">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="action" value="toggle_upsell_rule">
+                                <input type="hidden" name="tab" value="upsell">
+                                <input type="hidden" name="rule_id" value="<?= (int)$rule['id'] ?>">
+                                <button type="submit" class="badge" style="background: <?= $isActive ? '#ecfdf5' : '#f1f5f9' ?>; color: <?= $isActive ? '#047857' : '#64748b' ?>; border: 1px solid <?= $isActive ? '#a7f3d0' : '#cbd5e1' ?>; cursor: pointer; padding: 5px 12px; font-weight: 800; border-radius: 20px; display: flex; align-items: center; gap: 5px;" title="Click to toggle active status">
+                                    <i class="fa-solid <?= $isActive ? 'fa-check' : 'fa-pause' ?>"></i>
+                                    <span><?= $isActive ? 'ACTIVE AT POS' : 'PAUSED' ?></span>
+                                </button>
+                            </form>
+
+                            <button type="button" class="btn btn-sm btn-secondary" style="padding: 6px 12px; font-weight: 700; border-radius: 8px;" onclick='openEditUpsellModal(<?= json_encode($rule, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)'>
+                                <i class="fa-solid fa-pen-to-square mr-1"></i> Edit
+                            </button>
+
+                            <form action="<?= APP_URL ?>/index.php?view=settings" method="POST" style="margin: 0;" onsubmit="return confirm('Delete this promotion rule?');">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="action" value="delete_upsell_rule">
+                                <input type="hidden" name="tab" value="upsell">
+                                <input type="hidden" name="rule_id" value="<?= (int)$rule['id'] ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" style="padding: 6px 10px; border-radius: 8px;" title="Delete rule">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Visual Flow Track -->
+                    <div class="flow-diagram-track">
+                        <!-- Trigger Node -->
+                        <div class="flow-node-box">
+                            <span style="width: 32px; height: 32px; border-radius: 8px; background: #eff6ff; color: #2563eb; display: flex; align-items: center; justify-content: center; font-size: 14px;">
+                                <i class="fa-solid fa-car"></i>
+                            </span>
+                            <div>
+                                <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">When Customer Orders:</div>
+                                <div style="font-weight: 800; font-size: 13.5px; color: var(--text-main);">
+                                    <?= htmlspecialchars($rule['trigger_service_name'] ?: 'Any Wash Service') ?>
+                                    <span style="font-weight: 600; font-size: 11px; color: #64748b; margin-left: 4px;">(<?= htmlspecialchars($vType) ?>)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Directional Arrow with Action Badge -->
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                            <span class="flow-arrow-pill <?= $isAddon ? 'flow-arrow-addon' : 'flow-arrow-upgrade' ?>">
+                                <i class="fa-solid <?= $isAddon ? 'fa-plus' : 'fa-arrows-rotate' ?>"></i>
+                                <?= $isAddon ? 'ADD-ON COMBO (KEEP WASH)' : 'TIER UPGRADE (REPLACE)' ?>
+                            </span>
+                            <i class="fa-solid fa-arrow-right-long text-muted" style="font-size: 16px;"></i>
+                        </div>
+
+                        <!-- Target Offer Node -->
+                        <div class="flow-node-box" style="border-color: <?= $isAddon ? '#a7f3d0' : '#ddd6fe' ?>; background: <?= $isAddon ? '#f0fdf4' : '#faf5ff' ?>;">
+                            <span style="width: 32px; height: 32px; border-radius: 8px; background: <?= $isAddon ? '#10b981' : '#8b5cf6' ?>; color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 14px;">
+                                <i class="fa-solid <?= $isAddon ? 'fa-spray-can-sparkles' : 'fa-crown' ?>"></i>
+                            </span>
+                            <div>
+                                <div style="font-size: 11px; text-transform: uppercase; color: <?= $isAddon ? '#047857' : '#6d28d9' ?>; font-weight: 700;">Offers Customer:</div>
+                                <div style="font-weight: 800; font-size: 13.5px; color: var(--text-main);">
+                                    <?= htmlspecialchars($rule['offer_service_name'] ?: 'Target Service') ?>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Price Pill -->
+                        <div style="background: #ffffff; border: 1.5px solid #10b981; border-radius: 10px; padding: 6px 14px; text-align: right;">
+                            <div style="font-size: 10px; text-transform: uppercase; color: #047857; font-weight: 800;">Bundle Promo Price</div>
+                            <div style="font-size: 17px; font-weight: 900; color: #047857; font-family: var(--font-mono);">
+                                $<?= number_format($promoPrice, 2) ?>
+                                <span style="font-size: 11px; color: var(--text-muted); font-weight: 600;">(<?= number_format($promoKhr) ?> ៛)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Customer Pitch Snippet -->
+                    <div style="display: flex; gap: 20px; font-size: 12.5px; color: var(--text-muted); background: #ffffff; padding-top: 4px;">
+                        <div style="flex: 1;">
+                            <strong style="color: var(--text-main);"><i class="fa-solid fa-language mr-1" style="color: #6366f1;"></i> English Pitch:</strong>
+                            <div style="margin-top: 2px; color: #475569;"><?= htmlspecialchars($rule['offer_headline_en'] ?: ($rule['name'] ?? '')) ?></div>
+                        </div>
+                        <div style="flex: 1; border-left: 1px solid #e2e8f0; padding-left: 20px;">
+                            <strong style="color: var(--text-main);"><i class="fa-solid fa-language mr-1" style="color: #6366f1;"></i> Khmer Pitch:</strong>
+                            <div style="margin-top: 2px; color: #475569; font-family: var(--font-km);"><?= htmlspecialchars($rule['offer_headline_km'] ?: '') ?></div>
+                        </div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
+</div>
+
+<!-- ======================================================== -->
+<!-- 5. Split 2-Column Modal: Form on Left + Live POS Preview on Right -->
+<!-- ======================================================== -->
+<div id="modalUpsellRule" class="modal-backdrop-custom" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); z-index: 99999; align-items: center; justify-content: center; padding: 20px;">
+    <div class="modal-dialog-custom" style="background: var(--bg-surface, #ffffff); width: 100%; max-width: 960px; border-radius: 18px; margin: auto; box-shadow: 0 25px 60px rgba(0,0,0,0.35); overflow: hidden; max-height: 92vh; display: flex; flex-direction: column;">
+        <!-- Modal Top Bar -->
+        <div style="padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);">
+            <div>
+                <h3 id="upsellModalHeader" style="margin: 0; font-size: 17px; font-weight: 800; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                    <i class="fa-solid fa-wand-magic-sparkles" style="color: #8b5cf6;"></i>Create Checkout Promotion Rule
+                </h3>
+                <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                    Configure automated cashier cross-sell prompts and see live customer preview on the right.
+                </div>
+            </div>
+            <button type="button" onclick="closeUpsellModal()" style="border: none; background: #ffffff; width: 32px; height: 32px; border-radius: 50%; font-size: 18px; cursor: pointer; color: var(--text-muted); display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">&times;</button>
+        </div>
+
+        <!-- Modal Body: Split Form Left & Live Preview Right -->
+        <div style="display: grid; grid-template-columns: 1.15fr 0.85fr; overflow-y: auto; flex: 1;">
+            <!-- Left Side: Form Inputs -->
+            <form action="<?= APP_URL ?>/index.php?view=settings" method="POST" style="padding: 24px; border-right: 1px solid var(--border);" id="formUpsellRule">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="save_upsell_rule">
+                <input type="hidden" name="tab" value="upsell">
+                <input type="hidden" id="upsell_rule_id" name="rule_id" value="0">
+
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label class="form-label" style="font-weight: 800; font-size: 13px;">Campaign / Rule Name <span style="color: var(--danger);">*</span></label>
+                    <input type="text" id="upsell_name" name="rule_name" class="form-input" placeholder="e.g., Exterior Wash: Add Hydrophobic Wax" oninput="updateLivePreview()" required>
+                </div>
+
+                <!-- Trigger & Vehicle Type -->
+                <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px;">
+                    <div class="form-group">
+                        <label class="form-label" style="font-weight: 800; font-size: 13px;">Trigger When Customer Orders</label>
+                        <select id="upsell_trigger_service_id" name="trigger_service_id" class="form-input" onchange="updateLivePreview()">
+                            <option value="">Any Wash Service</option>
+                            <?php foreach ($allServices as $s): ?>
+                                <option value="<?= (int)$s['id'] ?>" data-name-en="<?= htmlspecialchars($s['name_en']) ?>" data-name-km="<?= htmlspecialchars($s['name_km']) ?>">
+                                    <?= htmlspecialchars($s['name_en']) ?> (<?= htmlspecialchars($s['name_km']) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" style="font-weight: 800; font-size: 13px;">Vehicle Type Filter</label>
+                        <select id="upsell_trigger_vehicle_type" name="trigger_vehicle_type" class="form-input" onchange="updateLivePreview()">
+                            <option value="">All Vehicles</option>
+                            <option value="small_car">Small Car (Sedan)</option>
+                            <option value="suv_pickup">SUV / Pickup</option>
+                            <option value="van_truck">Van / Truck</option>
+                            <option value="motorbike">Motorbike</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Offer Action Type (Visual Selectable Cards) -->
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label class="form-label" style="font-weight: 800; font-size: 13px; margin-bottom: 8px;">Offer Type at Checkout <span style="color: var(--danger);">*</span></label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <label class="custom-radio-card active-addon" id="label_addon" onclick="selectActionType('add_service')">
+                            <input type="radio" name="action_type" id="action_type_addon" value="add_service" checked style="margin-top: 3px;" onchange="updateLivePreview()">
+                            <div>
+                                <div style="font-weight: 800; font-size: 13px; color: #047857;">+ Add-On (Combo)</div>
+                                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+                                    Keeps wash in cart &amp; adds wax on top. Washer washes first, then applies wax.
+                                </div>
+                            </div>
+                        </label>
+                        <label class="custom-radio-card" id="label_upgrade" onclick="selectActionType('upgrade_service')">
+                            <input type="radio" name="action_type" id="action_type_upgrade" value="upgrade_service" style="margin-top: 3px;" onchange="updateLivePreview()">
+                            <div>
+                                <div style="font-weight: 800; font-size: 13px; color: #6d28d9;">⟳ Tier Upgrade</div>
+                                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+                                    Replaces basic wash with a premium combo package (e.g. Wash upgraded to Full Inside+Outside).
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Target Offer & Promo Price -->
+                <div class="grid" style="grid-template-columns: 1.6fr 1fr; gap: 14px; margin-bottom: 16px;">
+                    <div class="form-group">
+                        <label class="form-label" style="font-weight: 800; font-size: 13px;">Service to Offer <span style="color: var(--danger);">*</span></label>
+                        <select id="upsell_offer_service_id" name="offer_service_id" class="form-input" onchange="updateLivePreview()" required>
+                            <option value="">-- Select Service --</option>
+                            <?php foreach ($allServices as $s): ?>
+                                <option value="<?= (int)$s['id'] ?>" data-name-en="<?= htmlspecialchars($s['name_en']) ?>" data-name-km="<?= htmlspecialchars($s['name_km']) ?>">
+                                    <?= htmlspecialchars($s['name_en']) ?> (<?= htmlspecialchars($s['name_km']) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" style="font-weight: 800; font-size: 13px;">Promo Price ($ USD) <span style="color: var(--danger);">*</span></label>
+                        <input type="number" step="0.25" min="0" id="upsell_offer_price_usd" name="offer_price_usd" class="form-input" style="font-weight: 800; font-family: var(--font-mono); color: #047857;" placeholder="5.00" value="5.00" oninput="updateLivePreview()" required>
+                    </div>
+                </div>
+
+                <!-- Headlines EN & KM -->
+                <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px;">
+                    <div class="form-group">
+                        <label class="form-label" style="font-weight: 700; font-size: 12px;">Headline (English)</label>
+                        <input type="text" id="upsell_offer_headline_en" name="offer_headline_en" class="form-input" placeholder="e.g., Add Hydrophobic Wax & Polish for +$5.00?" oninput="updateLivePreview()">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" style="font-weight: 700; font-size: 12px;">Headline (Khmer)</label>
+                        <input type="text" id="upsell_offer_headline_km" name="offer_headline_km" class="form-input" placeholder="e.g., បន្ថែមបាញ់ក្រមួន Wax & ប៉ូលាពន្លឺ ត្រឹមតែ +$5.00 ដែរឬទេ?" oninput="updateLivePreview()">
+                    </div>
+                </div>
+
+                <!-- Pitch Descriptions EN & KM -->
+                <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px;">
+                    <div class="form-group">
+                        <label class="form-label" style="font-weight: 700; font-size: 12px;">Pitch Description (English)</label>
+                        <textarea id="upsell_offer_description_en" name="offer_description_en" class="form-input" rows="2" placeholder="e.g., Add water-repellent protective shine to your exterior wash." oninput="updateLivePreview()"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" style="font-weight: 700; font-size: 12px;">Pitch Description (Khmer)</label>
+                        <textarea id="upsell_offer_description_km" name="offer_description_km" class="form-input" rows="2" placeholder="e.g., បន្ថែមស្រទាប់ក្រមួនការពារទឹក និងបង្កើនពន្លឺលើការលាងក្រៅ។" oninput="updateLivePreview()"></textarea>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 20px; display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="upsell_is_active" name="is_active" value="1" checked style="width: 18px; height: 18px;" onchange="updateLivePreview()">
+                    <label for="upsell_is_active" style="cursor: pointer; font-weight: 700; color: var(--text-main); font-size: 13px;">Enable rule immediately upon saving</label>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border); padding-top: 16px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeUpsellModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" style="padding: 9px 20px; font-weight: 800;">
+                        <i class="fa-solid fa-floppy-disk mr-1"></i> Save Promotion Rule
+                    </button>
+                </div>
+            </form>
+
+            <!-- Right Side: Live POS Checkout Preview -->
+            <div style="padding: 24px; background: #f8fafc; display: flex; flex-direction: column;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <div style="font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: #475569; display: flex; align-items: center; gap: 6px;">
+                        <i class="fa-solid fa-tablet-screen-button" style="color: #6366f1;"></i> Live POS Popup Preview
+                    </div>
+                    <!-- Language Switcher for Preview -->
+                    <div style="display: flex; gap: 4px; background: #e2e8f0; padding: 2px; border-radius: 6px;">
+                        <button type="button" id="prevLangKm" class="btn btn-sm" style="padding: 2px 8px; font-size: 11px; font-weight: 800; background: #ffffff; border: none; border-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);" onclick="setPreviewLang('km')">
+                            ភាសាខ្មែរ
+                        </button>
+                        <button type="button" id="prevLangEn" class="btn btn-sm" style="padding: 2px 8px; font-size: 11px; font-weight: 800; background: transparent; border: none; border-radius: 4px; color: #64748b;" onclick="setPreviewLang('en')">
+                            English
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Simulated Tablet Screen -->
+                <div style="background: rgba(15, 23, 42, 0.4); border-radius: 16px; padding: 18px 14px; flex: 1; display: flex; align-items: center; justify-content: center;">
+                    <div style="background: #ffffff; width: 100%; border-radius: 14px; box-shadow: 0 20px 40px rgba(0,0,0,0.25); overflow: hidden; border: 1.5px solid rgba(139, 92, 246, 0.25);">
+                        <!-- Preview Header -->
+                        <div style="padding: 10px 14px; background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%); border-bottom: 1px solid rgba(139, 92, 246, 0.15); display: flex; align-items: center; justify-content: space-between;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="width: 22px; height: 22px; border-radius: 6px; background: #8b5cf6; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px;">
+                                    <i class="fa-solid fa-sparkles"></i>
+                                </span>
+                                <span id="previewTag" style="font-weight: 800; font-size: 11px; text-transform: uppercase; color: #6d28d9;">
+                                    ✨ ការផ្តល់ជូនបន្ថែមពិសេស
+                                </span>
+                            </div>
+                            <span style="color: #94a3b8; font-size: 16px;">&times;</span>
+                        </div>
+
+                        <!-- Preview Body -->
+                        <div style="padding: 16px 14px; text-align: center;">
+                            <h4 id="previewHeadline" style="font-size: 14px; font-weight: 800; color: #1e293b; margin: 0 0 12px 0; line-height: 1.35;">
+                                បន្ថែមបាញ់ក្រមួន Wax &amp; ប៉ូលាពន្លឺ ត្រឹមតែ +$5.00 ដែរឬទេ?
+                            </h4>
+
+                            <!-- Preview Offer Card -->
+                            <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 10px; margin-bottom: 12px; text-align: left; display: flex; gap: 10px; align-items: center;">
+                                <div style="width: 40px; height: 40px; border-radius: 8px; background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%); color: #7c3aed; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">
+                                    <i class="fa-solid fa-spray-can-sparkles" id="previewIcon"></i>
+                                </div>
+                                <div style="flex: 1; min-width: 0;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px; margin-bottom: 2px;">
+                                        <span id="previewTargetName" style="font-weight: 800; font-size: 12.5px; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                            បាញ់ក្រមួន Wax &amp; ប៉ូលាពន្លឺ
+                                        </span>
+                                        <span id="previewBadge" style="background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; font-weight: 800; font-size: 9px; padding: 1px 5px; border-radius: 4px;">
+                                            + បន្ថែមសេវា
+                                        </span>
+                                    </div>
+                                    <p id="previewDesc" style="font-size: 10.5px; color: #64748b; margin: 0 0 4px 0; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                        បន្ថែមស្រទាប់ក្រមួនការពារទឹក និងបង្កើនពន្លឺលើការលាងក្រៅ។
+                                    </p>
+                                    <div style="font-size: 13px; font-weight: 900; color: #059669; font-family: var(--font-mono);" id="previewPrice">
+                                        +$5.00 <span style="font-size: 10px; color: #64748b; font-weight: 500;">(20,500 ៛)</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Flow Hint -->
+                            <div id="previewHint" style="background: #eff6ff; border: 1px dashed #bfdbfe; border-radius: 6px; padding: 6px 10px; margin-bottom: 14px; font-size: 10px; color: #1e40af; text-align: left; display: flex; align-items: center; gap: 6px;">
+                                <i class="fa-solid fa-circle-info" style="color: #3b82f6;"></i>
+                                <span id="previewHintText">លាងរថយន្តខាងក្រៅមុន រួចបាញ់ក្រមួន Wax &amp; ប៉ូលា។ សេវាទាំងពីរស្ថិតក្នុងកន្ត្រកតែមួយ។</span>
+                            </div>
+
+                            <!-- Buttons -->
+                            <div style="display: flex; gap: 6px; justify-content: center;">
+                                <div id="previewBtnDismiss" style="flex: 1; padding: 7px; font-size: 11px; font-weight: 700; border-radius: 6px; border: 1px solid #cbd5e1; color: #64748b; background: #ffffff;">
+                                    ទុកពេលក្រោយ
+                                </div>
+                                <div id="previewBtnAccept" style="flex: 1.4; padding: 7px; font-size: 11px; font-weight: 800; border-radius: 6px; background: #8b5cf6; color: #ffffff;">
+                                    ✓ យល់ព្រមបន្ថែម (+$5.00)
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentPreviewLang = 'km';
+
+function setPreviewLang(lang) {
+    currentPreviewLang = lang;
+    const btnKm = document.getElementById('prevLangKm');
+    const btnEn = document.getElementById('prevLangEn');
+    if (lang === 'km') {
+        btnKm.style.background = '#ffffff';
+        btnKm.style.color = '#1e293b';
+        btnKm.style.boxShadow = '0 1px 2px rgba(0,0,0,0.1)';
+        btnEn.style.background = 'transparent';
+        btnEn.style.color = '#64748b';
+        btnEn.style.boxShadow = 'none';
+    } else {
+        btnEn.style.background = '#ffffff';
+        btnEn.style.color = '#1e293b';
+        btnEn.style.boxShadow = '0 1px 2px rgba(0,0,0,0.1)';
+        btnKm.style.background = 'transparent';
+        btnKm.style.color = '#64748b';
+        btnKm.style.boxShadow = 'none';
+    }
+    updateLivePreview();
+}
+
+function selectActionType(type) {
+    const isAddon = (type === 'add_service');
+    document.getElementById('action_type_addon').checked = isAddon;
+    document.getElementById('action_type_upgrade').checked = !isAddon;
+    
+    const lAddon = document.getElementById('label_addon');
+    const lUpgrade = document.getElementById('label_upgrade');
+    if (isAddon) {
+        lAddon.className = 'custom-radio-card active-addon';
+        lUpgrade.className = 'custom-radio-card';
+    } else {
+        lAddon.className = 'custom-radio-card';
+        lUpgrade.className = 'custom-radio-card active-upgrade';
+    }
+    updateLivePreview();
+}
+
+function updateLivePreview() {
+    const isKm = (currentPreviewLang === 'km');
+    const isAddon = document.getElementById('action_type_addon').checked;
+    const name = document.getElementById('upsell_name').value.trim();
+    const offerSvcSelect = document.getElementById('upsell_offer_service_id');
+    const selectedOpt = offerSvcSelect.options[offerSvcSelect.selectedIndex];
+    const offerNameEn = selectedOpt ? (selectedOpt.getAttribute('data-name-en') || '') : '';
+    const offerNameKm = selectedOpt ? (selectedOpt.getAttribute('data-name-km') || '') : '';
+    
+    const priceVal = parseFloat(document.getElementById('upsell_offer_price_usd').value) || 5.00;
+    const priceKhr = Math.round(priceVal * 4100);
+
+    const headEn = document.getElementById('upsell_offer_headline_en').value.trim();
+    const headKm = document.getElementById('upsell_offer_headline_km').value.trim();
+    const descEn = document.getElementById('upsell_offer_description_en').value.trim();
+    const descKm = document.getElementById('upsell_offer_description_km').value.trim();
+
+    // Elements
+    const elTag = document.getElementById('previewTag');
+    const elHeadline = document.getElementById('previewHeadline');
+    const elTargetName = document.getElementById('previewTargetName');
+    const elBadge = document.getElementById('previewBadge');
+    const elDesc = document.getElementById('previewDesc');
+    const elPrice = document.getElementById('previewPrice');
+    const elHintText = document.getElementById('previewHintText');
+    const elBtnAccept = document.getElementById('previewBtnAccept');
+    const elBtnDismiss = document.getElementById('previewBtnDismiss');
+    const elIcon = document.getElementById('previewIcon');
+
+    if (elBtnDismiss) {
+        elBtnDismiss.textContent = isKm ? 'ទុកពេលក្រោយ' : 'Not now';
+    }
+
+    if (isAddon) {
+        elTag.textContent = isKm ? '✨ ការផ្តល់ជូនបន្ថែមពិសេស' : '✨ Special Add-On Offer';
+        elBadge.textContent = isKm ? '+ បន្ថែមសេវា' : '+ ADD-ON';
+        elBadge.style.background = '#ecfdf5';
+        elBadge.style.color = '#059669';
+        elBadge.style.borderColor = '#a7f3d0';
+        elIcon.className = 'fa-solid fa-spray-can-sparkles';
+        elHintText.textContent = isKm ? 'លាងរថយន្តខាងក្រៅមុន រួចបាញ់ក្រមួន Wax & ប៉ូលា។ សេវាទាំងពីរស្ថិតក្នុងកន្ត្រកតែមួយ។' : 'Wash exterior first, then crew applies wax & polish. Both items stay in order.';
+        elBtnAccept.textContent = isKm ? `✓ យល់ព្រមបន្ថែម (+$${priceVal.toFixed(2)})` : `✓ Add to Cart (+$${priceVal.toFixed(2)})`;
+    } else {
+        elTag.textContent = isKm ? '✨ កញ្ចប់ដំឡើងពិសេស' : '✨ Special Upgrade Offer';
+        elBadge.textContent = isKm ? '⟳ ដំឡើងកញ្ចប់' : '⟳ UPGRADE';
+        elBadge.style.background = '#f5f3ff';
+        elBadge.style.color = '#7c3aed';
+        elBadge.style.borderColor = '#ddd6fe';
+        elIcon.className = 'fa-solid fa-crown';
+        elHintText.textContent = isKm ? 'ដំឡើងសេវាក្នុងកន្ត្រកទៅកញ្ចប់ពេញលេញក្នុងតម្លៃពិសេស។' : 'Replaces the basic item in your cart with this full premium package.';
+        elBtnAccept.textContent = isKm ? `✓ យល់ព្រមដំឡើង ($${priceVal.toFixed(2)})` : `✓ Upgrade ($${priceVal.toFixed(2)})`;
+    }
+
+    const defaultHeadKm = isAddon ? `បន្ថែម${offerNameKm || 'សេវាបន្ថែម'} ត្រឹមតែ +$${priceVal.toFixed(2)} ដែរឬទេ?` : `ដំឡើងទៅ ${offerNameKm || 'កញ្ចប់ពិសេស'} ត្រឹមតែ $${priceVal.toFixed(2)} ដែរឬទេ?`;
+    const defaultHeadEn = isAddon ? `Add ${offerNameEn || 'Add-On'} for +$${priceVal.toFixed(2)}?` : `Upgrade to ${offerNameEn || 'Premium'} for $${priceVal.toFixed(2)}?`;
+
+    elHeadline.textContent = isKm ? (headKm || defaultHeadKm) : (headEn || defaultHeadEn);
+    elTargetName.textContent = isKm ? (offerNameKm || 'ឈ្មោះសេវា') : (offerNameEn || 'Target Service');
+    elDesc.textContent = isKm ? (descKm || 'ការផ្តល់ជូនពិសេសពីហាង AquaGleam') : (descEn || 'Special promotional offer from AquaGleam.');
+    elPrice.innerHTML = `${isAddon ? '+$' : '$'}${priceVal.toFixed(2)} <span style="font-size: 10px; color: #64748b; font-weight: 500;">(${priceKhr.toLocaleString()} ៛)</span>`;
+}
+
+function openNewUpsellModal() {
+    document.getElementById('upsellModalHeader').innerHTML = '<i class="fa-solid fa-wand-magic-sparkles mr-2" style="color: #8b5cf6;"></i>Create Checkout Promotion Rule';
+    document.getElementById('upsell_rule_id').value = '0';
+    document.getElementById('upsell_name').value = '';
+    document.getElementById('upsell_trigger_service_id').value = '';
+    document.getElementById('upsell_trigger_vehicle_type').value = '';
+    selectActionType('add_service');
+    document.getElementById('upsell_offer_service_id').value = '';
+    document.getElementById('upsell_offer_price_usd').value = '5.00';
+    document.getElementById('upsell_offer_headline_en').value = '';
+    document.getElementById('upsell_offer_headline_km').value = '';
+    document.getElementById('upsell_offer_description_en').value = '';
+    document.getElementById('upsell_offer_description_km').value = '';
+    document.getElementById('upsell_is_active').checked = true;
+    
+    updateLivePreview();
+    const m = document.getElementById('modalUpsellRule');
+    m.style.display = 'flex';
+}
+
+function openEditUpsellModal(rule) {
+    document.getElementById('upsellModalHeader').innerHTML = '<i class="fa-solid fa-pen-to-square mr-2" style="color: #8b5cf6;"></i>Edit Checkout Promotion Rule';
+    document.getElementById('upsell_rule_id').value = rule.id || '0';
+    document.getElementById('upsell_name').value = rule.name || '';
+    document.getElementById('upsell_trigger_service_id').value = rule.trigger_service_id || '';
+    document.getElementById('upsell_trigger_vehicle_type').value = rule.trigger_vehicle_type || '';
+    
+    if ((rule.action_type || 'add_service') === 'upgrade_service') {
+        selectActionType('upgrade_service');
+    } else {
+        selectActionType('add_service');
+    }
+    
+    document.getElementById('upsell_offer_service_id').value = rule.offer_service_id || '';
+    document.getElementById('upsell_offer_price_usd').value = rule.offer_price_usd !== null ? rule.offer_price_usd : '5.00';
+    document.getElementById('upsell_offer_headline_en').value = rule.offer_headline_en || '';
+    document.getElementById('upsell_offer_headline_km').value = rule.offer_headline_km || '';
+    document.getElementById('upsell_offer_description_en').value = rule.offer_description_en || '';
+    document.getElementById('upsell_offer_description_km').value = rule.offer_description_km || '';
+    document.getElementById('upsell_is_active').checked = (Number(rule.is_active) === 1);
+    
+    updateLivePreview();
+    const m = document.getElementById('modalUpsellRule');
+    m.style.display = 'flex';
+}
+
+function closeUpsellModal() {
+    const m = document.getElementById('modalUpsellRule');
+    m.style.display = 'none';
+}
+
+window.addEventListener('click', function(e) {
+    const m = document.getElementById('modalUpsellRule');
+    if (e.target === m) {
+        closeUpsellModal();
+    }
+});
+</script>
 
 <!-- ======================================================== -->
 <!-- GROUP 6B: PERFORMANCE & LEADERBOARD SETTINGS -->
