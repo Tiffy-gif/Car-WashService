@@ -145,7 +145,7 @@ Once electricity is restored, staff must record all handwritten paper tickets in
   6. The system:
      - Creates official paid order records linked to the paper slip reference.
      - Commits any product stock used from the warehouse ledger.
-     - Credits washer commissions to the designated staff.
+     - Credits completed wash jobs to the designated staff.
      - Adds cash inflows into today's register drawer balance.
      - Writes a single `BULK_RECOVERY_IMPORT` audit log entry.
 

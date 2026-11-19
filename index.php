@@ -7,6 +7,7 @@ require_once __DIR__ . '/core/AuditLogger.php';
 require_once __DIR__ . '/core/Auth.php';
 require_once __DIR__ . '/core/Language.php';
 require_once __DIR__ . '/core/Helpers.php';
+require_once __DIR__ . '/core/TelegramNotifier.php';
 require_once __DIR__ . '/database/init.php';
 
 Auth::startSession();
@@ -149,9 +150,12 @@ if (Auth::mustChangePin() && $view !== 'change_pin') {
     exit;
 }
 
-// 4b. Handle Owner / Admin Backup Download & Creation
+// 4b. Handle Owner Backup Download & Creation (Strictly Owner Only)
 if ($action === 'download_backup') {
-                                                                                                                Auth::requirePermission('backup.manage');
+    if (!Auth::check() || Auth::getRole() !== 'owner') {
+        http_response_code(403);
+        die("Access Denied: Only a logged-in owner can download system backups.");
+    }
     require_once __DIR__ . '/core/Backup.php';
     $specificFile = trim((string)($_GET['file'] ?? ''));
     if ($specificFile !== '') {
@@ -172,7 +176,10 @@ if ($action === 'download_backup') {
 }
 
 if ($action === 'create_backup_now' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    Auth::requirePermission('backup.manage');
+    if (!Auth::check() || Auth::getRole() !== 'owner') {
+        http_response_code(403);
+        die("Access Denied: Only a logged-in owner can create backups.");
+    }
     if (!verify_csrf()) {
         header('Location: index.php?view=settings&tab=system&error=csrf');
         exit;
@@ -635,6 +642,7 @@ $viewMap = [
     'washer_jobs'     => '/views/washer/jobs.php',
     'mechanic_jobs'   => '/views/mechanic/jobs.php',
     'vehicle_history' => '/views/owner/vehicle_history.php',
+    'oil_reminders'   => '/views/owner/oil_reminders.php',
     'expenses'        => '/views/owner/expenses.php',
     'reports'         => '/views/owner/reports.php',
     'extras'          => '/views/owner/extras.php',

@@ -46,7 +46,6 @@ If a hard drive fails and you replace the mini-PC:
    - Unique Username (e.g. `vireak_w`)
    - Role: Select exact role (`washer`, `mechanic`, `cashier`, `stock_control`, `manager`).
    - Initial 6-digit PIN.
-   - Commission Type (Flat rate per vehicle or percentage) and Commission Rate.
 4. Instruct new staff to log in and immediately change their temporary PIN to a private one via **Change PIN** (`views/auth/change_pin.php`).
 
 ### B. Staff Departure: Soft Deactivation (Never Delete!)
@@ -63,7 +62,7 @@ If a hard drive fails and you replace the mini-PC:
    - Blocks the account from logging into POS or Back Office.
    - Terminates any active POS sessions in `pos_sessions`.
    - Removes the staff member from active bay assignment dropdowns.
-   - Retains 100% of their historical commission records, past orders, and audit log entries intact.
+   - Retains 100% of their historical work assignment records, past orders, and audit log entries intact.
 
 ### The Last-Owner Safety Guard:
 The system contains an automated security check:
@@ -123,9 +122,9 @@ On the final day of each calendar month, perform this 5-step closing routine:
 
 - [ ] **Step 1: Daily Z-Reports vs. Bank Statements Reconciliation**
   - Verify that the sum of all monthly Z-Reports matches the cash deposited into your physical bank account plus digital ABA/KHQR inflows.
-- [ ] **Step 2: Staff Commission Payouts (`views/owner/commissions.php`)**
-  - Review commission totals for all active washers, mechanics, and cashiers.
-  - Print the monthly commission summary for staff signature sign-off and disburse payroll.
+- [ ] **Step 2: Staff Timecard & Payroll Clearance (iews/owner/reports.php)**
+  - Review logged hours and job completion totals for all active washers, mechanics, and cashiers.
+  - Print the monthly staff summary for staff signature sign-off and disburse payroll.
 - [ ] **Step 3: Petty Cash & Expense Clearance (`views/owner/expenses.php`)**
   - Verify all receipts for out-of-drawer petty cash purchases (ice, brooms, emergency hardware).
   - Ensure total recorded expenses match the cash deducted from shift drawers.

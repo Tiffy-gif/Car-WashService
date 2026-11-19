@@ -11,12 +11,12 @@ flowchart TD
     A["Raw Shop Floor Data<br/>(Orders, Timecards, Movements)"] --> B["Reporting & Analytics Engine"]
     
     B --> C["1. Financial Reports<br/>(views/owner/reports.php)"]
-    B --> D["2. Labor & Commission Reports<br/>(views/owner/commissions.php)"]
+    B --> D["2. Labor & Timecard Reports<br/>(views/owner/reports.php)"]
     B --> E["3. Expense Tracking<br/>(views/owner/expenses.php)"]
     B --> F["4. Operational KPIs & Analytics<br/>(core/PerformanceAnalytics.php)"]
     
     C --> G["Gross vs Net Sales, POS Device Breakdown, Payment Mix"]
-    D --> H["Washer Commissions, Tech Job Payouts, Upsell Bonuses"]
+    D --> H["Washer Job Volume, Timecards, Staff Hours"]
     E --> I["Petty Cash, Chemical Costs, Shop Overheads"]
     F --> J["Cars/Labor Hr, Bay Utilization, Staff Efficiency"]
 ```
@@ -35,11 +35,11 @@ Accessible to: `owner`, `manager`, `system_admin`.
 * Tracks out-of-drawer petty cash (e.g., ice for staff, emergency hardware purchase) as well as recurring overheads (water utility, electricity, soap drum replenishment).
 * Every expense specifies: Expense Date, Category, Amount in USD/KHR, and Staff Name.
 
-### C. Staff Commissions & Payouts (`views/owner/commissions.php`)
+### C. Staff Labor & Job Production Tracking (`views/owner/reports.php`)
 * Eliminates end-of-month payroll disputes.
-* **Washers**: Itemized list of vehicles washed and earned commission (e.g., $0.50 per wash).
-* **Mechanics**: Flat rate or percentage earned per oil change / technical inspection completed.
-* **Cashiers**: Bonus commissions earned on converted upsell items (e.g., $0.50 per ceramic wax upsell).
+* **Washers**: Itemized list of vehicles washed and average wash completion times.
+* **Mechanics**: Completed oil changes and technical inspections.
+* **Cashiers**: Converted upsell volume and completed tickets.
 
 ---
 
@@ -99,7 +99,6 @@ To build healthy competition among bay teams, the system features a live **Staff
   1. Total cars completed this week / month.
   2. Efficiency score percentage.
   3. Customer satisfaction / zero-damage record.
-  4. Total commission earned.
 * Owners can display the leaderboard in the staff breakroom or award monthly "Employee of the Month" bonuses.
 
 ---
@@ -122,14 +121,14 @@ Successful shop owners follow a disciplined 3-tier review schedule:
    - Review which hours had low utilization. Schedule equipment maintenance or chemical inventory replenishment during those slow windows.
 2. **Review Duration Overruns (`service_duration_reviews`)**:
    - Review services that took >20% longer than expected. Accept catalog duration adjustments if vehicles consistently take longer.
-3. **Approve Staff Commissions**:
-   - Review and sign off on weekly commission balances before payroll disbursement.
+3. **Review Staff Timecards & Hours**:
+   - Review and sign off on weekly hours and job counts before payroll disbursement.
 4. **Inspect Reorder Alerts**:
    - Check warehouse stock ledger for items below minimum threshold; place supplier orders.
 
 ### C. The Monthly Financial Cadence (45 Minutes on the 1st of the Month)
 1. **Net Profit Calculation**:
-   $$\text{Net Profit} = \text{Gross Inflows} - (\text{Petty Cash Expenses} + \text{Chemical Inventory Cost} + \text{Staff Payroll \& Commissions} + \text{Rent \& Utilities})$$
+   $$\text{Net Profit} = \text{Gross Inflows} - (\text{Petty Cash Expenses} + \text{Chemical Inventory Cost} + \text{Staff Payroll} + \text{Rent \& Utilities})$$
 2. **Customer Retention Review**:
    - Check the **At-Risk Customers** list. Launch targeted SMS/Telegram win-back promotions.
 3. **Catalog Price Review**:

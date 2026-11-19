@@ -63,7 +63,7 @@ The system includes built-in membership tiering configured in `core/Loyalty.php`
 
 ---
 
-## 4. Smart Upsell Rules & Staff Commission Tracking
+## 4. Smart Upsell Rules & Conversion Tracking
 
 To boost average order value (AOV), the POS includes automated contextual upsell recommendations.
 
@@ -75,7 +75,7 @@ To boost average order value (AOV), the POS includes automated contextual upsell
 ### Logging Upsell Conversions:
 * When staff successfully offer and add an upsell, the system records an entry in `upsell_logs`:
   `Shop: SHOP-PP-001 | Staff: Sokha | Item: Ceramic Wax | Price: $3.00 | Accepted: 1`.
-* In **Back Office &rarr; Commissions** (`/commissions`), owners can view staff upsell conversion rates and pay performance bonuses.
+* In **Back Office &rarr; Reports** (`/reports`), owners can view staff upsell conversion rates and performance metrics.
 
 ---
 

@@ -280,7 +280,7 @@ $autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] == '1';
                 </div>
 
                 <div class="slip-row"><span>Shift #:</span> <strong><?= htmlspecialchars($slipData['shift_uid']) ?></strong></div>
-                <div class="slip-row"><span>Cashier:</span> <strong><?= htmlspecialchars($slipData['cashier_name']) ?></strong></div>
+                <div class="slip-row"><span>Cashier:</span> <strong><?= htmlspecialchars($slipData['cashier_name']) ?> (<?= htmlspecialchars($slipData['cashier_role'] ?? 'Cashier') ?>)</strong></div>
                 <div class="slip-row"><span>Terminal:</span> <span><?= htmlspecialchars($slipData['device_name']) ?></span></div>
                 <div class="slip-row"><span>Opened At:</span> <span><?= date('d/m/Y H:i', strtotime($slipData['started_at'])) ?></span></div>
                 <div class="slip-row"><span>Exchange Rate:</span> <span>$1.00 = <?= number_format($slipData['exchange_rate']) ?> ៛</span></div>
@@ -324,9 +324,20 @@ $autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] == '1';
 
                 <div class="slip-row"><span>Z-Report #:</span> <strong><?= htmlspecialchars($slipData['z_report_number']) ?></strong></div>
                 <div class="slip-row"><span>Business Date:</span> <strong><?= htmlspecialchars($slipData['close_date']) ?></strong></div>
+                <div class="slip-row"><span>Day Opened By:</span> <strong><?= htmlspecialchars($slipData['opened_by_name'] ?? 'N/A') ?> (<?= htmlspecialchars($slipData['opened_by_role'] ?? 'Cashier') ?>)</strong></div>
+                <?php if (!empty($slipData['opened_at'])): ?>
+                    <div class="slip-row"><span>Opened At:</span> <span><?= date('d/m/Y H:i', strtotime($slipData['opened_at'])) ?></span></div>
+                <?php endif; ?>
+                <div class="slip-row"><span>Day Closed By:</span> <strong><?= htmlspecialchars($slipData['closed_by_name'] ?? $slipData['manager_name']) ?> (<?= htmlspecialchars($slipData['closed_by_role'] ?? 'Cashier') ?>)</strong></div>
                 <div class="slip-row"><span>Closed At:</span> <span><?= date('d/m/Y H:i', strtotime($slipData['closed_at'])) ?></span></div>
-                <div class="slip-row"><span>Closed By:</span> <strong><?= htmlspecialchars($slipData['manager_name']) ?></strong></div>
                 <div class="slip-row"><span>Exchange Rate:</span> <span>$1.00 = <?= number_format($slipData['exchange_rate']) ?> ៛</span></div>
+
+                <?php if (!empty($slipData['needs_manager_review'])): ?>
+                    <div class="reopen-banner" style="background: #fee2e2; border-color: #dc2626; color: #991b1b; padding: 6px; font-weight: bold; margin-bottom: 8px;">
+                        ** NEEDS MANAGER REVIEW **<br>
+                        <span style="font-size: 11px; font-weight: normal;">Discrepancy detected on Close Day (Short/Over: <?= ($slipData['total_difference_usd'] > 0 ? '+' : '') ?>$<?= number_format($slipData['total_difference_usd'], 2) ?>). Requires manager review and sign-off.</span>
+                    </div>
+                <?php endif; ?>
 
                 <?php if (!empty($slipData['reopen_history'])): ?>
                     <div class="reopen-banner">
@@ -428,8 +439,13 @@ $autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] == '1';
 
                 <div class="slip-signatures">
                     <div class="sig-block" style="width: 100%;">
-                        <div class="sig-line">Manager Sign-Off: <?= htmlspecialchars($slipData['manager_name']) ?></div>
+                        <div class="sig-line">Closed By: <?= htmlspecialchars($slipData['closed_by_name'] ?? $slipData['manager_name']) ?> (<?= htmlspecialchars($slipData['closed_by_role'] ?? 'Cashier') ?>)</div>
                     </div>
+                    <?php if (!empty($slipData['needs_manager_review'])): ?>
+                        <div class="sig-block" style="width: 100%; margin-top: 15px;">
+                            <div class="sig-line">Manager Sign-Off: ________________________</div>
+                        </div>
+                    <?php endif; ?>
                 </div>
 
             <?php else: ?>
@@ -440,9 +456,9 @@ $autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] == '1';
                 </div>
 
                 <div class="slip-row"><span>Shift #:</span> <strong><?= htmlspecialchars($slipData['shift_uid']) ?></strong></div>
-                <div class="slip-row"><span>Cashier:</span> <strong><?= htmlspecialchars($slipData['cashier_name']) ?></strong></div>
+                <div class="slip-row"><span>Cashier:</span> <strong><?= htmlspecialchars($slipData['cashier_name']) ?> (<?= htmlspecialchars($slipData['cashier_role'] ?? 'Cashier') ?>)</strong></div>
                 <?php if (!empty($slipData['handover_to_name'])): ?>
-                    <div class="slip-row"><span>Handover To:</span> <strong><?= htmlspecialchars($slipData['handover_to_name']) ?></strong></div>
+                    <div class="slip-row"><span>Handover To:</span> <strong><?= htmlspecialchars($slipData['handover_to_name']) ?> (<?= htmlspecialchars($slipData['handover_to_role'] ?? 'Cashier') ?>)</strong></div>
                 <?php endif; ?>
                 <div class="slip-row"><span>Terminal:</span> <span><?= htmlspecialchars($slipData['device_name']) ?></span></div>
                 <div class="slip-row"><span>Started:</span> <span><?= date('d/m/Y H:i', strtotime($slipData['started_at'])) ?></span></div>
@@ -519,12 +535,24 @@ $autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] == '1';
                     <div style="font-size: 12px;"><strong>Note:</strong> <?= htmlspecialchars($slipData['notes']) ?></div>
                 <?php endif; ?>
 
+                <?php if (!empty($slipData['unpaid_orders'])): ?>
+                    <div class="slip-divider"></div>
+                    <div style="font-weight: 700; margin-bottom: 4px; text-transform: uppercase; font-size: 13px;">Carried Over Orders (<?= count($slipData['unpaid_orders']) ?>)</div>
+                    <div style="font-size: 11px; margin-bottom: 6px; color: #555;">Unpaid/unfinished orders carry over to the next shift:</div>
+                    <?php foreach ($slipData['unpaid_orders'] as $uo): ?>
+                        <div class="slip-row" style="font-size: 12px; margin: 2px 0;">
+                            <span><?= htmlspecialchars($uo['order_number']) ?> (<?= htmlspecialchars($uo['vehicle_plate'] ?: 'No Plate') ?>)</span>
+                            <strong>$<?= number_format((float)$uo['total_usd'], 2) ?> [<?= strtoupper($uo['status']) ?>]</strong>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+
                 <div class="slip-signatures">
                     <div class="sig-block">
-                        <div class="sig-line">Outgoing Cashier: <?= htmlspecialchars($slipData['cashier_name']) ?></div>
+                        <div class="sig-line">Outgoing Cashier: <?= htmlspecialchars($slipData['cashier_name']) ?> (<?= htmlspecialchars($slipData['cashier_role'] ?? 'Cashier') ?>)</div>
                     </div>
                     <div class="sig-block">
-                        <div class="sig-line"><?= !empty($slipData['handover_to_name']) ? 'Incoming Cashier: ' . htmlspecialchars($slipData['handover_to_name']) : 'Manager Sign-Off' ?></div>
+                        <div class="sig-line"><?= !empty($slipData['handover_to_name']) ? 'Incoming Cashier: ' . htmlspecialchars($slipData['handover_to_name']) . ' (' . htmlspecialchars($slipData['handover_to_role'] ?? 'Cashier') . ')' : 'Manager Sign-Off' ?></div>
                     </div>
                 </div>
 

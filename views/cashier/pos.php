@@ -434,8 +434,8 @@ foreach ($vehiclesList as $v) {
 }
 
 // Fetch active washers & mechanics (check capabilities or legacy role)
-$washersList = $pdo->query("SELECT u.id, u.full_name, u.commission_type, u.commission_rate FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE (r.can_assign_washer = 1 OR u.role = 'washer') AND u.status = 'active' ORDER BY u.full_name ASC")->fetchAll();
-$mechanicsList = $pdo->query("SELECT u.id, u.full_name, u.commission_type, u.commission_rate FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE (r.can_assign_mechanic = 1 OR u.role = 'mechanic') AND u.status = 'active' ORDER BY u.full_name ASC")->fetchAll();
+$washersList = $pdo->query("SELECT u.id, u.full_name FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE (r.can_assign_washer = 1 OR u.role = 'washer') AND u.status = 'active' ORDER BY u.full_name ASC")->fetchAll();
+$mechanicsList = $pdo->query("SELECT u.id, u.full_name FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE (r.can_assign_mechanic = 1 OR u.role = 'mechanic') AND u.status = 'active' ORDER BY u.full_name ASC")->fetchAll();
 
 // Fetch plates with past repair history
 $historyPlates = $pdo->query("SELECT DISTINCT plate_number FROM vehicle_repair_history")->fetchAll(PDO::FETCH_COLUMN);

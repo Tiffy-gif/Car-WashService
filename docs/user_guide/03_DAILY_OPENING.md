@@ -82,7 +82,7 @@ sequenceDiagram
 
 #### What Can Go Wrong & What to Do:
 - *Problem*: You forgot your PIN or the screen displays *"Account inactive"*.
-- *Fix*: Immediately inform the General Manager or Owner. They can unlock your account and reset your temporary PIN in **Manage Staff** (`view=staff`). Do not wash cars under another worker's PIN, or your commissions will be credited to them.
+- *Fix*: Immediately inform the General Manager or Owner. They can unlock your account and reset your temporary PIN in **Manage Staff** (`view=staff`). Do not wash cars under another worker's PIN, or your work history will be credited to them.
 
 ---
 

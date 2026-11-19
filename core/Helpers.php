@@ -234,16 +234,23 @@ function update_setting(PDO $pdo, string $key, ?string $newValue, ?int $userId, 
 
     // Record audit history
     try {
+        $isTelegramToken = ($key === 'telegram_bot_token');
+        $histOld = $isTelegramToken ? 'token changed' : $oldStr;
+        $histNew = $isTelegramToken ? 'token changed' : $newStr;
+        $auditDetails = $isTelegramToken
+            ? "Setting '{$key}' token changed"
+            : "Setting '{$key}' changed from '{$oldStr}' to '{$newStr}'";
+
         $hStmt = $pdo->prepare("INSERT INTO settings_history (setting_key, old_value, new_value, changed_by_id, changed_by_name, changed_at) VALUES (?, ?, ?, ?, ?, ?)");
         $hStmt->execute([
             $key,
-            $oldStr,
-            $newStr,
+            $histOld,
+            $histNew,
             $userId,
             $userName,
             date('Y-m-d H:i:s')
         ]);
-        audit_log('SETTING_CHANGE', "Setting '{$key}' changed from '{$oldStr}' to '{$newStr}'", 'setting', $key, $userId, $userName);
+        audit_log('SETTING_CHANGE', $auditDetails, 'setting', $key, $userId, $userName);
     } catch (Throwable $t) {
         app_log('ERROR', 'Failed to log settings history: ' . $t->getMessage(), ['key' => $key]);
     }
@@ -394,6 +401,29 @@ function get_pos_url(): string {
         return APP_URL . '/pos/index.html#pos';
     }
     return APP_URL . '/index.php?view=pos';
+}
+
+/**
+ * Normalize phone numbers to a consistent format:
+ * - Strips whitespace, dashes, dots, parentheses, and '+' symbols.
+ * - Converts Cambodian country code (+855 or 855) to local leading '0'.
+ * - Returns null for empty strings or null inputs.
+ */
+function normalize_phone(?string $phone): ?string {
+    if ($phone === null) {
+        return null;
+    }
+    $clean = preg_replace('/[\s\-\.\(\)\+]+/', '', trim($phone));
+    if ($clean === '') {
+        return null;
+    }
+    if (str_starts_with($clean, '855')) {
+        $clean = substr($clean, 3);
+        if (!str_starts_with($clean, '0')) {
+            $clean = '0' . $clean;
+        }
+    }
+    return $clean !== '' ? $clean : null;
 }
 
 

@@ -251,6 +251,6 @@ Before opening to paying customers, perform one complete test loop:
    - Manager opens **Close Day (Z-Report)**. Enters safe cash and types Manager PIN.
    - Daily Z-report prints on thermal paper. Day lock engages automatically.
 6. **Review Reports**:
-   - Open **Reports & Analytics** (`/reports`) and **Audit Logs** (`/audit_logs`) to verify all sales, drawer events, and commission balances recorded accurately.
+   - Open **Reports & Analytics** (`/reports`) and **Audit Logs** (`/audit_logs`) to verify all sales, drawer events, and staff records recorded accurately.
 
 **Congratulations! Your shop is fully commissioned and ready for live commercial operation.**

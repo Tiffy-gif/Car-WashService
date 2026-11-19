@@ -101,13 +101,13 @@ flowchart LR
 
 ### 1. Shop Owner (`owner` / ម្ចាស់ហាង)
 - **Primary Mission**: Business profitability, capital safety, and strategic growth.
-- **What They Can Do**: Access all 28 back-office screens, view executive revenue dashboards, export detailed P&L reports, pay crew commissions, approve expense vouchers, configure system settings, and inspect security audit logs.
+- **What They Can Do**: Access all 28 back-office screens, view executive revenue dashboards, export detailed P&L reports, approve expense vouchers, configure system settings, and inspect security audit logs.
 - **What They Cannot Do**: The owner role has no functional restrictions, but must follow system controls (e.g. providing reasons for stock adjustments).
 
 ### 2. General Manager (`manager` / អ្នកចាត់ការទូទៅ)
 - **Primary Mission**: Daily floor leadership, queue pacing, fraud prevention, and customer satisfaction.
 - **What They Can Do**: Conduct unannounced cash spot audits, verify bank transfer payment slips, authorize on-screen discounts and order cancellations with manager PIN, approve warehouse parts requests, reorder queue bays, correct staff timecards, and review operational reports.
-- **What They CANNOT Do**: Cannot view owner financial dashboards (`dashboard.view`), cannot export executive profit reports, cannot pay out payroll commissions, cannot delete expense ledgers, and cannot modify system RBAC roles or database settings.
+- **What They CANNOT Do**: Cannot view owner financial dashboards (`dashboard.view`), cannot export executive profit reports, cannot delete expense ledgers, and cannot modify system RBAC roles or database settings.
 
 ### 3. Cashier (`cashier` / បេឡាករ)
 - **Primary Mission**: Accurate order intake, friendly customer engagement, and penny-perfect cash management.
@@ -116,7 +116,7 @@ flowchart LR
 
 ### 4. Car Washer (`washer` / បុគ្គលិកលាង)
 - **Primary Mission**: Thorough cleaning, vehicle paint safety, and rapid turnaround.
-- **What They Can Do**: View assigned wash bay vehicles on tablet (`washer_jobs.view`), tap "Start Wash", tap "Finish Wash", assign themselves to an open vehicle, and inspect their personal wash commission totals.
+- **What They Can Do**: View assigned wash bay vehicles on tablet (`washer_jobs.view`), tap "Start Wash", tap "Finish Wash", assign themselves to an open vehicle, and view completed wash history.
 - **What They CANNOT Do**: Cannot view customer phone numbers, cannot touch billing or payments, and cannot access warehouse parts or settings.
 
 ### 5. Wash Supervisor (`wash_supervisor` / ប្រធានត្រួតពិនិត្យការលាង)
@@ -137,7 +137,7 @@ flowchart LR
 ### 8. Stock Control / Warehouse (`stock_control` / អ្នកគ្រប់គ្រងស្តុក)
 - **Primary Mission**: Inventory accuracy, loss prevention, and supplier receiving.
 - **What They Can Do**: Manage parts catalog (`oil_care.list`, `extras.list`), approve or reject mechanic parts requests with mandatory reason codes, log physical count discrepancies, record new stock deliveries, and inspect the immutable stock ledger.
-- **What They CANNOT Do**: Cannot handle customer cash, cannot view payroll commissions, and cannot delete transactions from the stock ledger.
+- **What They CANNOT Do**: Cannot handle customer cash and cannot delete transactions from the stock ledger.
 
 ### 9. CRM Coordinator (`crm` / អ្នកសម្របសម្រួល CRM)
 - **Primary Mission**: Customer retention, fleet accounts, and service maintenance reminders.
@@ -187,7 +187,6 @@ The table below reflects the exact permission records configured in the database
 | **Customer Registry** | `customers.list` / `edit` | **YES** | **YES** | **YES** | NO | NO | NO | NO | NO |
 | **Shift Start & Close** | `pos.access` | **YES** | **YES** | **YES** | NO | NO | NO | NO | NO |
 | **Close Day & Z-Report** | `daily_close.close` | **YES** | NO | **YES** | NO | NO | NO | NO | NO |
-| **Crew Commissions Payroll**| `commissions.list` / `pay` | **YES** | NO | NO | NO | NO | NO | NO | NO |
 | **Expense Vouchers** | `expenses.list` / `add` | **YES** | NO | NO | NO | NO | NO | NO | NO |
 | **Financial Reports** | `reports.view` | **YES** | **YES** | NO | NO | NO | NO | NO | NO |
 | **Export Reports (CSV/Excel)**| `reports.export` | **YES** | NO | NO | NO | NO | NO | NO | NO |

@@ -2241,6 +2241,16 @@ $baysList = BayManager::getAllBays($pdo);
             </p>
         </div>
 
+        <div style="margin-bottom: 20px; padding: 14px 18px; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: var(--radius-md); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div>
+                <strong style="color: #065f46; font-size: 14px;"><i class="fa-solid fa-bell mr-1"></i> Customer Follow-ups & Reminders Screen</strong>
+                <p style="color: #047857; font-size: 13px; margin: 2px 0 0 0;">View vehicles due soon or overdue, with customer names and phone numbers for calling or messaging.</p>
+            </div>
+            <a href="<?= APP_URL ?>/index.php?view=oil_reminders" class="btn btn-sm" style="background: #059669; color: #fff; font-weight: 600;">
+                <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> Open Oil Reminders Screen
+            </a>
+        </div>
+
         <form action="<?= APP_URL ?>/index.php?view=settings" method="POST">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="save_oil">

@@ -72,10 +72,6 @@
                     <i class="fa-solid fa-oil-can"></i>
                     <span data-i18n="navOilReminders">Oil Service</span>
                 </button>
-                <button class="nav-tab" data-view="close" title="Daily Close">
-                    <i class="fa-solid fa-calendar-check"></i>
-                    <span data-i18n="navClose">Daily Close</span>
-                </button>
             </nav>
 
             <!-- Washer Navigation -->
@@ -95,8 +91,16 @@
             </nav>
         </div>
 
+
+
         <!-- Right: Status, Last Updated, Language, Dark Mode, Backoffice, User, Settings, Logout -->
         <div class="header-actions">
+<!-- Cashier Actions Button -->
+            <button type="button" class="btn-cashier-actions" id="btnOpenCashierActions" title="Cashier Actions / សកម្មភាពអ្នកគិតលុយ" style="display: inline-flex; align-items: center; gap: 7px; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 750; border: 1.5px solid #fed7aa; background: #fffaf5; color: #ea580c; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 1px 3px rgba(234, 88, 12, 0.08);">
+                <i class="fa-solid fa-sliders" style="font-size: 13px;"></i>
+                <span data-i18n="cashierActions">Cashier Actions</span>
+            </button>
+
             <!-- Network Status Pill (Preserved for compatibility) -->
             <div class="status-pill online" id="networkPill" title="Network Status" style="display: none;">
                 <span class="dot"></span>
@@ -137,17 +141,7 @@
             <button class="btn btn-outline btn-sm" id="btnLangToggle" style="display: none;"
                 title="Change Language">EN</button>
 
-            <!-- POS Shift Status Badge -->
-            <button type="button" class="pos-shift-badge-btn" id="posShiftStatusBadge" style="display: none; align-items: center; gap: 7px; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; border: 1px solid #fecaca; background: #fef2f2; color: #dc2626; cursor: pointer; transition: all 0.2s ease;">
-                <i class="fa-solid fa-cash-register" id="posShiftStatusIcon"></i>
-                <span id="posShiftStatusText">No Active Shift - Click to Open</span>
-            </button>
-
-            <!-- Cashier Actions Button -->
-            <button type="button" class="btn-cashier-actions" id="btnOpenCashierActions" title="Cashier Actions / សកម្មភាពអ្នកគិតលុយ" style="display: inline-flex; align-items: center; gap: 7px; padding: 5px 13px; border-radius: 999px; font-size: 12px; font-weight: 750; border: 1.5px solid #fed7aa; background: #fffaf5; color: #ea580c; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 1px 3px rgba(234, 88, 12, 0.08);">
-                <i class="fa-solid fa-sliders" style="font-size: 13px;"></i>
-                <span data-i18n="cashierActions">Cashier Actions</span>
-            </button>
+            
 
             <!-- User Pill with Dropdown Menu (Option A) -->
             <div class="user-menu-container" id="userMenuContainer" style="position: relative; display: inline-block;">
@@ -178,14 +172,6 @@
                         </div>
                     </div>
 
-                    <button type="button" class="header-menu-item" id="userMenuCashierActions">
-                        <i class="fa-solid fa-sliders" style="color: #ea580c;"></i>
-                        <span data-i18n="cashierActions">សកម្មភាពអ្នកគិតលុយ (Cashier Actions)</span>
-                    </button>
-                    <button type="button" class="header-menu-item" id="userMenuEndShift" style="display: none;">
-                        <i class="fa-solid fa-handshake" style="color: #f59e0b;"></i>
-                        <span data-i18n="endShiftMenu">បញ្ចប់វេន (End Shift)</span>
-                    </button>
                     <button type="button" class="header-menu-item" id="userMenuSpotAudit" style="display: none;">
                         <i class="fa-solid fa-calculator" style="color: #0284c7;"></i>
                         <span data-i18n="spotAuditMenu">ត្រួតពិនិត្យសាច់ប្រាក់ (Spot Audit)</span>
@@ -1081,216 +1067,7 @@
             </div>
         </section>
 
-        <!-- 4. Daily Close View (Z-Report) -->
-        <section class="view-section" id="viewClose">
-            <div class="view-content-container">
-                <!-- Header Bar -->
-                <div class="view-header-bar">
-                    <div class="view-header-left">
-                        <div class="view-header-icon icon-blue">
-                            <i class="fa-solid fa-chart-pie"></i>
-                        </div>
-                        <div class="view-header-titles">
-                            <h2 data-i18n="closeDayTitle">របាយការណ៍បិទបញ្ជីប្រចាំថ្ងៃ</h2>
-                            <p data-i18n="closeDayDesc">Daily shift sales breakdown by payment type and cash drawer
-                                balance</p>
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-                        <select id="closeDeviceFilter" class="header-filter-select"></select>
-                        <input type="date" id="closeDateFilter" class="header-filter-input">
-                        <button type="button" class="btn btn-outline" id="btnRefreshDailyReport" title="Refresh data">
-                            <i class="fa-solid fa-rotate"></i>
-                        </button>
-                        <button type="button" class="btn btn-danger" id="btnCloseDaySubmit"
-                            style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.55rem 1rem;">
-                            <i class="fa-solid fa-lock"></i>
-                            <span data-i18n="dailyCloseBtn">បិទបញ្ជីថ្ងៃនេះ</span>
-                        </button>
-                        <button type="button" class="btn btn-primary" id="btnPrintDailyReport"
-                            style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.55rem 1.25rem;">
-                            <i class="fa-solid fa-print"></i>
-                            <span data-i18n="printCloseReport">បោះពុម្ពរបាយការណ៍បិទវេន</span>
-                        </button>
-                    </div>
-                </div>
 
-                <!-- Daily Close Offline & Status Banners (Requirements 19, 20) -->
-                <div id="closeOfflineBanner" class="alert alert-warning"
-                    style="display: none; margin-bottom: 1rem; align-items: center; gap: 0.5rem;">
-                    <i class="fa-solid fa-triangle-exclamation"></i>
-                    <strong data-i18n="offlineNotFinal">ក្រៅបណ្តាញ - មិនទាន់ផ្លូវការ</strong>
-                </div>
-                <div id="closeStatusBanner" class="alert alert-info"
-                    style="display: none; margin-bottom: 1rem; justify-content: space-between; align-items: center;">
-                    <div id="closeStatusBannerText" style="font-weight: 600;"></div>
-                    <button type="button" class="btn btn-warning btn-sm" id="btnReopenDay" style="display: none;">
-                        <i class="fa-solid fa-lock-open"></i> <span data-i18n="reopenDayBtn">បើកបញ្ជីឡើងវិញ</span>
-                    </button>
-                </div>
-
-                <!-- Balanced 6-Card Summary Metrics Grid -->
-                <div class="view-kpi-grid blind-hide-cashier">
-                    <!-- Total Sales -->
-                    <div class="view-kpi-card kpi-primary">
-                        <div class="view-kpi-top">
-                            <span class="view-kpi-label" data-i18n="totalSales">ការលក់សរុប</span>
-                            <div class="view-kpi-icon"><i class="fa-solid fa-chart-line"></i></div>
-                        </div>
-                        <div class="view-kpi-value" id="closeTotalSalesUsd">$0.00</div>
-                        <div class="view-kpi-sub" id="closeTotalSalesKhr">0 ៛</div>
-                    </div>
-
-                    <!-- Cash Collected -->
-                    <div class="view-kpi-card kpi-success">
-                        <div class="view-kpi-top">
-                            <span class="view-kpi-label" data-i18n="cashTotal">សាច់ប្រាក់សុទ្ធ</span>
-                            <div class="view-kpi-icon"><i class="fa-solid fa-money-bill-wave"></i></div>
-                        </div>
-                        <div class="view-kpi-value" id="closeCashUsd">$0.00</div>
-                        <div class="view-kpi-sub" id="closeCashKhr">0 ៛</div>
-                    </div>
-
-                    <!-- ABA Pay -->
-                    <div class="view-kpi-card kpi-azure">
-                        <div class="view-kpi-top">
-                            <span class="view-kpi-label" data-i18n="abaTotal">ABA Pay</span>
-                            <div class="view-kpi-icon"><i class="fa-solid fa-building-columns"></i></div>
-                        </div>
-                        <div class="view-kpi-value" id="closeAbaUsd">$0.00</div>
-                        <div class="view-kpi-sub" id="closeAbaKhr">0 ៛</div>
-                    </div>
-
-                    <!-- KHQR Scan -->
-                    <div class="view-kpi-card kpi-danger">
-                        <div class="view-kpi-top">
-                            <span class="view-kpi-label" data-i18n="khqrTotal">KHQR Scan</span>
-                            <div class="view-kpi-icon"><i class="fa-solid fa-qrcode"></i></div>
-                        </div>
-                        <div class="view-kpi-value" id="closeKhqrUsd">$0.00</div>
-                        <div class="view-kpi-sub" id="closeKhqrKhr">0 ៛</div>
-                    </div>
-
-                    <!-- Unpaid Invoices -->
-                    <div class="view-kpi-card kpi-warning">
-                        <div class="view-kpi-top">
-                            <span class="view-kpi-label" data-i18n="unpaid">មិនទាន់ទូទាត់</span>
-                            <div class="view-kpi-icon"><i class="fa-solid fa-hourglass-half"></i></div>
-                        </div>
-                        <div class="view-kpi-value" id="closeUnpaidCount">0</div>
-                        <div class="view-kpi-sub" id="closeUnpaidUsd">$0.00</div>
-                    </div>
-
-                    <!-- Cancelled Orders -->
-                    <div class="view-kpi-card">
-                        <div class="view-kpi-top">
-                            <span class="view-kpi-label" data-i18n="cancelledOrders">ការកុម្ម៉ង់បោះបង់</span>
-                            <div class="view-kpi-icon" style="background: #f1f5f9; color: #64748b;"><i
-                                    class="fa-solid fa-ban"></i></div>
-                        </div>
-                        <div class="view-kpi-value" id="closeCancelledCount">0</div>
-                        <div class="view-kpi-sub" id="closeCancelledUsd">$0.00</div>
-                    </div>
-                </div>
-
-                <!-- Cash Drawer Reconciliation -->
-                <div class="drawer-reconcile-card">
-                    <div class="drawer-reconcile-header">
-                        <h3 class="drawer-reconcile-title">
-                            <i class="fa-solid fa-cash-register"></i>
-                            <span data-i18n="cashDrawerTitle">ផ្ទៀងផ្ទាត់សាច់ប្រាក់ក្នុងថត</span>
-                        </h3>
-                        <span id="drawerStatusBadge" class="drawer-status-pill balanced">
-                            គ្រប់ចំនួន
-                        </span>
-                    </div>
-
-                    <div class="drawer-columns-grid">
-                        <!-- Expected Cash -->
-                        <div class="drawer-metric-box">
-                            <span class="drawer-metric-title" data-i18n="expectedCash">សាច់ប្រាក់ប្រព័ន្ធរំពឹងទុក</span>
-                            <div class="drawer-metric-amount" id="drawerExpectedCashUsd">$0.00</div>
-                            <div class="drawer-metric-khr" id="drawerExpectedCashKhr">0 ៛</div>
-                        </div>
-
-                        <!-- Actual Cash Counted -->
-                        <div class="drawer-metric-box active-input-box">
-                            <span class="drawer-metric-title" style="color: var(--primary);"
-                                data-i18n="actualCashCounted">សាច់ប្រាក់រាប់ជាក់ស្តែង</span>
-                            <div class="drawer-inputs-row">
-                                <div class="drawer-input-group">
-                                    <label>USD ($)</label>
-                                    <input type="number" id="drawerCountUsd" class="form-control" placeholder="0.00"
-                                        step="0.5">
-                                </div>
-                                <div class="drawer-input-group">
-                                    <label>KHR (៛)</label>
-                                    <input type="number" id="drawerCountKhr" class="form-control" placeholder="0"
-                                        step="100">
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Variance / Difference -->
-                        <div class="drawer-metric-box">
-                            <span class="drawer-metric-title" data-i18n="cashDifference">ផលខុសគ្នា</span>
-                            <div class="drawer-metric-amount" id="drawerDiffUsd">$0.00</div>
-                            <div class="drawer-metric-khr" id="drawerDiffKhr">0 ៛</div>
-                        </div>
-                    </div>
-
-                    <div class="drawer-notes-bar">
-                        <input type="text" id="drawerNotes" class="form-control"
-                            placeholder="Drawer notes or cash count explanation (optional)...">
-                        <button type="button" class="btn btn-outline" id="btnSaveDrawerAudit"
-                            style="white-space: nowrap; height: 42px; display: inline-flex; align-items: center; gap: 0.4rem;">
-                            <i class="fa-solid fa-floppy-disk"></i> <span data-i18n="saveAudit">Save Audit</span>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Shift Details Table -->
-                <div class="view-table-card">
-                    <div
-                        style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
-                        <h3
-                            style="font-size: 1rem; font-weight: 700; margin: 0; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem;">
-                            <i class="fa-solid fa-list-ul" style="color: var(--primary);"></i> <span
-                                data-i18n="recentOrdersInShift">Recent Orders in Current Shift</span>
-                        </h3>
-                    </div>
-                    <div class="view-table-responsive">
-                        <table class="pos-data-table">
-                            <thead>
-                                <tr>
-                                    <th data-i18n="colOrderNum">Order #</th>
-                                    <th data-i18n="colPlate">Plate</th>
-                                    <th data-i18n="colCustomer">Customer</th>
-                                    <th data-i18n="colPayment">Method</th>
-                                    <th data-i18n="colTotal">Total USD</th>
-                                    <th style="text-align: right;" data-i18n="colTime">Time</th>
-                                </tr>
-                            </thead>
-                            <tbody id="shiftOrdersTableBody">
-                                <!-- Order rows rendered dynamically -->
-                            </tbody>
-                        </table>
-                    </div>
-                    <!-- Close Orders Pagination (Requirement 21) -->
-                    <div id="closeOrdersPagination"
-                        style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1.25rem; border-top: 1px solid var(--border);">
-                        <span id="closeOrdersPageInfo" style="font-size: 0.85rem; color: var(--text-muted);">Page 1 of
-                            1</span>
-                        <div style="display: flex; gap: 0.4rem;">
-                            <button type="button" class="btn btn-outline btn-sm" id="btnClosePrevPage" disabled><i
-                                    class="fa-solid fa-chevron-left"></i></button>
-                            <button type="button" class="btn btn-outline btn-sm" id="btnCloseNextPage" disabled><i
-                                    class="fa-solid fa-chevron-right"></i></button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
 
         <!-- 5. Today's Orders View (Requirement 8) -->
         <section class="view-section" id="viewOrders">
@@ -1917,7 +1694,7 @@
                         <div style="font-size: 1rem; font-weight: 700; color: #dc2626; margin-bottom: 0.5rem;">
                             <i class="fa-solid fa-qrcode"></i> KHQR Scan To Pay
                         </div>
-                        <!-- Canvas / SVG / Image for dynamic KHQR display -->
+                        <!-- Canvas / SVG / Image for counter KHQR display -->
                         <div class="qr-code-img" id="khqrDisplay"
                             style="display: flex; justify-content: center; align-items: center; min-height: 190px;">
                             <img id="khqrImageElement" src="" alt="KHQR Stand Code"
@@ -3745,6 +3522,78 @@
                 <button type="button" class="btn btn-danger" id="btnConfirmEndShift"
                     style="flex: 1.5; font-weight: 800;">
                     <i class="fa-solid fa-lock mr-1"></i> <span id="btnConfirmEndShiftText">End Shift (Solo)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: End Day / Daily Close (Z-Report) Modal -->
+    <div class="modal-backdrop" id="modalEndDay" style="z-index: 9990;">
+        <div class="modal-content" style="max-width: 480px; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h3 style="display: flex; align-items: center; gap: 0.5rem; color: #dc2626;">
+                    <i class="fa-solid fa-power-off"></i>
+                    <span id="endDayModalTitle" data-i18n="endDayTitle">បិទបញ្ជីប្រចាំថ្ងៃ (End Day)</span>
+                </h3>
+                <button type="button" class="btn btn-outline btn-sm btn-icon" id="btnCloseEndDayModal">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem;">
+                <div style="margin-bottom: 1rem; padding: 0.75rem; background: var(--bg-hover); border-radius: var(--radius-md); display: flex; justify-content: space-between;">
+                    <div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);" data-i18n="endDayClosingStaff">អ្នកបិទបញ្ជី:</div>
+                        <div id="endDayCurrentStaff" style="font-weight: 800; color: var(--text-main);"></div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 0.75rem; color: var(--text-muted);" data-i18n="endDayDateLabel">កាលបរិច្ឆេទ:</div>
+                        <div id="endDayCurrentDate" style="font-weight: 700; font-size: 0.85rem; color: var(--text-main);"></div>
+                    </div>
+                </div>
+
+                <!-- Blind Cash Drawer Count (Expected cash NOT shown) -->
+                <div style="margin-bottom: 1.25rem;">
+                    <label style="font-weight: 800; font-size: 0.9rem; color: var(--primary); margin-bottom: 0.5rem; display: block;" data-i18n="endDayBlindCount">
+                        <i class="fa-solid fa-calculator mr-1"></i> រាប់សាច់ប្រាក់ជាក់ស្តែងក្នុងថត (Drawer Cash Count) *
+                    </label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                        <div>
+                            <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted);">USD ($)</label>
+                            <input type="number" id="endDayCountUsd" class="form-control" placeholder="0.00" step="0.5" style="font-size: 1.25rem; font-weight: 800; text-align: center;">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted);">KHR (៛)</label>
+                            <input type="number" id="endDayCountKhr" class="form-control" placeholder="0" step="100" style="font-size: 1.25rem; font-weight: 800; text-align: center;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Authorization Sign-off -->
+                <div style="border-top: 1px solid var(--border); padding-top: 1rem; margin-bottom: 1rem;">
+                    <div style="font-weight: 800; font-size: 0.88rem; color: var(--text-main); margin-bottom: 0.75rem;">
+                        <i class="fa-solid fa-key mr-1"></i> <span data-i18n="endDaySignoff">Security PIN Sign-off *</span>
+                    </div>
+                    <div style="margin-bottom: 0.5rem;">
+                        <input type="password" id="endDayPin" maxlength="6" class="form-control" placeholder="6-digit PIN" style="letter-spacing: 4px; font-weight: 700; text-align: center;">
+                    </div>
+                </div>
+
+                <!-- Closing Notes -->
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.3rem; display: block;" data-i18n="endDayNotes">កំណត់ចំណាំ (Closing Notes):</label>
+                    <input type="text" id="endDayNotes" class="form-control" placeholder="Day closing notes (optional)...">
+                </div>
+
+                <!-- Warning notice -->
+                <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: var(--radius-md); padding: 0.65rem 0.85rem; font-size: 0.82rem; color: #991b1b; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fa-solid fa-triangle-exclamation" style="font-size: 1rem; flex-shrink: 0;"></i>
+                    <span data-i18n="endDayNotice">ការបិទបញ្ជីថ្ងៃ (Z-Report) នឹងចាក់សោការលក់ប្រចាំថ្ងៃ និងបោះពុម្ព Z-Report ។ (Closing the day will lock today's sales and generate the Z-Report.)</span>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 1rem 1.25rem; gap: 0.75rem;">
+                <button type="button" class="btn btn-outline" id="btnCancelEndDay" style="flex: 1;" data-i18n="cancel">បោះបង់</button>
+                <button type="button" class="btn btn-danger" id="btnConfirmEndDay" style="flex: 1.5; font-weight: 800;">
+                    <i class="fa-solid fa-lock mr-1"></i> <span id="btnConfirmEndDayText" data-i18n="endDayBtnConfirm">បិទបញ្ជីថ្ងៃ (Close Day)</span>
                 </button>
             </div>
         </div>

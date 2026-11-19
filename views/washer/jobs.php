@@ -109,7 +109,7 @@ $washQueue = $queues['wash_queue'];
 // Fetch orders assigned to this washer
 // Fetch all active wash jobs in bays or in progress
 $jobsStmt = $pdo->query("
-    SELECT o.*, 0.00 as commission_usd, GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ') as service_names,
+    SELECT o.*, GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ') as service_names,
            b.bay_name
     FROM orders o
     LEFT JOIN order_items oi ON o.id = oi.order_id
@@ -368,12 +368,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                     </div>
                 </div>
 
-                <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid var(--border);">
-                    <div>
-                        <span class="text-xs text-muted">Commission:</span>
-                        <strong style="color: var(--success); font-size: 15px;"><?= formatUSD((float)$job['commission_usd']) ?></strong>
-                    </div>
-
+                <div style="display: flex; justify-content: flex-end; align-items: center; padding-top: 12px; border-top: 1px solid var(--border);">
                     <div style="display: flex; gap: 8px;">
                         <?php if ($job['status'] === 'waiting'): ?>
                             <form action="" method="POST" style="display: flex; gap: 4px;">

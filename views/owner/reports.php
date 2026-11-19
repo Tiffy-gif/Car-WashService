@@ -150,28 +150,9 @@ $refundCount = (int)$refData['refund_count'];
 $netSettledRevenue = max(0.0, $grossRev - $settledRefunds);
 $netSettledRevenueKhr = (int)round($netSettledRevenue * get_exchange_rate());
 
-// 2. Total Staff Commissions Paid (Washers + Mechanics)
-$wCommSql = "
-    SELECT COALESCE(SUM(ow.commission_usd), 0)
-    FROM orders o
-    JOIN order_washers ow ON o.id = ow.order_id
-    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$orderWhere}
-";
-$wCommStmt = $pdo->prepare($wCommSql);
-$wCommStmt->execute($dateParams);
-$washerComm = (float)$wCommStmt->fetchColumn();
-
-$mCommSql = "
-    SELECT COALESCE(SUM(om.commission_usd), 0)
-    FROM orders o
-    JOIN order_mechanics om ON o.id = om.order_id
-    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' {$orderWhere}
-";
-$mCommStmt = $pdo->prepare($mCommSql);
-$mCommStmt->execute($dateParams);
-$mechanicComm = (float)$mCommStmt->fetchColumn();
-
-$totalComm = $washerComm + $mechanicComm;
+$washerComm = 0.00;
+$mechanicComm = 0.00;
+$totalComm = 0.00;
 
 // 3. Operating Expenses
 if ($selectedDevice === 'all') {
@@ -222,8 +203,8 @@ $missingCogsSales = (float)$splitData['missing_cogs_sales'];
 $hasMissingCogs = $missingCogsCount > 0;
 $productProfit = $productRevenue - $productCogs;
 
-// 5. Net Operating Profit Formula: Net Settled Revenue - COGS - Worker Commissions - Operating Expenses
-$netProfit = $netSettledRevenue - $productCogs - $totalComm - $totalExp;
+// 5. Net Operating Profit Formula: Net Settled Revenue - COGS - Operating Expenses
+$netProfit = $netSettledRevenue - $productCogs - $totalExp;
 $netProfitKhr = (int)round($netProfit * get_exchange_rate());
 $netOperatingProfit = $netProfit;
 $netOperatingProfitKhr = $netProfitKhr;
@@ -325,8 +306,7 @@ $vehicleBreakdown = $vehStmt->fetchAll();
 // 7. Income by Washer (Filter strictly by role = 'washer')
 $wSql = "
     SELECT u.full_name, COUNT(DISTINCT o.id) as jobs_count,
-           COALESCE(SUM(o.total_usd), 0) as revenue_handled,
-           COALESCE(SUM(ow.commission_usd), 0) as commission_earned
+           COALESCE(SUM(o.total_usd), 0) as revenue_handled
     FROM order_washers ow
     JOIN orders o ON ow.order_id = o.id
     JOIN users u ON ow.washer_id = u.id
@@ -759,9 +739,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     fputcsv($out, ['  - Products & Spare Parts Sales', number_format($productRevenue, 2), number_format((int)round($productRevenue * $curRate))]);
     fputcsv($out, ['Cost of Goods Sold (COGS)', '-' . number_format($productCogs, 2), '-' . number_format((int)round($productCogs * $curRate))]);
     fputcsv($out, ['Operating Expenses', '-' . number_format($totalExp, 2), '-' . number_format((int)round($totalExp * $curRate))]);
-    fputcsv($out, ['Staff Commissions Paid', '-' . number_format($totalComm, 2), '-' . number_format((int)round($totalComm * $curRate))]);
-    fputcsv($out, ['  - Washer Commissions', '-' . number_format($washerComm, 2), '-' . number_format((int)round($washerComm * $curRate))]);
-    fputcsv($out, ['  - Mechanic Commissions', '-' . number_format($mechanicComm, 2), '-' . number_format((int)round($mechanicComm * $curRate))]);
     fputcsv($out, ['NET OPERATING PROFIT', number_format($netOperatingProfit, 2), number_format($netOperatingProfitKhr)]);
     if ($hasMissingCogs) {
         fputcsv($out, ['WARNING: Missing COGS Data', "{$missingCogsCount} sold items lack cost price (affecting $" . number_format($missingCogsSales, 2) . " in sales)", 'Profit may be overstated']);
@@ -826,15 +803,14 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     }
     fputcsv($out, []);
 
-    // Washer Commissions
-    fputcsv($out, ['--- WASHER COMMISSIONS ---']);
-    fputcsv($out, ['Staff Name', 'Jobs Handled', 'Revenue Handled (USD)', 'Commission Earned (USD)']);
+    // Washer Production
+    fputcsv($out, ['--- WASHER PRODUCTION ---']);
+    fputcsv($out, ['Staff Name', 'Jobs Handled', 'Revenue Handled (USD)']);
     foreach ($washerBreakdown as $wb) {
         fputcsv($out, [
             $wb['full_name'],
             $wb['jobs_count'],
-            number_format((float)$wb['revenue_handled'], 2),
-            number_format((float)$wb['commission_earned'], 2)
+            number_format((float)$wb['revenue_handled'], 2)
         ]);
     }
     fputcsv($out, []);
@@ -1637,7 +1613,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                 <button type="button" onclick="window.print(); toggleReportsActions();">
                     <i class="fa-solid fa-print" style="color: var(--primary); width: 16px;"></i> Print Report
                 </button>
-                <?php if (Auth::can('reports.backup')): ?>
+                <?php if (Auth::check() && Auth::getRole() === 'owner'): ?>
                 <div class="actions-dropdown-divider"></div>
                 <a href="<?= APP_URL ?>/index.php?action=download_backup">
                     <i class="fa-solid fa-database" style="color: #ea580c; width: 16px;"></i> Full Database Backup (.sql)
@@ -1732,32 +1708,7 @@ include dirname(__DIR__) . '/layouts/header.php';
             </div>
         </div>
 
-        <?php if ($totalComm > 0): ?>
-        <!-- Card 4: Staff Commissions Paid -->
-        <div class="kpi-card">
-            <div class="kpi-card-top">
-                <div>
-                    <div class="kpi-card-title">Staff Commissions Paid</div>
-                    <div class="kpi-card-value" style="color: #9333ea;"><?= formatUSD($totalComm) ?></div>
-                    <div class="kpi-card-khr">(<?= formatKHR((int)round($totalComm * $curRate)) ?>)</div>
-                </div>
-                <div class="kpi-icon-box" style="background: rgba(147, 51, 234, 0.12); color: #9333ea;">
-                    <i class="fa-solid fa-hand-holding-dollar"></i>
-                </div>
-            </div>
-            <div class="kpi-card-footer">
-                <div>
-                    <span>Washers: <strong><?= formatUSD($washerComm) ?></strong></span>
-                    <span style="margin: 0 6px;">&bull;</span>
-                    <span>Mechanics: <strong><?= formatUSD($mechanicComm) ?></strong></span>
-                </div>
-                <?php $commShare = ($netSettledRevenue > 0) ? round(($totalComm / $netSettledRevenue) * 100) : 0; ?>
-                <span class="text-muted"><strong><?= $commShare ?>%</strong> of revenue</span>
-            </div>
-        </div>
-        <?php endif; ?>
-
-        <!-- Card 5: Net Operating Profit (Full Width) -->
+        <!-- Card 4: Net Operating Profit (Full Width) -->
         <div class="kpi-card <?= ($netOperatingProfit >= 0) ? 'profit-positive' : 'profit-negative' ?>" style="grid-column: 1 / -1;">
             <div class="kpi-card-top">
                 <div>
@@ -1776,7 +1727,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                 </div>
             </div>
             <div class="kpi-card-footer" style="padding-top: 14px; margin-top: 14px; border-top: 1px dashed var(--border);">
-                <span>Formula: Net Settled Rev (<?= formatUSD($netSettledRevenue) ?>) - COGS (<?= formatUSD($productCogs) ?>) <?= ($totalComm > 0) ? '- Comm (' . formatUSD($totalComm) . ') ' : '' ?>- Exp (<?= formatUSD($totalExp) ?>)</span>
+                <span>Formula: Net Settled Rev (<?= formatUSD($netSettledRevenue) ?>) - COGS (<?= formatUSD($productCogs) ?>) - Exp (<?= formatUSD($totalExp) ?>)</span>
                 <?php $netMargin = ($netSettledRevenue > 0) ? round(($netOperatingProfit / $netSettledRevenue) * 100) : 0; ?>
                 <span style="font-weight: 700; font-size: 14px; color: <?= ($netOperatingProfit >= 0) ? '#16a34a' : '#dc2626' ?>;">
                     <?= $netMargin ?>% Net Margin
@@ -1787,7 +1738,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 
     <!-- 4. Visual Comparison Charts: 3 Clean Cards (Responsive, Light & Dark Theme Resilient) -->
     <div class="charts-grid">
-        <!-- Chart 1: Financial Balance (Revenue vs Expenses vs Commissions vs COGS) -->
+        <!-- Chart 1: Financial Balance (Revenue vs Expenses vs COGS) -->
         <div class="chart-card">
             <div class="chart-header">
                 <div>
@@ -1799,11 +1750,10 @@ include dirname(__DIR__) . '/layouts/header.php';
                 <span class="badge badge-slate" style="font-size: 11px;">USD Total</span>
             </div>
             <?php 
-                $maxBarRef = max(0.01, $netSettledRevenue, ($totalExp + $totalComm + $productCogs));
+                $maxBarRef = max(0.01, $netSettledRevenue, ($totalExp + $productCogs));
                 $revPct = min(100, round(($netSettledRevenue / $maxBarRef) * 100));
                 $cogsPct = min(100, round(($productCogs / $maxBarRef) * 100));
                 $expPct = min(100, round(($totalExp / $maxBarRef) * 100));
-                $commPct = min(100, round(($totalComm / $maxBarRef) * 100));
             ?>
             <div class="chart-bars-wrap">
                 <div class="chart-bar-item">
@@ -1835,18 +1785,6 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <div class="chart-bar-fill" style="width: <?= $expPct ?>%; background: #d97706;"></div>
                     </div>
                 </div>
-
-                <?php if ($totalComm > 0): ?>
-                <div class="chart-bar-item">
-                    <div class="chart-bar-meta">
-                        <span class="chart-bar-label"><i class="fa-solid fa-circle" style="color: #9333ea; font-size: 9px;"></i> Staff Commissions</span>
-                        <strong><?= formatUSD($totalComm) ?></strong>
-                    </div>
-                    <div class="chart-bar-track">
-                        <div class="chart-bar-fill" style="width: <?= $commPct ?>%; background: #9333ea;"></div>
-                    </div>
-                </div>
-                <?php endif; ?>
             </div>
         </div>
 
@@ -2571,9 +2509,9 @@ include dirname(__DIR__) . '/layouts/header.php';
             <div>
                 <h2 class="report-table-title">
                     <i class="fa-solid fa-users-gear" style="color: var(--primary);"></i>
-                    Washer Production &amp; Net Contribution
+                    Washer Production
                 </h2>
-                <span class="text-xs text-muted">Individual crew production, jobs cleaned, commission payout, and net contribution (washers only)</span>
+                <span class="text-xs text-muted">Individual crew production, jobs cleaned, and revenue handled (washers only)</span>
             </div>
             <div class="text-xs text-muted">
                 <?= count($washerBreakdown) ?> Washers on Record
@@ -2586,15 +2524,13 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <th style="min-width: 220px;">Washer Name</th>
                         <th class="table-num" style="min-width: 140px;">Jobs Cleaned</th>
                         <th class="table-num" style="min-width: 160px;">Revenue Handled</th>
-                        <th class="table-num" style="min-width: 160px;">Commission Paid</th>
-                        <th class="table-num" style="min-width: 180px;">Shop Net Contribution</th>
                         <th style="min-width: 160px;">Efficiency Share</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($washerBreakdown)): ?>
                         <tr>
-                            <td colspan="6">
+                            <td colspan="4">
                                 <div class="empty-state-box">
                                     <div class="empty-state-icon"><i class="fa-solid fa-user-group"></i></div>
                                     <div class="empty-state-text">No washer production records found for this period.</div>
@@ -2604,8 +2540,6 @@ include dirname(__DIR__) . '/layouts/header.php';
                     <?php else: ?>
                         <?php foreach ($washerBreakdown as $wb): 
                             $revH = (float)$wb['revenue_handled'];
-                            $commP = (float)$wb['commission_earned'];
-                            $shopNet = $revH - $commP;
                             $eff = ($grossRev > 0) ? round(($revH / $grossRev) * 100) : 0;
                         ?>
                         <tr>
@@ -2623,13 +2557,6 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <td class="table-num">
                                 <strong><?= formatUSD($revH) ?></strong>
                                 <div class="text-xs text-muted"><?= formatKHR((int)round($revH * $curRate)) ?></div>
-                            </td>
-                            <td class="table-num" style="color: #9333ea; font-weight: 700;">
-                                <?= formatUSD($commP) ?>
-                            </td>
-                            <td class="table-num" style="color: #16a34a; font-weight: 700;">
-                                <?= formatUSD($shopNet) ?>
-                                <div class="text-xs text-muted"><?= formatKHR((int)round($shopNet * $curRate)) ?></div>
                             </td>
                             <td>
                                 <div style="display: flex; align-items: center; gap: 8px;">

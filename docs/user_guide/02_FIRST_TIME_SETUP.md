@@ -177,17 +177,14 @@ flowchart TD
 ### Step 9: Staff Accounts & Security PINs *(One-Time, then Repeated)*
 - **Who does it**: Shop Owner or System Administrator.
 - **Where**: Navigation menu **Manage Staff** *(គ្រប់គ្រងបុគ្គលិក)* (`index.php?view=staff`).
-- **What you see**: List of active employees, assigned roles, commission rates, and status.
+- **What you see**: List of active employees, assigned roles, and status.
 - **Action**:
   1. Click **+ Add New Staff Member** *(បន្ថែមបុគ្គលិក)*.
   2. Enter **Full Name** (e.g. `Sokha Chan`).
   3. Enter **Username** (e.g. `cashier1`).
   4. Assign **Role**: Choose from dropdown (`Cashier`, `Washer`, `Mechanic`, `Wash Supervisor`, `Manager`, `Stock Control`, `CRM`).
-  5. Enter **Commission Settings**:
-     - For Washers: Choose `Percentage` (e.g. `20%`) or `Fixed per car` (e.g. `$0.50`).
-     - For Mechanics: Choose `Percentage` (e.g. `30%` on labor).
-  6. Set **Temporary 6-Digit PIN**: e.g. `123456`. Check the box **"Must change PIN on first login"**.
-  7. Click **Create Staff Account**.
+  5. Set **Temporary 6-Digit PIN**: e.g. `123456`. Check the box **"Must change PIN on first login"**.
+  6. Click **Create Staff Account**.
 - **What can go wrong & what to do**:
   - *Symptom*: Washer or Cashier forgets their PIN.
   - *Fix*: Open Manage Staff, click **Reset PIN** next to their name, enter a temporary PIN, and instruct them to change it upon login.

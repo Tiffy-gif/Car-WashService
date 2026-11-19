@@ -51,7 +51,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         $nameKm = trim($_POST['name_km'] ?? '');
         $code   = trim($_POST['code'] ?? '');
         $desc   = trim($_POST['description'] ?? '');
-        $isComm = isset($_POST['is_commission_eligible']) ? 1 : 0;
+        $isComm = 0;
         $canWasher = isset($_POST['can_assign_washer']) ? 1 : 0;
         $canMech   = isset($_POST['can_assign_mechanic']) ? 1 : 0;
         $selectedPerms = $_POST['permissions'] ?? [];
@@ -265,8 +265,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
 }
 endPost:
 
-// Fetch all permissions grouped by Area -> Module
-$permRows = $pdo->query("SELECT * FROM permissions ORDER BY sort_order ASC, id ASC")->fetchAll(PDO::FETCH_ASSOC);
+// Fetch all permissions grouped by Area -> Module (excluding decommissioned commissions)
+$permRows = $pdo->query("SELECT * FROM permissions WHERE module != 'commissions' ORDER BY sort_order ASC, id ASC")->fetchAll(PDO::FETCH_ASSOC);
 
 $permissionsByArea = [
     'sales' => [
@@ -313,7 +313,6 @@ $moduleMeta = [
     'customers'       => ['en' => 'Customers & Vehicles', 'km' => 'អតិថិជន & យានយន្ត'],
     'staff'           => ['en' => 'Manage Staff', 'km' => 'គ្រប់គ្រងបុគ្គលិក'],
     'roles'           => ['en' => 'Roles & Permissions', 'km' => 'តួនាទី & សិទ្ធិ'],
-    'commissions'     => ['en' => 'Crew Commissions', 'km' => 'កម្រៃជើងសារ'],
 
     'dashboard'       => ['en' => 'Dashboard', 'km' => 'ផ្ទាំងគ្រប់គ្រង'],
     'reports'         => ['en' => 'Reports & Profits', 'km' => 'របាយការណ៍ & ប្រាក់ចំណេញ'],
@@ -619,11 +618,6 @@ include dirname(__DIR__) . '/layouts/header.php';
                 </div>
                 <div style="display: flex; flex-wrap: wrap; gap: 24px;">
                     <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer;">
-                        <input type="checkbox" name="is_commission_eligible" value="1" class="role-check-input"
-                               <?= (!empty($editRole['is_commission_eligible'])) ? 'checked' : '' ?>>
-                        <span style="font-weight: 600;">Eligible for crew commissions</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer;">
                         <input type="checkbox" name="can_assign_washer" value="1" class="role-check-input"
                                <?= (!empty($editRole['can_assign_washer'])) ? 'checked' : '' ?>>
                         <span style="font-weight: 600;">Can be assigned to jobs as Washer</span>
@@ -921,11 +915,6 @@ include dirname(__DIR__) . '/layouts/header.php';
                                 </td>
                                 <td>
                                     <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                                        <?php if (!empty($r['is_commission_eligible'])): ?>
-                                            <span class="badge badge-warning" style="font-size: 11px;">
-                                                <i class="fa-solid fa-percent mr-1"></i> Commission
-                                            </span>
-                                        <?php endif; ?>
                                         <?php if (!empty($r['can_assign_washer'])): ?>
                                             <span class="badge badge-info" style="font-size: 11px;">
                                                 <i class="fa-solid fa-soap mr-1"></i> Washer Job
@@ -936,7 +925,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                                                 <i class="fa-solid fa-wrench mr-1"></i> Mechanic Job
                                             </span>
                                         <?php endif; ?>
-                                        <?php if (empty($r['is_commission_eligible']) && empty($r['can_assign_washer']) && empty($r['can_assign_mechanic'])): ?>
+                                        <?php if (empty($r['can_assign_washer']) && empty($r['can_assign_mechanic'])): ?>
                                             <span style="font-size: 12px; color: var(--text-muted);">&mdash;</span>
                                         <?php endif; ?>
                                     </div>

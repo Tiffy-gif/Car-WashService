@@ -17,6 +17,7 @@ $currentUsername = Auth::getUsername() ?? '';
 $currentUserRole = Auth::getRole() ?? 'cashier';
 $currentFullName = Auth::getFullName() ?? $currentUsername;
 $isManagerOrOwner = in_array($currentUserRole, ['owner', 'manager', 'system_admin'], true);
+$canCloseDay = $isManagerOrOwner || Auth::userHasPermission($currentUserId, 'daily_close.close') || Auth::userHasPermission($currentUserId, 'pos.close_day') || $currentUserRole === 'cashier';
 
 $message = null;
 $messageType = 'success';
@@ -206,6 +207,10 @@ if ($isManagerOrOwner) {
     $shortagesOwed = [];
     $allSpotAudits = [];
     $dailyCloses = [];
+    if ($canCloseDay) {
+        $closesStmt = $pdo->query("SELECT * FROM pos_daily_closes ORDER BY close_date DESC, id DESC LIMIT 30");
+        $dailyCloses = $closesStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
     $cashiersList = [];
 }
 
@@ -228,12 +233,14 @@ include dirname(__DIR__) . '/layouts/header.php';
         <button type="button" class="btn btn-secondary" onclick="openModal('drawerNoSaleModal')">
             <i class="fa-solid fa-unlock-keyhole mr-1" style="color: #ea580c;"></i> Open Drawer (No Sale)
         </button>
+        <?php if ($canCloseDay): ?>
+            <button type="button" class="btn btn-primary" onclick="openModal('closeDayModal')">
+                <i class="fa-solid fa-file-invoice-dollar mr-1"></i> Close Day &amp; Z-Report
+            </button>
+        <?php endif; ?>
         <?php if ($isManagerOrOwner): ?>
             <button type="button" class="btn btn-secondary" onclick="openModal('spotAuditModal')">
                 <i class="fa-solid fa-magnifying-glass-chart mr-1" style="color: #2563eb;"></i> Trigger Spot Audit
-            </button>
-            <button type="button" class="btn btn-primary" onclick="openModal('closeDayModal')">
-                <i class="fa-solid fa-file-invoice-dollar mr-1"></i> Close Day &amp; Z-Report
             </button>
         <?php endif; ?>
     </div>
@@ -686,7 +693,7 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 </div>
 
-<?php if ($isManagerOrOwner): ?>
+<?php if ($canCloseDay): ?>
     <!-- Daily Closes / Z-Report History Table -->
     <div class="card">
         <div class="card-header">
@@ -707,7 +714,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <th>Cash Sales</th>
                         <th>Expected Cash</th>
                         <th>Counted Cash</th>
-                        <th>Shortage Owed</th>
+                        <th>Short / Over</th>
                         <th>Status</th>
                         <th>Actions</th>
                     </tr>
@@ -722,18 +729,24 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <tr>
                                 <td><strong><?= htmlspecialchars($dc['close_date']) ?></strong></td>
                                 <td style="font-family: var(--font-mono); font-weight: 700;"><?= htmlspecialchars((string)($dc['z_report_number'] ?? '-')) ?></td>
-                                <td><?= htmlspecialchars((string)($dc['closed_by_name'] ?? $dc['manager_name'] ?? '-')) ?></td>
+                                <td><?= htmlspecialchars((string)($dc['closed_by_name'] ?? $dc['manager_name'] ?? '-')) ?> (<?= htmlspecialchars(ucfirst($dc['role'] ?? 'Cashier')) ?>)</td>
                                 <td class="text-xs"><?= htmlspecialchars((string)($dc['closed_at'] ?? '-')) ?></td>
                                 <td><strong><?= formatUSD((float)($dc['total_sales_usd'] ?? 0)) ?></strong></td>
                                 <td><?= formatUSD((float)($dc['cash_sales_usd'] ?? 0)) ?></td>
                                 <td><?= formatUSD((float)($dc['expected_cash_usd'] ?? 0)) ?></td>
                                 <td><?= formatUSD((float)($dc['counted_cash_usd'] ?? 0)) ?></td>
                                 <td>
-                                    <?php $dso = (float)($dc['shortage_owed_usd'] ?? 0); ?>
-                                    <?php if ($dso > 0): ?>
-                                        <span class="badge badge-danger">$<?= number_format($dso, 2) ?></span>
+                                    <?php 
+                                        $dso = (float)($dc['shortage_owed_usd'] ?? 0);
+                                        $diffTot = (float)($dc['total_difference_usd'] ?? 0);
+                                        $isDiscrepancy = ($dso > 0 || $diffTot != 0 || (isset($dc['notes']) && strpos($dc['notes'], 'Needs Manager Review') !== false));
+                                    ?>
+                                    <?php if ($isDiscrepancy): ?>
+                                        <span class="badge badge-danger" style="background: #fef2f2; color: #dc2626; border: 1px solid #f87171;" title="Needs Manager Review">
+                                            <?= ($diffTot > 0 ? '+' : '-') ?>$<?= number_format(abs($diffTot ?: $dso), 2) ?> (Needs Review)
+                                        </span>
                                     <?php else: ?>
-                                        <span class="text-muted">-</span>
+                                        <span class="badge badge-success" style="background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0;">Balanced</span>
                                     <?php endif; ?>
                                 </td>
                                 <td>
@@ -747,12 +760,10 @@ include dirname(__DIR__) . '/layouts/header.php';
                                     <a href="slip.php?type=close_day&id=<?= (int)$dc['id'] ?>" target="_blank" class="btn btn-primary btn-sm" style="font-weight: 600;">
                                         <i class="fa-solid fa-print mr-1"></i> Print Z-Report
                                     </a>
-                                    <?php if ($dc['status'] === 'closed'): ?>
+                                    <?php if ($isManagerOrOwner && $dc['status'] === 'closed'): ?>
                                         <button type="button" class="btn btn-secondary btn-sm" onclick="openReopenModal('<?= htmlspecialchars($dc['close_date']) ?>')">
                                             <i class="fa-solid fa-lock-open mr-1"></i> Reopen
                                         </button>
-                                    <?php else: ?>
-                                        <span class="text-xs text-muted">Active</span>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -893,12 +904,12 @@ include dirname(__DIR__) . '/layouts/header.php';
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Manager / Owner Username *</label>
+                        <label class="form-label">Username (Cashier / Manager / Owner) *</label>
                         <input type="text" name="manager_username" class="form-input" value="<?= htmlspecialchars($currentUsername) ?>" required>
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Manager 6-digit PIN *</label>
+                        <label class="form-label">6-digit Authorization PIN *</label>
                         <input type="password" maxlength="6" name="manager_pin" class="form-input" placeholder="6-digit PIN" required style="font-family: var(--font-mono); letter-spacing: 4px;">
                     </div>
 

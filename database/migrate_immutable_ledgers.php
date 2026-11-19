@@ -30,6 +30,16 @@ function getRequiredImmutableTriggers(): array {
             'event' => 'UPDATE',
             'timing' => 'BEFORE',
         ],
+        'trg_settings_history_before_delete' => [
+            'table' => 'settings_history',
+            'event' => 'DELETE',
+            'timing' => 'BEFORE',
+        ],
+        'trg_settings_history_before_update' => [
+            'table' => 'settings_history',
+            'event' => 'UPDATE',
+            'timing' => 'BEFORE',
+        ],
     ];
 }
 
@@ -48,7 +58,7 @@ function verifyImmutableTriggers(PDO $pdo): array {
     $details = [];
 
     // 1. Verify target tables exist first
-    foreach (['stock_movements', 'audit_logs'] as $tbl) {
+    foreach (['stock_movements', 'audit_logs', 'settings_history'] as $tbl) {
         $tblExists = false;
         try {
             if ($isSqlite) {
@@ -202,7 +212,7 @@ function verifyImmutableTriggers(PDO $pdo): array {
 function createImmutableTriggers(PDO $pdo): bool {
     $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
     $isSqlite = ($driver === 'sqlite');
-    $tables = ['stock_movements', 'audit_logs'];
+    $tables = ['stock_movements', 'audit_logs', 'settings_history'];
 
     foreach ($tables as $table) {
         try {
@@ -353,7 +363,7 @@ function migrateImmutableLedgers(bool $force = false, ?PDO $pdo = null): bool {
         migrateLog("WARNING: 'migrate_immutable_ledgers' present in schema_migrations but physical triggers are missing/invalid. Re-creating...", 'WARNING');
     }
 
-    migrateLog("Creating immutable ledger triggers on stock_movements and audit_logs...");
+    migrateLog("Creating immutable ledger triggers on stock_movements, audit_logs, and settings_history...");
 
     // 2. Attempt trigger creation
     $creationSuccess = createImmutableTriggers($pdo);

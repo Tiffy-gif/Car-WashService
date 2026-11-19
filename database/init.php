@@ -211,7 +211,7 @@ function initDatabase(bool $force = false): void {
     $pdo->exec("CREATE TABLE IF NOT EXISTS customers (
         id {$autoInc},
         name VARCHAR(100) NOT NULL,
-        phone VARCHAR(20) DEFAULT NULL,
+        phone VARCHAR(20) DEFAULT NULL UNIQUE,
         notes TEXT DEFAULT NULL,
         loyalty_points INT DEFAULT 0,
         lifetime_points INT DEFAULT 0,

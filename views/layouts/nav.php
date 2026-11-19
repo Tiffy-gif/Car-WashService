@@ -100,6 +100,12 @@ $rawMenuGroups = [
                 'icon'       => 'fa-clock-rotate-left',
                 'permission' => 'vehicle_history.list',
             ],
+            [
+                'view'       => 'oil_reminders',
+                'label'      => __('nav_oil_reminders', 'Oil Reminders'),
+                'icon'       => 'fa-oil-can',
+                'permission' => 'customers.list',
+            ],
         ],
     ],
     [

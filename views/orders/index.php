@@ -11,6 +11,7 @@ require_once dirname(__DIR__, 2) . '/core/BayManager.php';
 require_once dirname(__DIR__, 2) . '/core/CashierControl.php';
 require_once dirname(__DIR__, 2) . '/core/StockControl.php';
 require_once dirname(__DIR__, 2) . '/core/BankTransferControl.php';
+require_once dirname(__DIR__, 2) . '/core/TelegramNotifier.php';
 
 Auth::requirePermission('orders.list');
 $pageTitle = __('nav_orders');
@@ -201,42 +202,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                     }
                 }
 
-                // Re-sync washer commissions with final total
-                $washers = $pdo->prepare("SELECT ow.id, ow.washer_id, u.commission_type, u.commission_rate FROM order_washers ow JOIN users u ON ow.washer_id = u.id WHERE ow.order_id = ?");
-                $washers->execute([$orderId]);
-                $wRows = $washers->fetchAll();
-                $numW = count($wRows);
-
-                if ($numW > 0) {
-                    $commUpdate = $pdo->prepare("UPDATE order_washers SET commission_usd = ? WHERE id = ?");
-                    foreach ($wRows as $wr) {
-                        if ($wr['commission_type'] === 'percentage') {
-                            $cUsd = round(($totalUsd * ((float)$wr['commission_rate'] / 100)) / $numW, 2);
-                        } else {
-                            $cUsd = round((float)$wr['commission_rate'] / $numW, 2);
-                        }
-                        $commUpdate->execute([$cUsd, $wr['id']]);
-                    }
-                }
-
-                // Re-sync mechanic commissions with final total
-                $mechanics = $pdo->prepare("SELECT om.id, om.mechanic_id, u.commission_type, u.commission_rate FROM order_mechanics om JOIN users u ON om.mechanic_id = u.id WHERE om.order_id = ?");
-                $mechanics->execute([$orderId]);
-                $mRows = $mechanics->fetchAll();
-                $numM = count($mRows);
-
-                if ($numM > 0) {
-                    $mCommUpdate = $pdo->prepare("UPDATE order_mechanics SET commission_usd = ? WHERE id = ?");
-                    foreach ($mRows as $mr) {
-                        if ($mr['commission_type'] === 'percentage') {
-                            $cUsd = round(($totalUsd * ((float)$mr['commission_rate'] / 100)) / $numM, 2);
-                        } else {
-                            $cUsd = round((float)$mr['commission_rate'] / $numM, 2);
-                        }
-                        $mCommUpdate->execute([$cUsd, $mr['id']]);
-                    }
-                }
-
                 // Also update vehicle_repair_history total if entry exists
                 $pdo->prepare("UPDATE vehicle_repair_history SET total_cost_usd = ? WHERE order_id = ?")->execute([$totalUsd, $orderId]);
 
@@ -347,24 +312,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $totalUsd = (float)$ordStmt->fetchColumn();
 
             if (!empty($washerIds)) {
-                $wInfoStmt = $pdo->prepare("SELECT id, commission_type, commission_rate FROM users WHERE id = ?");
-                $wInsStmt = $pdo->prepare("INSERT INTO order_washers (order_id, washer_id, commission_usd) VALUES (?, ?, ?)");
-                $numWashers = count($washerIds);
-
+                $wInsStmt = $pdo->prepare("INSERT INTO order_washers (order_id, washer_id, commission_usd) VALUES (?, ?, 0.00)");
                 foreach ($washerIds as $wId) {
                     $wId = (int)$wId;
-                    $wInfoStmt->execute([$wId]);
-                    $washer = $wInfoStmt->fetch();
-
-                    $commUsd = 0.00;
-                    if ($washer) {
-                        if ($washer['commission_type'] === 'percentage') {
-                            $commUsd = round(($totalUsd * ((float)$washer['commission_rate'] / 100)) / $numWashers, 2);
-                        } else {
-                            $commUsd = round((float)$washer['commission_rate'] / $numWashers, 2);
-                        }
-                    }
-                    $wInsStmt->execute([$orderId, $wId, $commUsd]);
+                    if ($wId <= 0) continue;
+                    $wInsStmt->execute([$orderId, $wId]);
                 }
             }
             $message = "Washers successfully assigned!";
@@ -429,9 +381,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                         // Free any bay occupied by this order
                         $pdo->prepare("UPDATE bays SET status = 'free', current_order_id = NULL, occupied_at = NULL WHERE current_order_id = ?")->execute([$orderId]);
 
-                        // Soft-cancel commissions: Never hard delete
-                        $pdo->prepare("UPDATE order_washers SET is_active = 0, commission_usd = 0 WHERE order_id = ?")->execute([$orderId]);
-                        $pdo->prepare("UPDATE order_mechanics SET is_active = 0, commission_usd = 0 WHERE order_id = ?")->execute([$orderId]);
+                        // Soft-cancel crew assignments: Never hard delete
+                        $pdo->prepare("UPDATE order_washers SET is_active = 0 WHERE order_id = ?")->execute([$orderId]);
+                        $pdo->prepare("UPDATE order_mechanics SET is_active = 0 WHERE order_id = ?")->execute([$orderId]);
 
                         // Reverse loyalty points (refund redeemed points & clawback earned points)
                         $userId = Auth::getId() ? (int)Auth::getId() : null;
@@ -455,6 +407,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                         $cancelStmt->execute([$fullReason, " [{$fullReason}]", $orderId]);
 
                         AuditLogger::log('ORDER_CANCEL', "Cancelled order #{$order['order_number']}. Reason: {$fullReason}", 'order', (string)$orderId);
+                        TelegramNotifier::notifyOrderCancelled(
+                            (string)$order['order_number'],
+                            (string)($order['plate_number'] ?? ''),
+                            (float)($order['total_usd'] ?? 0),
+                            $fullReason,
+                            (string)(Auth::getUserName() ?: 'Staff')
+                        );
                         $message = "Order #{$order['order_number']} has been CANCELLED. Inventory stock and loyalty points were restored.";
                     }
                 }
@@ -821,7 +780,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 
                                     <!-- Cancel Order Button: Unpaid orders or Manager/Owner for paid orders -->
                                     <?php if ((Auth::can('orders.cancel') || Auth::can('pos.cancel_order')) && in_array(Auth::getRole(), ['owner', 'manager', 'system_admin'], true)): ?>
-                                        <button type="button" class="btn btn-secondary btn-sm" style="color: var(--danger);" title="Cancel Order (Restores Stock & Commission)"
+                                        <button type="button" class="btn btn-secondary btn-sm" style="color: var(--danger);" title="Cancel Order (Restores Stock)"
                                                 data-order-id="<?= (int)$ord['id'] ?>"
                                                 data-order-num="<?= htmlspecialchars($ord['order_number'], ENT_QUOTES, 'UTF-8') ?>"
                                                 data-plate="<?= htmlspecialchars($ord['plate_number'], ENT_QUOTES, 'UTF-8') ?>"
@@ -1060,7 +1019,6 @@ include dirname(__DIR__) . '/layouts/header.php';
                     <strong>Important:</strong> Cancelling this order will:
                     <ul style="margin: 6px 0 0 18px; padding: 0;">
                         <li>Restore any deducted products & spare parts to stock</li>
-                        <li>Remove washer and mechanic commissions</li>
                         <li>Exclude this order from all revenue and income reports</li>
                     </ul>
                 </div>

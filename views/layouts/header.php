@@ -485,8 +485,8 @@ $pageHeaderTitle = isset($pageTitle) && trim((string)$pageTitle) !== '' ? ($page
                                 <?= strtoupper(substr($currentUser['username'] ?? 'U', 0, 2)) ?>
                             </div>
                             <div>
-                                <div style="font-weight: 700; color: var(--text-main); font-size: 15px;"><?= htmlspecialchars($currentUser['full_name'] ?? $currentUser['username']) ?></div>
-                                <div class="text-xs text-muted" style="text-transform: capitalize;"><?= htmlspecialchars($currentUser['role']) ?></div>
+                                <div style="font-weight: 700; color: var(--text-main); font-size: 15px;"><?= htmlspecialchars((string)($currentUser['full_name'] ?? $currentUser['username'] ?? 'User')) ?></div>
+                                <div class="text-xs text-muted" style="text-transform: capitalize;"><?= htmlspecialchars((string)($currentUser['role'] ?? 'staff')) ?></div>
                             </div>
                         </div>
 

@@ -70,7 +70,7 @@ To see how all the pieces of the system connect in real life, follow a typical o
 7. Sokha asks: *"You have 240 loyalty points ($24 credit). Would you like to use points today?"*
    - Vannak says: *"No, keep saving them for my next ceramic coat."*
 8. Vannak chooses **KHQR Scan**.
-9. Sokha selects the **KHQR** tab. A high-contrast Bakong QR code appears on the customer display.
+9. Sokha selects the **KHQR** tab. The shop's verified KHQR stand display image appears on the counter display.
 10. Vannak opens his ABA Mobile app, scans the code, and taps confirm for `$16.20`.
 11. Sokha verifies the incoming transaction alert, taps the camera icon on the POS tablet, snaps a quick photo of Vannak's phone confirmation screen, and taps **[Complete KHQR Payment]**.
 12. Order receipt prints with VIP Queue Number **#Q-004**, and the car is steered into Bay 2.

@@ -92,6 +92,6 @@ During the comprehensive audit of the Car Wash & Detailing Management codebase a
 
 ## 10. Secondary Customer-Facing Display & QR Presentation
 * **Code Reference**: [pos/index.html](file:///C:/xampp/htdocs/Car-WashService/pos/index.html#L1580-L1630) & [pos/js/app.js](file:///C:/xampp/htdocs/Car-WashService/pos/js/app.js)
-* **Codebase Reality**: The POS renders dynamic KHQR codes on screen inside the checkout modal.
+* **Codebase Reality**: The POS displays the shop's verified counter KHQR stand code on screen inside the checkout modal.
 * **Hardware Requirement**: For optimal customer experience, the cashier station should have either a secondary customer-facing LCD display (extended desktop) or a swivel tablet mount so the customer can scan the QR code without reaching over the counter.
 * **Business Decision Required**: Select front counter mounting hardware: Swivel tablet mount vs dual-monitor POS terminal.

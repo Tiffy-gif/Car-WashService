@@ -208,7 +208,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
 
 // Fetch orders in technical bays or with repair/oil change tasks
 $jobsStmt = $pdo->query("
-    SELECT o.*, 0.00 as commission_usd,
+    SELECT o.*,
            COALESCE(o.repair_status, o.status) as current_job_status
     FROM orders o
     LEFT JOIN bays b ON o.bay_id = b.id
@@ -812,12 +812,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                 </div>
 
                 <!-- Footer Meta & Actions -->
-                <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border); padding-top: 12px; flex-wrap: wrap; gap: 8px;">
-                    <div>
-                        <div class="text-xs text-muted">Technical Commission:</div>
-                        <strong style="color: #ea580c; font-size: 15px;"><?= formatUSD((float)$job['commission_usd']) ?></strong>
-                    </div>
-
+                <div style="display: flex; justify-content: flex-end; align-items: center; border-top: 1px solid var(--border); padding-top: 12px; flex-wrap: wrap; gap: 8px;">
                     <div style="display: flex; gap: 8px; align-items: center;">
                         <a href="<?= APP_URL ?>/index.php?view=vehicle_history&plate=<?= urlencode($job['plate_number']) ?>" class="btn btn-secondary btn-sm" title="View vehicle history">
                             <i class="fa-solid fa-clock-rotate-left mr-1"></i> History

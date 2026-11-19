@@ -169,7 +169,7 @@ These 1-page quick cards are designed to be printed and laminated at each workst
 3. **Check Cloud Sync Monitor**: Ensure the local shop is pushing records with zero pending backlogs.
 4. **Review Weekly Bay Utilization**: Ensure shop utilization stays in the profitable 65%–80% range.
 5. **Calibrate Base Durations**: Review `service_duration_reviews` to keep wait times accurate.
-6. **Approve Staff Commissions**: Review itemized commission calculations before monthly payroll.
+6. **Review Staff Timecards & Hours**: Review itemized staff hours and job completion before monthly payroll.
 7. **Perform Weekly Offsite Backups**: Copy the latest database backup to a private USB flash drive.
 8. **Inspect Warehouse Margins**: Review lubricant purchasing costs and calibrate service prices.
 9. **Audit Staff Permissions**: Ensure no staff member has unauthorized manager privileges.

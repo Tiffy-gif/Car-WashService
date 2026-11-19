@@ -1132,7 +1132,7 @@ class PosThermalPrinter {
         ctx.font = '16px "Segoe UI", sans-serif';
         this.drawTwoColumns(ctx, 'Shift #:', shiftData.shift_uid || '', margin, width - margin, y);
         y += 24;
-        this.drawTwoColumns(ctx, 'Cashier:', shiftData.cashier_name || '', margin, width - margin, y);
+        this.drawTwoColumns(ctx, 'Cashier:', `${shiftData.cashier_name || ''} (${shiftData.cashier_role || 'Cashier'})`, margin, width - margin, y);
         y += 24;
         this.drawTwoColumns(ctx, 'Terminal:', shiftData.device_name || 'Counter POS', margin, width - margin, y);
         y += 24;
@@ -1240,10 +1240,10 @@ class PosThermalPrinter {
         ctx.font = '16px "Segoe UI", sans-serif';
         this.drawTwoColumns(ctx, 'Shift #:', shiftData.shift_uid || '', margin, width - margin, y);
         y += 24;
-        this.drawTwoColumns(ctx, 'Cashier:', shiftData.cashier_name || '', margin, width - margin, y);
+        this.drawTwoColumns(ctx, 'Cashier:', `${shiftData.cashier_name || ''} (${shiftData.cashier_role || 'Cashier'})`, margin, width - margin, y);
         y += 24;
         if (isHandover) {
-            this.drawTwoColumns(ctx, 'Handover To:', shiftData.handover_to_name, margin, width - margin, y);
+            this.drawTwoColumns(ctx, 'Handover To:', `${shiftData.handover_to_name} (${shiftData.handover_to_role || 'Cashier'})`, margin, width - margin, y);
             y += 24;
         }
         this.drawTwoColumns(ctx, 'Terminal:', shiftData.device_name || 'Counter POS', margin, width - margin, y);
@@ -1336,15 +1336,31 @@ class PosThermalPrinter {
         this.drawTwoColumns(ctx, 'Total Diff (USD):', `${totDiffUsd > 0 ? '+' : ''}$${totDiffUsd.toFixed(2)} [${(shiftData.total_diff_status || 'EXACT').toUpperCase()}]`, margin, width - margin, y);
         y += 35;
 
+        // Carried over unpaid / unfinished orders
+        if (shiftData.unpaid_orders && shiftData.unpaid_orders.length > 0) {
+            this.drawDashedLine(ctx, y, width, margin);
+            y += 24;
+            ctx.font = 'bold 16px "Segoe UI", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(`CARRIED OVER ORDERS (${shiftData.unpaid_orders.length})`, margin, y);
+            y += 22;
+            ctx.font = '13px "Segoe UI", sans-serif';
+            shiftData.unpaid_orders.forEach(uo => {
+                this.drawTwoColumns(ctx, `${uo.order_number} (${uo.vehicle_plate || 'No Plate'}):`, `$${parseFloat(uo.total_usd || 0).toFixed(2)} [${(uo.status || 'UNPAID').toUpperCase()}]`, margin, width - margin, y);
+                y += 20;
+            });
+            y += 10;
+        }
+
         // Signatures
         this.drawDashedLine(ctx, y, width, margin);
         y += 45;
 
-        ctx.font = 'bold 15px "Segoe UI", sans-serif';
+        ctx.font = 'bold 14px "Segoe UI", sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(`Outgoing: ${shiftData.cashier_name || 'Cashier'}`, margin, y);
+        ctx.fillText(`Outgoing: ${shiftData.cashier_name || 'Cashier'} (${shiftData.cashier_role || 'Cashier'})`, margin, y);
         ctx.textAlign = 'right';
-        ctx.fillText(isHandover ? `Incoming: ${shiftData.handover_to_name}` : 'Manager Sign-Off', width - margin, y);
+        ctx.fillText(isHandover ? `Incoming: ${shiftData.handover_to_name} (${shiftData.handover_to_role || 'Cashier'})` : 'Manager Sign-Off', width - margin, y);
         y += 35;
 
         ctx.textAlign = 'center';
@@ -1416,13 +1432,23 @@ class PosThermalPrinter {
         y += 24;
         this.drawTwoColumns(ctx, 'Close Date:', closeData.close_date || '', margin, width - margin, y);
         y += 24;
-        this.drawTwoColumns(ctx, 'Closed By:', closeData.manager_name || 'Manager', margin, width - margin, y);
+        this.drawTwoColumns(ctx, 'Opened By:', `${closeData.opened_by_name || 'N/A'} (${closeData.opened_by_role || 'Cashier'})`, margin, width - margin, y);
+        y += 24;
+        this.drawTwoColumns(ctx, 'Closed By:', `${closeData.closed_by_name || closeData.manager_name || 'N/A'} (${closeData.closed_by_role || 'Cashier'})`, margin, width - margin, y);
         y += 24;
         const clsTime = closeData.closed_at ? new Date(closeData.closed_at.replace(/-/g, '/')).toLocaleString() : new Date().toLocaleString();
         this.drawTwoColumns(ctx, 'Closed At:', clsTime, margin, width - margin, y);
         y += 24;
         this.drawTwoColumns(ctx, 'Exchange Rate:', `$1.00 = ${(closeData.exchange_rate || 4100).toLocaleString()} ៛`, margin, width - margin, y);
         y += 26;
+
+        if (closeData.needs_manager_review) {
+            ctx.strokeRect(margin, y, width - (margin * 2), 40);
+            ctx.font = 'bold 15px "Segoe UI", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('** NEEDS MANAGER REVIEW **', width / 2, y + 24);
+            y += 50;
+        }
 
         // If day was reopened previously, print warning notice!
         if (closeData.reopen_history && closeData.reopen_history.length > 0) {
@@ -1554,8 +1580,13 @@ class PosThermalPrinter {
 
         ctx.font = 'bold 15px "Segoe UI", sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(`Manager Sign-Off: ${closeData.manager_name || 'Manager'}`, width / 2, y);
-        y += 35;
+        ctx.fillText(`Closed By: ${closeData.closed_by_name || closeData.manager_name || 'Staff'} (${closeData.closed_by_role || 'Cashier'})`, width / 2, y);
+        y += 26;
+
+        if (closeData.needs_manager_review) {
+            ctx.fillText('Manager Sign-Off: ____________________', width / 2, y);
+            y += 26;
+        }
 
         ctx.font = '13px "Segoe UI", sans-serif';
         ctx.fillText(`Printed on ${new Date().toLocaleString()} | Counter POS`, width / 2, y);

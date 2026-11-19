@@ -49,31 +49,51 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $message = 'Customer name is required.';
             $messageType = 'danger';
         } else {
-            $phoneVal = ($phone !== '') ? $phone : null;
+            $phoneVal = normalize_phone($phone);
             $notesVal = ($notes !== '') ? $notes : null;
             $tierCode = strtolower(trim($_POST['membership_tier_code'] ?? 'standard'));
             $expiresAt = !empty($_POST['membership_expires_at']) ? trim($_POST['membership_expires_at']) : null;
             $optIn = isset($_POST['message_opt_in']) ? (int)$_POST['message_opt_in'] : 1;
 
-            if ($customerId) {
-                // Update Customer
-                $stmt = $pdo->prepare("UPDATE customers SET name = ?, phone = ?, notes = ?, message_opt_in = ?, message_opt_in_updated_at = NOW() WHERE id = ?");
-                $stmt->execute([$name, $phoneVal, $notesVal, $optIn, $customerId]);
-                MembershipManager::linkCustomerToTier($pdo, $customerId, $tierCode, null, $expiresAt);
-            } else {
-                // Insert Customer
-                $stmt = $pdo->prepare("INSERT INTO customers (name, phone, notes, status, message_opt_in, message_opt_in_updated_at) VALUES (?, ?, ?, 'active', ?, NOW())");
-                $stmt->execute([$name, $phoneVal, $notesVal, $optIn]);
-                $customerId = (int)$pdo->lastInsertId();
-                MembershipManager::linkCustomerToTier($pdo, $customerId, $tierCode, null, $expiresAt);
-
-                // If plate is provided, insert primary vehicle
-                if ($plate !== '') {
-                    $vStmt = $pdo->prepare("INSERT INTO vehicles (customer_id, plate_number, plate_province, vehicle_type, make_model, color) VALUES (?, ?, ?, ?, ?, ?)");
-                    $vStmt->execute([$customerId, $plate, $province, $vType, $model, $color]);
+            // Check if normalized phone number already exists for another customer
+            $phoneDuplicate = false;
+            if ($phoneVal !== null) {
+                if ($customerId) {
+                    $chkPhone = $pdo->prepare("SELECT id, name, phone FROM customers WHERE phone = ? AND id != ? LIMIT 1");
+                    $chkPhone->execute([$phoneVal, $customerId]);
+                } else {
+                    $chkPhone = $pdo->prepare("SELECT id, name, phone FROM customers WHERE phone = ? LIMIT 1");
+                    $chkPhone->execute([$phoneVal]);
+                }
+                $existingCust = $chkPhone->fetch(PDO::FETCH_ASSOC);
+                if ($existingCust) {
+                    $phoneDuplicate = true;
+                    $message = "The phone number '{$phone}' is already registered to customer '{$existingCust['name']}' (ID: #{$existingCust['id']}). Please enter a unique phone number.";
+                    $messageType = 'danger';
                 }
             }
-            $message = 'Customer saved successfully!';
+
+            if (!$phoneDuplicate) {
+                if ($customerId) {
+                    // Update Customer
+                    $stmt = $pdo->prepare("UPDATE customers SET name = ?, phone = ?, notes = ?, message_opt_in = ?, message_opt_in_updated_at = NOW() WHERE id = ?");
+                    $stmt->execute([$name, $phoneVal, $notesVal, $optIn, $customerId]);
+                    MembershipManager::linkCustomerToTier($pdo, $customerId, $tierCode, null, $expiresAt);
+                } else {
+                    // Insert Customer
+                    $stmt = $pdo->prepare("INSERT INTO customers (name, phone, notes, status, message_opt_in, message_opt_in_updated_at) VALUES (?, ?, ?, 'active', ?, NOW())");
+                    $stmt->execute([$name, $phoneVal, $notesVal, $optIn]);
+                    $customerId = (int)$pdo->lastInsertId();
+                    MembershipManager::linkCustomerToTier($pdo, $customerId, $tierCode, null, $expiresAt);
+
+                    // If plate is provided, insert primary vehicle
+                    if ($plate !== '') {
+                        $vStmt = $pdo->prepare("INSERT INTO vehicles (customer_id, plate_number, plate_province, vehicle_type, make_model, color) VALUES (?, ?, ?, ?, ?, ?)");
+                        $vStmt->execute([$customerId, $plate, $province, $vType, $model, $color]);
+                    }
+                }
+                $message = 'Customer saved successfully!';
+            }
         }
         }
     } elseif ($action === 'toggle_message_opt_in') {

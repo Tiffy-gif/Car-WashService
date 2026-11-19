@@ -42,7 +42,6 @@ This glossary provides plain-language definitions and the exact English and Khme
 | **Customers** | Customers & Vehicles | អតិថិជន និងរថយន្ត | `views/owner/customers.php` |
 | **Vehicle History** | Vehicle Service History | ប្រវត្តិនៃការជួសជុល | `views/owner/vehicle_history.php` |
 | **Oil Care** | Oil & Reminders | ប្រេង និងការរំលឹក | `views/owner/oil_care.php` |
-| **Commissions** | Staff Commissions | កម្រៃជើងសារបុគ្គលិក | `views/owner/commissions.php` |
 | **Expenses** | Shop Expenses | ចំណាយប្រចាំថ្ងៃ | `views/owner/expenses.php` |
 | **Reports** | Reports & Analytics | របាយការណ៍ និងស្ថិតិ | `views/owner/reports.php` |
 | **POS Devices** | POS Devices & Terminals | ឧបករណ៍ POS | `views/owner/pos_devices.php` |

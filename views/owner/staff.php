@@ -44,13 +44,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         $pin = trim($_POST['pin'] ?? '');
         $password = trim($_POST['password'] ?? '');
         $role = trim($_POST['role'] ?? 'washer');
-        $commType = trim($_POST['commission_type'] ?? 'percentage');
-        $commRate = max(0.00, (float)($_POST['commission_rate'] ?? 0.00));
+        $commType = 'none';
+        $commRate = 0.00;
 
         // Resolve role ID and code
         $matchedRole = $roleCodeMap[$role] ?? null;
         if (!$matchedRole) {
-            $rStmt = $pdo->prepare("SELECT id, code, is_commission_eligible FROM roles WHERE code = ? OR id = ? LIMIT 1");
+            $rStmt = $pdo->prepare("SELECT id, code FROM roles WHERE code = ? OR id = ? LIMIT 1");
             $rStmt->execute([$role, (int)$role]);
             $matchedRole = $rStmt->fetch();
         }
@@ -104,14 +104,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         $phone = trim($_POST['phone'] ?? '');
         $username = strtolower(trim($_POST['username'] ?? ''));
         $role = trim($_POST['role'] ?? 'washer');
-        $commType = trim($_POST['commission_type'] ?? 'percentage');
-        $commRate = max(0.00, (float)($_POST['commission_rate'] ?? 0.00));
+        $commType = 'none';
+        $commRate = 0.00;
         $status = in_array($_POST['status'] ?? '', ['active', 'inactive'], true) ? $_POST['status'] : 'active';
 
         // Resolve role ID and code
         $matchedRole = $roleCodeMap[$role] ?? null;
         if (!$matchedRole) {
-            $rStmt = $pdo->prepare("SELECT id, code, is_commission_eligible FROM roles WHERE code = ? OR id = ? LIMIT 1");
+            $rStmt = $pdo->prepare("SELECT id, code FROM roles WHERE code = ? OR id = ? LIMIT 1");
             $rStmt->execute([$role, (int)$role]);
             $matchedRole = $rStmt->fetch();
         }
@@ -316,7 +316,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             // SOFT DELETE per requirement: "Nothing is permanently deleted anywhere. Use an 'inactive' flag instead."
             $pdo->prepare("UPDATE users SET status = 'inactive' WHERE id = ?")->execute([$userId]);
             audit_log('USER_DEACTIVATED', "Soft-deleted (deactivated) staff member '{$u['full_name']}' ({$u['username']})", 'user', (string)$userId);
-            $message = "Staff member '{$u['full_name']}' marked inactive. Historical orders and commissions remain safe.";
+            $message = "Staff member '{$u['full_name']}' marked inactive. Historical orders remain safe.";
         }
     }
 
@@ -350,7 +350,7 @@ endAction:
 
 // Fetch all staff members
 $staffList = $pdo->query("
-    SELECT u.*, r.name_en as role_name_en, r.name_km as role_name_km, r.is_commission_eligible
+    SELECT u.*, r.name_en as role_name_en, r.name_km as role_name_km
     FROM users u
     LEFT JOIN roles r ON u.role_id = r.id OR u.role = r.code
     ORDER BY u.id ASC
@@ -689,9 +689,6 @@ include dirname(__DIR__) . '/layouts/header.php';
                         </div>
                     </div>
                 </div>
-
-                <input type="hidden" name="commission_type" value="none">
-                <input type="hidden" name="commission_rate" value="0.00">
             </div>
 
             <div class="modal-footer">
@@ -773,9 +770,6 @@ include dirname(__DIR__) . '/layouts/header.php';
                         </div>
                     </div>
                 </div>
-
-                <input type="hidden" name="commission_type" id="edit_comm_type" value="none">
-                <input type="hidden" name="commission_rate" id="edit_comm_rate" value="0.00">
             </div>
 
             <div class="modal-footer">
@@ -825,7 +819,6 @@ include dirname(__DIR__) . '/layouts/header.php';
 
 <script>
 function openNewStaffModal() {
-    toggleCommSection('add');
     openModal('addStaffModal');
 }
 
@@ -847,10 +840,7 @@ function openEditStaffModal(btnOrUser) {
     document.getElementById('edit_username').value = user.username;
     document.getElementById('edit_role').value = user.role;
     document.getElementById('edit_status').value = user.status;
-    document.getElementById('edit_comm_type').value = user.commission_type || 'percentage';
-    document.getElementById('edit_comm_rate').value = parseFloat(user.commission_rate || 0).toFixed(2);
 
-    toggleCommSection('edit');
     openModal('editStaffModal');
 }
 
@@ -864,11 +854,6 @@ function openResetPasswordModal(btnOrUserId, fullName, username) {
     document.getElementById('reset_user_id').value = userId;
     document.getElementById('reset_user_label').innerText = 'Resetting password for: ' + fullName + ' (@' + username + ')';
     openModal('resetPasswordModal');
-}
-
-function toggleCommSection(prefix) {
-    const commSection = document.getElementById(prefix + '_comm_section');
-    if (commSection) commSection.style.display = 'none';
 }
 </script>
 

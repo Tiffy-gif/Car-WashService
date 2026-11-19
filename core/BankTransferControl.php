@@ -297,9 +297,6 @@ class BankTransferControl {
             }
         }
 
-        // Re-sync crew commissions
-        self::recalcCommissions($pdo, $orderId, $totalUsd);
-
         // Audit Log
         $logMsg = "Bank transfer payment of $" . number_format($totalUsd, 2) . " on Order #{$order['order_number']} verified and APPROVED by Manager {$mgr['manager_name']}. Payment ID: {$payUid}";
         AuditLogger::log('BANK_TRANSFER_APPROVED', $logMsg, 'order', (string)$orderId, $mgr['manager_id'], $mgr['manager_name'], $mgr['manager_role']);
@@ -428,25 +425,5 @@ class BankTransferControl {
             'manager_name'      => $mgr['manager_name'],
             'message'           => "Paper receipt fallback authorized by Manager {$mgr['manager_name']}. Issue handwritten receipt Voucher #{$voucherNumber}."
         ];
-    }
-
-    private static function recalcCommissions(PDO $pdo, int $orderId, float $totalUsd): void {
-        // Washer commissions
-        $washers = $pdo->prepare("SELECT ow.id, u.commission_type, u.commission_rate FROM order_washers ow JOIN users u ON ow.washer_id = u.id WHERE ow.order_id = ? AND ow.is_active = 1");
-        $washers->execute([$orderId]);
-        $wRows = $washers->fetchAll(PDO::FETCH_ASSOC);
-        $numW = count($wRows);
-
-        if ($numW > 0) {
-            $commUpdate = $pdo->prepare("UPDATE order_washers SET commission_usd = ? WHERE id = ?");
-            foreach ($wRows as $wr) {
-                if ($wr['commission_type'] === 'percentage') {
-                    $cUsd = round(($totalUsd * ((float)$wr['commission_rate'] / 100)) / $numW, 2);
-                } else {
-                    $cUsd = round((float)$wr['commission_rate'] / $numW, 2);
-                }
-                $commUpdate->execute([$cUsd, $wr['id']]);
-            }
-        }
     }
 }

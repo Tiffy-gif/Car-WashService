@@ -35,9 +35,10 @@ function migrateBaysQueue(bool $force = false): bool {
     migrateLog("Bays, bay_history, and orders columns ensured.");
 
     // 1b. Seed default TV display settings if not present
+    $randomTvCode = 'tv_' . bin2hex(random_bytes(16));
     $defaultSettings = [
         'tv_display_enabled'  => '1',
-        'tv_display_code'     => 'tv-office-88',
+        'tv_display_code'     => $randomTvCode,
         'tv_display_language' => 'both',
     ];
     $insSetting = $pdo->prepare($isSqlite

@@ -383,8 +383,9 @@ class Backup {
     }
 
     public static function downloadSqlBackup(PDO $pdo): void {
-        if (class_exists('Auth')) {
-            Auth::requirePermission('backup.manage');
+        if (!class_exists('Auth') || !Auth::check() || Auth::getRole() !== 'owner') {
+            http_response_code(403);
+            die("Access Denied: Only a logged-in owner can download system backups.");
         }
 
         $filename = 'CarWash_Backup_' . date('Y-m-d_His') . '.sql';

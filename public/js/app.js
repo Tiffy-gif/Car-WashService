@@ -59,10 +59,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (tableSearchInput) {
         tableSearchInput.addEventListener('input', (e) => {
             const query = e.target.value.toLowerCase().trim();
+            // Also normalize query for phone numbers (+855 / spaces / dashes)
+            let cleanPhoneQuery = query.replace(/[\s\-\.\(\)\+]+/g, '');
+            if (cleanPhoneQuery.startsWith('855')) {
+                cleanPhoneQuery = cleanPhoneQuery.substring(3);
+                if (!cleanPhoneQuery.startsWith('0')) {
+                    cleanPhoneQuery = '0' + cleanPhoneQuery;
+                }
+            }
+
             const rows = document.querySelectorAll('.searchable-table tbody tr');
             rows.forEach(row => {
                 const text = row.innerText.toLowerCase();
-                if (text.includes(query)) {
+                const textClean = text.replace(/[\s\-\.\(\)\+]+/g, '');
+                if (text.includes(query) || (cleanPhoneQuery !== '' && textClean.includes(cleanPhoneQuery))) {
                     row.style.display = '';
                 } else {
                     row.style.display = 'none';

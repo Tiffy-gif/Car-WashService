@@ -16,6 +16,7 @@ require_once dirname(__DIR__, 2) . '/core/SmartQueueEngine.php';
 require_once dirname(__DIR__, 2) . '/core/MembershipManager.php';
 require_once dirname(__DIR__, 2) . '/core/AuditLogger.php';
 require_once dirname(__DIR__, 2) . '/core/OrderGate.php';
+require_once dirname(__DIR__, 2) . '/core/TelegramNotifier.php';
 
 function getSlipFileFromInput(?string $base64Data, ?array $uploadedFile = null): ?array {
     if (!empty($uploadedFile) && !empty($uploadedFile['tmp_name'])) {
@@ -650,6 +651,45 @@ if (!in_array($action, $DEVICE_ONLY_ACTIONS, true)) {
         ]);
         exit;
     }
+
+    // 3. Central Day Closed Lockdown Enforcement:
+    // When the day is closed, cashier sales and operations are completely blocked.
+    // Management (Owner, Manager, Admin) can view in view-only mode, but cannot create sales, open float, or admit cars.
+    $dayLock = CashierControl::isDayLocked();
+    if (!empty($dayLock['locked']) && ($dayLock['reason'] ?? '') === 'day_closed') {
+        $callerRole = strtolower($sessionUser['role'] ?? '');
+        $isManagement = in_array($callerRole, ['owner', 'manager', 'admin', 'system_admin'], true);
+
+        // Non-management (e.g. cashier) is completely blocked from any action except logout or checking day lock status
+        if (!$isManagement && $action !== 'staff_logout' && $action !== 'get_day_lock_status') {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'error'   => 'DAY_CLOSED',
+                'message' => 'Today is closed. Sales will open again tomorrow.'
+            ]);
+            exit;
+        }
+
+        // Actions prohibited when day is closed (enforces view-only mode for management on closed days):
+        $restrictedOnClosedDay = [
+            'create_order', 'pay_order', 'submit_bank_transfer', 'approve_bank_transfer',
+            'process_refund', 'cancel_order',
+            'shift_start', 'edit_opening_float', 'record_cash_movement', 'open_drawer_no_sale',
+            'customer_arrived', 'mark_arrived', 'appointment_arrived', 'assign_bay', 'assign_car_to_bay',
+            'finish_car', 'finish_job', 'finish_bay', 'pass_qc', 'qc_pass', 'qc_fail',
+            'move_queue_car', 'queue_move_up'
+        ];
+        if (in_array($action, $restrictedOnClosedDay, true)) {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'error'   => 'DAY_CLOSED_VIEW_ONLY',
+                'message' => 'Today is closed. Sales will open again tomorrow.'
+            ]);
+            exit;
+        }
+    }
 }
 
 // ========================================================
@@ -749,9 +789,27 @@ if ($action === 'staff_login') {
         CashierControl::clearFailedDeviceLogins($authDeviceId);
     }
 
-    $uStmt = $pdo->prepare("SELECT id, username, full_name, role, phone, commission_type, commission_rate, status, is_sample_account FROM users WHERE username = ?");
+    $uStmt = $pdo->prepare("SELECT id, username, full_name, role, phone, status, is_sample_account FROM users WHERE username = ?");
     $uStmt->execute([$username]);
     $user = $uStmt->fetch(PDO::FETCH_ASSOC);
+
+    // Day Closed Lockdown Check:
+    // If the day is closed, cashier login is completely blocked.
+    // Owner, Manager and Admin can log in to view in view-only mode.
+    $dayLock = CashierControl::isDayLocked();
+    $isDayClosed = (!empty($dayLock['locked']) && ($dayLock['reason'] ?? '') === 'day_closed');
+    $userRole = strtolower($user['role'] ?? '');
+    $isManagement = in_array($userRole, ['owner', 'manager', 'admin', 'system_admin'], true);
+
+    if ($isDayClosed && !$isManagement) {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'DAY_CLOSED',
+            'message' => 'Today is closed. Sales will open again tomorrow.'
+        ]);
+        exit;
+    }
 
     // Fetch all system settings from settings table
     $settings = [];
@@ -844,6 +902,9 @@ if ($action === 'staff_login') {
             'device_uid' => $device['device_uid'],
             'location' => $device['location']
         ],
+        'is_view_only' => $isDayClosed,
+        'view_only_reason' => $isDayClosed ? 'Today is closed. Sales will open again tomorrow.' : null,
+        'is_day_closed' => $isDayClosed,
         'exchange_rate' => get_exchange_rate(),
         'settings' => $settings,
         'shop' => $shopData
@@ -868,7 +929,7 @@ if ($action === 'get_web_session') {
     }
 
     $webUserId = (int)Auth::getUserId();
-    $uStmt = $pdo->prepare("SELECT id, username, full_name, role, phone, commission_type, commission_rate, status, is_sample_account FROM users WHERE id = ?");
+    $uStmt = $pdo->prepare("SELECT id, username, full_name, role, phone, status, is_sample_account FROM users WHERE id = ?");
     $uStmt->execute([$webUserId]);
     $user = $uStmt->fetch(PDO::FETCH_ASSOC);
 
@@ -878,6 +939,22 @@ if ($action === 'get_web_session') {
             'success' => false,
             'error' => 'USER_INACTIVE',
             'message' => 'Staff account is inactive or not found.'
+        ]);
+        exit;
+    }
+
+    // Day Closed Lockdown Check:
+    $dayLock = CashierControl::isDayLocked();
+    $isDayClosed = (!empty($dayLock['locked']) && ($dayLock['reason'] ?? '') === 'day_closed');
+    $userRole = strtolower($user['role'] ?? '');
+    $isManagement = in_array($userRole, ['owner', 'manager', 'admin', 'system_admin'], true);
+
+    if ($isDayClosed && !$isManagement) {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'DAY_CLOSED',
+            'message' => 'Today is closed. Sales will open again tomorrow.'
         ]);
         exit;
     }
@@ -953,6 +1030,9 @@ if ($action === 'get_web_session') {
             'device_uid' => $device['device_uid'],
             'location' => $device['location']
         ],
+        'is_view_only' => $isDayClosed,
+        'view_only_reason' => $isDayClosed ? 'Today is closed. Sales will open again tomorrow.' : null,
+        'is_day_closed' => $isDayClosed,
         'exchange_rate' => get_exchange_rate(),
         'settings' => $settings,
         'shop' => $shopData
@@ -1086,7 +1166,7 @@ if ($action === 'sync_catalog') {
 
     // 4. Washers & Mechanics on duty (Check role capability flags or legacy role)
     $washers = $pdo->query("
-        SELECT u.id, u.full_name, u.role, u.commission_type, u.commission_rate 
+        SELECT u.id, u.full_name, u.role 
         FROM users u 
         LEFT JOIN roles r ON u.role_id = r.id 
         WHERE (r.can_assign_washer = 1 OR u.role = 'washer') 
@@ -1095,7 +1175,7 @@ if ($action === 'sync_catalog') {
     ")->fetchAll(PDO::FETCH_ASSOC);
 
     $mechanics = $pdo->query("
-        SELECT u.id, u.full_name, u.role, u.commission_type, u.commission_rate 
+        SELECT u.id, u.full_name, u.role 
         FROM users u 
         LEFT JOIN roles r ON u.role_id = r.id 
         WHERE (r.can_assign_mechanic = 1 OR u.role = 'mechanic') 
@@ -2335,50 +2415,23 @@ if ($action === 'create_order') {
             }
         }
 
-        // Assign Washers & Commission Calculation
+        // Assign Washers
         if (!empty($assignedWashers) && is_array($assignedWashers)) {
-            $wIns = $pdo->prepare("INSERT INTO order_washers (order_id, washer_id, commission_usd) VALUES (?, ?, ?)");
-            $uStmt = $pdo->prepare("SELECT commission_type, commission_rate FROM users WHERE id = ?");
-            $numW = count($assignedWashers);
-
+            $wIns = $pdo->prepare("INSERT INTO order_washers (order_id, washer_id, commission_usd) VALUES (?, ?, 0.00)");
             foreach ($assignedWashers as $wId) {
                 $wId = (int)$wId;
                 if ($wId <= 0) continue;
-                $uStmt->execute([$wId]);
-                $wRow = $uStmt->fetch();
-                $wComm = 0.00;
-                if ($wRow) {
-                    if ($wRow['commission_type'] === 'percentage') {
-                        $wComm = round(($totalUsd * ((float)$wRow['commission_rate'] / 100)) / $numW, 2);
-                    } else {
-                        $wComm = round((float)$wRow['commission_rate'] / $numW, 2);
-                    }
-                }
-                $wIns->execute([$orderId, $wId, $wComm]);
+                $wIns->execute([$orderId, $wId]);
             }
         }
 
-        // Assign Mechanics & Commission Calculation
+        // Assign Mechanics
         if (!empty($assignedMechanics) && is_array($assignedMechanics)) {
-            $mIns = $pdo->prepare("INSERT INTO order_mechanics (order_id, mechanic_id, commission_usd) VALUES (?, ?, ?)");
-            $uStmt = $pdo->prepare("SELECT commission_type, commission_rate FROM users WHERE id = ?");
-            $numM = count($assignedMechanics);
-            $mechBasis = ($repairLaborTotal > 0) ? $repairLaborTotal : $totalUsd;
-
+            $mIns = $pdo->prepare("INSERT INTO order_mechanics (order_id, mechanic_id, commission_usd) VALUES (?, ?, 0.00)");
             foreach ($assignedMechanics as $mId) {
                 $mId = (int)$mId;
                 if ($mId <= 0) continue;
-                $uStmt->execute([$mId]);
-                $mRow = $uStmt->fetch();
-                $mComm = 0.00;
-                if ($mRow) {
-                    if ($mRow['commission_type'] === 'percentage') {
-                        $mComm = round(($mechBasis * ((float)$mRow['commission_rate'] / 100)) / $numM, 2);
-                    } else {
-                        $mComm = round((float)$mRow['commission_rate'] / $numM, 2);
-                    }
-                }
-                $mIns->execute([$orderId, $mId, $mComm]);
+                $mIns->execute([$orderId, $mId]);
             }
         }
 
@@ -2939,40 +2992,6 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
             }
         }
 
-        // Recalculate washer commissions with final total
-        $washers = $pdo->prepare("SELECT ow.id, ow.washer_id, u.commission_type, u.commission_rate FROM order_washers ow JOIN users u ON ow.washer_id = u.id WHERE ow.order_id = ?");
-        $washers->execute([$id]);
-        $wRows = $washers->fetchAll();
-        $numW = count($wRows);
-        if ($numW > 0) {
-            $commUpdate = $pdo->prepare("UPDATE order_washers SET commission_usd = ? WHERE id = ?");
-            foreach ($wRows as $wr) {
-                if ($wr['commission_type'] === 'percentage') {
-                    $cUsd = round(($totalUsd * ((float)$wr['commission_rate'] / 100)) / $numW, 2);
-                } else {
-                    $cUsd = round((float)$wr['commission_rate'] / $numW, 2);
-                }
-                $commUpdate->execute([$cUsd, $wr['id']]);
-            }
-        }
-
-        // Recalculate mechanic commissions with final total
-        $mechanics = $pdo->prepare("SELECT om.id, om.mechanic_id, u.commission_type, u.commission_rate FROM order_mechanics om JOIN users u ON om.mechanic_id = u.id WHERE om.order_id = ?");
-        $mechanics->execute([$id]);
-        $mRows = $mechanics->fetchAll();
-        $numM = count($mRows);
-        if ($numM > 0) {
-            $mCommUpdate = $pdo->prepare("UPDATE order_mechanics SET commission_usd = ? WHERE id = ?");
-            foreach ($mRows as $mr) {
-                if ($mr['commission_type'] === 'percentage') {
-                    $cUsd = round(($totalUsd * ((float)$mr['commission_rate'] / 100)) / $numM, 2);
-                } else {
-                    $cUsd = round((float)$mr['commission_rate'] / $numM, 2);
-                }
-                $mCommUpdate->execute([$cUsd, $mr['id']]);
-            }
-        }
-
         // Update vehicle_repair_history total if entry exists
         $pdo->prepare("UPDATE vehicle_repair_history SET total_cost_usd = ? WHERE order_id = ?")->execute([$totalUsd, $id]);
 
@@ -3013,6 +3032,13 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
         } catch (Exception $e) {
             error_log("Loyalty reversal error in status update: " . $e->getMessage());
         }
+        TelegramNotifier::notifyOrderCancelled(
+            (string)($ord['order_number'] ?? ''),
+            (string)($ord['plate_number'] ?? ''),
+            (float)($ord['total_usd'] ?? 0),
+            "Status changed to cancelled",
+            $stf['username'] ?? 'Staff'
+        );
     }
 
     echo json_encode([
@@ -3038,7 +3064,7 @@ if ($action === 'get_queue') {
 
     if ($role === 'washer' && $userId > 0) {
         $stmt = $pdo->prepare("
-            SELECT o.*, ow.commission_usd,
+            SELECT o.*, 0.00 as commission_usd,
                    (SELECT GROUP_CONCAT(CONCAT(oi.service_name, ' (x', oi.qty, ')') SEPARATOR ', ') FROM order_items oi WHERE oi.order_id = o.id) as item_names
             FROM orders o
             JOIN order_washers ow ON o.id = ow.order_id
@@ -3055,7 +3081,7 @@ if ($action === 'get_queue') {
         $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $earnStmt = $pdo->prepare("
-            SELECT COALESCE(SUM(ow.commission_usd), 0) as total_earned, COUNT(DISTINCT o.id) as jobs_count
+            SELECT 0.00 as total_earned, COUNT(DISTINCT o.id) as jobs_count
             FROM orders o
             JOIN order_washers ow ON o.id = ow.order_id
             WHERE ow.washer_id = ? AND (o.status = 'paid' OR o.payment_status = 'paid') AND DATE(o.created_at) = CURDATE()
@@ -3074,7 +3100,7 @@ if ($action === 'get_queue') {
 
     if ($role === 'mechanic' && $userId > 0) {
         $stmt = $pdo->prepare("
-            SELECT o.*, om.commission_usd,
+            SELECT o.*, 0.00 as commission_usd,
                    (SELECT GROUP_CONCAT(CONCAT(oi.service_name, ' (x', oi.qty, ')') SEPARATOR ', ') FROM order_items oi WHERE oi.order_id = o.id) as item_names
             FROM orders o
             JOIN order_mechanics om ON o.id = om.order_id
@@ -3091,7 +3117,7 @@ if ($action === 'get_queue') {
         $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $earnStmt = $pdo->prepare("
-            SELECT COALESCE(SUM(om.commission_usd), 0) as total_earned, COUNT(DISTINCT o.id) as jobs_count
+            SELECT 0.00 as total_earned, COUNT(DISTINCT o.id) as jobs_count
             FROM orders o
             JOIN order_mechanics om ON o.id = om.order_id
             WHERE om.mechanic_id = ? AND (o.status = 'paid' OR o.payment_status = 'paid') AND DATE(o.created_at) = CURDATE()
@@ -3650,9 +3676,9 @@ if ($action === 'cancel_order') {
             $restoreStockStmt->execute([$pi['qty'], $pi['product_id']]);
         }
 
-        // 2. Soft-cancel crew commissions: Never hard delete
-        $pdo->prepare("UPDATE order_washers SET is_active = 0, commission_usd = 0 WHERE order_id = ?")->execute([$id]);
-        $pdo->prepare("UPDATE order_mechanics SET is_active = 0, commission_usd = 0 WHERE order_id = ?")->execute([$id]);
+        // 2. Soft-cancel crew assignments: Never hard delete
+        $pdo->prepare("UPDATE order_washers SET is_active = 0 WHERE order_id = ?")->execute([$id]);
+        $pdo->prepare("UPDATE order_mechanics SET is_active = 0 WHERE order_id = ?")->execute([$id]);
 
         // 3. Mark order cancelled with both user IDs
         $pdo->prepare("
@@ -3681,6 +3707,15 @@ if ($action === 'cancel_order') {
         } catch (Exception $e) {
             error_log("Loyalty reverse error on cancel_order in POS API: " . $e->getMessage());
         }
+
+        // 6. Notify owner via Telegram
+        TelegramNotifier::notifyOrderCancelled(
+            (string)($ord['order_number'] ?? ''),
+            (string)($ord['plate_number'] ?? ''),
+            (float)($ord['total_usd'] ?? $ord['total_amount'] ?? 0),
+            $reason,
+            $stf['username'] . (!empty($approverUsername) ? " (Approved by {$approverUsername})" : '')
+        );
 
         echo json_encode([
             'success' => true,
@@ -4141,6 +4176,20 @@ if ($action === 'save_pos_closing' || $action === 'close_day' || $action === 'sa
         exit;
     }
 
+    // Rule: Day cannot be closed while any shift is still open
+    $openShiftsStmt = $pdo->prepare("SELECT COUNT(*) FROM cashier_shifts WHERE status = 'open' AND (DATE(started_at) = ? OR DATE(started_at) <= ?)");
+    $openShiftsStmt->execute([$targetDate, $targetDate]);
+    $openCount = (int)$openShiftsStmt->fetchColumn();
+    if ($openCount > 0) {
+        http_response_code(400);
+        echo json_encode([
+            'success' => false,
+            'error' => 'OPEN_SHIFTS_EXIST',
+            'message' => "Cannot close day: There are {$openCount} active open shift(s). All cashiers must count and end their shifts before closing the day."
+        ]);
+        exit;
+    }
+
     // Check if device already closed for target date
     $chkStmt = $pdo->prepare("SELECT id, closed_at, cashier_name FROM pos_closings WHERE close_date = ? AND pos_device_id = ? AND status = 'closed'");
     $chkStmt->execute([$targetDate, $deviceId]);
@@ -4303,7 +4352,7 @@ if ($action === 'reopen_daily_close' || $action === 'reopen_day') {
         echo json_encode([
             'success' => false,
             'error' => 'PERMISSION_DENIED',
-            'message' => 'Only Owner or Manager can reopen a closed day.'
+            'message' => 'Only a Manager can reopen a closed day, never a cashier.'
         ]);
         exit;
     }
@@ -4539,6 +4588,10 @@ if ($action === 'close_day_zreport') {
     $mgrPin = (string)($inputData['manager_pin'] ?? $inputData['pin'] ?? $_POST['manager_pin'] ?? $_POST['pin'] ?? '');
     $notes = trim($inputData['notes'] ?? $_POST['notes'] ?? '');
 
+    if ($mgrUser === '' && !empty($sessionUser['username'])) {
+        $mgrUser = $sessionUser['username'];
+    }
+
     try {
         $res = CashierControl::closeDayZReport($mgrUser, $mgrPin, $countedUsd, $countedKhr, $notes);
         echo json_encode($res);
@@ -4560,6 +4613,18 @@ if ($action === 'reopen_day') {
     $reason = trim($inputData['reason'] ?? $_POST['reason'] ?? '');
     $mgrUser = trim($inputData['manager_username'] ?? $_POST['manager_username'] ?? '');
     $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
+
+    // Server-side guard: Only a Manager can reopen a closed day, never a cashier
+    $callerRole = strtolower($sessionUser['role'] ?? '');
+    if (!empty($sessionUser) && in_array($callerRole, ['cashier', 'washer', 'mechanic', 'technical'], true)) {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'PERMISSION_DENIED',
+            'message' => 'Only a Manager can reopen a closed day, never a cashier.'
+        ]);
+        exit;
+    }
 
     try {
         $res = CashierControl::reopenClosedDay($targetDate, $reason, $mgrUser, $mgrPin);
@@ -4970,11 +5035,11 @@ if ($action === 'get_washer_jobs') {
         $jobs = $jobsStmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    // Today's commission for washer
+    // Today's jobs count for washer
     $todayEarn = ['total_earned' => 0.00, 'jobs_count' => 0];
     if ($stfUser) {
         $earnStmt = $pdo->prepare("
-            SELECT COALESCE(SUM(ow.commission_usd), 0) as total_earned, COUNT(DISTINCT o.id) as jobs_count
+            SELECT 0.00 as total_earned, COUNT(DISTINCT o.id) as jobs_count
             FROM orders o
             JOIN order_washers ow ON o.id = ow.order_id
             WHERE ow.washer_id = ? AND DATE(o.created_at) = CURDATE()
@@ -5135,17 +5200,12 @@ if ($action === 'get_technical_jobs') {
 
     // Today's commission for mechanic
     $todayEarn = 0.00;
-    if ($stfUser) {
-        $earnStmt = $pdo->prepare("SELECT COALESCE(SUM(commission_usd), 0) FROM order_mechanics om JOIN orders o ON om.order_id = o.id WHERE om.mechanic_id = ? AND DATE(o.created_at) = CURDATE()");
-        $earnStmt->execute([$stfUser['id']]);
-        $todayEarn = (float)$earnStmt->fetchColumn();
-    }
 
     // Completed jobs today for this mechanic
     $completedJobs = [];
     if ($stfUser) {
         $cStmt = $pdo->prepare("
-            SELECT o.*, COALESCE(om.commission_usd, 0.00) as commission_usd,
+            SELECT o.*, 0.00 as commission_usd,
                    (SELECT {$svcConcat} FROM order_items oi WHERE oi.order_id = o.id) as service_names
             FROM orders o
             JOIN order_mechanics om ON o.id = om.order_id

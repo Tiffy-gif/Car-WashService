@@ -15,7 +15,7 @@ The system operates on an 11-role Granular Role-Based Access Control (RBAC) mode
 | `owner` | Shop Owner | ម្ចាស់ហាង | Full administrative access across operations, finances, settings, reports, staff, and audit trails. |
 | `manager` | General Manager | អ្នកចាត់ការទូទៅ | Daily shop floor oversight, queue reordering, override authorizations, spot audits, staff timecards, and operational reports. Strictly restricted from payroll, expenses, and security audit logs. |
 | `cashier` | Cashier | បេឡាករ | Front-desk customer intake, POS checkout, cash drawer reconciliation, shift handover, receipt printing, and disaster recovery paperwork. Cannot cancel orders or issue refunds. |
-| `washer` | Car Washer | បុគ្គលិកលាង | Dedicated washing bay screen, vehicle cleaning task timers, and personal washing commission tracking. |
+| `washer` | Car Washer | បុគ្គលិកលាង | Dedicated washing bay screen, vehicle cleaning task timers, and assigned wash job tracking. |
 | `wash_supervisor` | Wash Supervisor | ប្រធានត្រួតពិនិត្យការលាង | Washing bay assignment, queue reordering, crew assignment adjustments, and job bottleneck oversight. |
 | `mechanic` | Mechanic & Technician | ជាងជួសជុល & បច្ចេកទេស | Service bay screen, repair tasks, 2-lane technical inspections, oil fluid adjustments, and warehouse parts requests. |
 | `technical` | Technical Staff | ជាងបច្ចេកទេស | Workshop inspection checklists, job notes, vehicle service history, and parts requests. |
@@ -51,10 +51,9 @@ All back-office screens are dispatched through the centralized router `index.php
 | `categories` | Categories Control<br>*(ការគ្រប់គ្រងប្រភេទ)* | `views/owner/categories.php` | `categories.list` | `owner`, `manager`, `stock_control` | Category hierarchy: organizing catalog items into Wash, Repair, Oil Care, Products, and Expense categories with icons and color tags. |
 | `customers` | Customers & Vehicles<br>*(អតិថិជន & យានយន្ត)* | `views/owner/customers.php` | `customers.list` | `owner`, `manager`, `cashier`, `crm` | Customer relationship database: customer profiles, phone numbers, registered license plates, membership tiers, loyalty points, and reminder preferences. |
 | `vehicle_history` | Vehicle History<br>*(ប្រវត្តិជួសជុលយានយន្ត)* | `views/owner/vehicle_history.php` | `vehicle_history.list` | `owner`, `manager`, `wash_supervisor`, `mechanic`, `technical`, `cashier`, `crm` | Longitudinal vehicle service record: past visit dates, odometer readings, performed washes, oil change specifications, and technician notes. |
-| `commissions` | Crew Commissions<br>*(កម្រៃជើងសារបុគ្គលិក)* | `views/owner/commissions.php` | `commissions.list` | `owner` | Payroll and incentive dashboard: calculates individual commission shares for washers and mechanics based on completed jobs and commission rates. |
 | `expenses` | Daily Expenses<br>*(ចំណាយប្រចាំថ្ងៃ)* | `views/owner/expenses.php` | `expenses.list` | `owner` | Operational expense tracking: shop supplies, utilities, soap/wax chemicals, staff food, and petty cash payouts deducted from net profit. |
 | `reports` | Reports & Profits<br>*(របាយការណ៍ & ប្រាក់ចំណេញ)* | `views/owner/reports.php` | `reports.view` | `owner`, `manager` | Analytics hub: Sales Summary, P&L, Cars per Labor Hour KPI, Bay Utilization KPI, Technician Efficiency Leaderboard, and Staff Timecards. |
-| `staff` | Manage Staff<br>*(គ្រប់គ្រងបុគ្គលិក)* | `views/owner/staff.php` | `staff.list` | `owner`, `manager`, `system_admin` | Employee directory: adding staff, assigning roles, setting commission types (percentage/fixed), resetting PINs, and soft-deactivating accounts. |
+| `staff` | Manage Staff<br>*(គ្រប់គ្រងបុគ្គលិក)* | `views/owner/staff.php` | `staff.list` | `owner`, `manager`, `system_admin` | Employee directory: adding staff, assigning roles, resetting PINs, and soft-deactivating accounts. |
 | `roles` | Roles & Permissions<br>*(តួនាទី & សិទ្ធិ)* | `views/owner/roles.php` | `roles.list` | `owner`, `system_admin` | Security RBAC administration: granular matrix toggling permissions for sales, operations, warehouse, finance, and system settings per role. |
 | `pos_devices` | POS Devices & API<br>*(ឧបករណ៍ POS & API)* | `views/owner/pos_devices.php` | `pos_devices.list` | `owner`, `system_admin` | Tablet hardware terminal management: pairing tablets, issuing SHA-256 API keys, monitoring active terminals, and blocking lost/stolen devices. |
 | `settings` | Shop Settings<br>*(ការកំណត់ហាង)* | `views/owner/settings.php` | `settings.view` | `owner`, `system_admin` | Master system settings with 12 tabs: Shop Info, Receipt Header/Footer, Money/Currencies, Payment/KHQR, Bays, Oil Specs, Loyalty, Performance, Telegram, Cloud Sync, System/Backup, and Audit History. |
@@ -117,7 +116,6 @@ Based on actual `role_permissions` database mapping:
 | **Shift End & Blind Count** (`pos.access`) | YES | YES | YES | NO | NO | NO | NO | NO | NO | NO |
 | **Day Close Z-Report** (`daily_close.close`) | YES | NO | YES | NO | NO | NO | NO | NO | NO | NO |
 | **View Shift & Day Close Status** (`daily_close.view`) | YES | YES | YES | NO | NO | NO | NO | NO | NO | NO |
-| **Crew Commissions Payroll** (`commissions.list`, `pay`) | YES | NO | NO | NO | NO | NO | NO | NO | NO | NO |
 | **Daily Expenses Ledger** (`expenses.list`, `add`, `del`) | YES | NO | NO | NO | NO | NO | NO | NO | NO | NO |
 | **Financial & Operational Reports** (`reports.view`) | YES | YES | NO | NO | NO | NO | NO | NO | NO | NO |
 | **Export Reports to CSV/Excel** (`reports.export`) | YES | NO | NO | NO | NO | NO | NO | NO | NO | NO |

@@ -2082,12 +2082,6 @@ class PosApp {
                 this.handleLogout();
             });
 
-            document.getElementById('userMenuEndShift')?.addEventListener('click', () => {
-                userMenuDropdown.style.display = 'none';
-                userPill.classList.remove('active');
-                this.showEndShiftModal();
-            });
-
             document.getElementById('userMenuSpotAudit')?.addEventListener('click', () => {
                 userMenuDropdown.style.display = 'none';
                 userPill.classList.remove('active');
@@ -2097,7 +2091,27 @@ class PosApp {
             document.getElementById('userMenuSettings')?.addEventListener('click', () => {
                 userMenuDropdown.style.display = 'none';
                 userPill.classList.remove('active');
-                openSettings();
+
+                const curRole = (this.currentUser?.role || '').toLowerCase();
+                const isManagerOrAdmin = ['owner', 'manager', 'admin', 'system_admin'].includes(curRole);
+
+                if (isManagerOrAdmin) {
+                    openSettings();
+                } else {
+                    const isKm = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km');
+                    const title = isKm ? 'ការអនុញ្ញាតការកំណត់ (Settings Authorization)' : 'Settings Authorization';
+                    const subtitle = isKm 
+                        ? 'សូមបញ្ចូលឈ្មោះ និងលេខកូដសម្ងាត់ PIN របស់អ្នកគ្រប់គ្រង (Owner / Manager / Admin) ដើម្បីចូលទៅកាន់ការកំណត់' 
+                        : 'Enter Owner, Manager, or Admin username and 6-digit PIN to access Settings.';
+
+                    this.requestManagerPin(
+                        title,
+                        subtitle,
+                        () => {
+                            openSettings();
+                        }
+                    );
+                }
             });
         }
 
@@ -2941,6 +2955,15 @@ class PosApp {
         });
         document.getElementById('btnConfirmEndShift')?.addEventListener('click', () => this.handleEndShiftSubmit());
 
+        // End Day Modal Listeners
+        document.getElementById('btnCloseEndDayModal')?.addEventListener('click', () => {
+            document.getElementById('modalEndDay')?.classList.remove('open');
+        });
+        document.getElementById('btnCancelEndDay')?.addEventListener('click', () => {
+            document.getElementById('modalEndDay')?.classList.remove('open');
+        });
+        document.getElementById('btnConfirmEndDay')?.addEventListener('click', () => this.handleEndDaySubmit());
+
         // Cashier Actions Listeners
         this.initCashierActionsListeners();
 
@@ -3414,6 +3437,7 @@ class PosApp {
                         deviceName: res.device.device_name || 'Counter Terminal'
                     });
                 }
+                this.isViewOnly = !!res.is_view_only;
                 if (res.settings || res.shop) {
                     const merged = { ...(res.settings || {}), ...(res.shop || {}) };
                     PosStorage.setSettings(merged);
@@ -3425,6 +3449,11 @@ class PosApp {
                 }
             }
         } catch (e) {
+            if (e.code === 'DAY_CLOSED') {
+                this.showAlert('loginAlert', e.message || 'Today is closed. Sales will open again tomorrow.', 'danger');
+                this.redirectToLogin('day_closed');
+                return;
+            }
             // Check if server rejected terminal authorization
             if (e.code === 'DEVICE_BLOCKED' || e.code === 'UNAPPROVED_DEVICE' || e.code === 'DEVICE_KEY_REQUIRED') {
                 this.handleDeviceUnauthorized(e.code, e.message);
@@ -3644,6 +3673,7 @@ class PosApp {
                 this.updatePinDots();
 
                 this.currentUser = response.user;
+                this.isViewOnly = !!response.is_view_only;
                 PosStorage.setUser(response.user);
                 if (response.session_token) {
                     PosStorage.setSessionToken(response.session_token);
@@ -4029,14 +4059,6 @@ class PosApp {
         const isWorkerRole = (curRole === 'washer' || curRole === 'mechanic' || curRole === 'technical');
         const hasShift = !!(this.activeShift || PosStorage.getCurrentShift());
 
-        // 1. End Shift: Strictly for Cashier, Manager, Owner when an active cash shift is running
-        // Washers and Mechanics NEVER handle cash drawers or shifts
-        const canEndShift = !isWorkerRole && hasShift && (curRole === 'cashier' || isManagerOrAdmin);
-        const endShiftBtn = document.getElementById('userMenuEndShift');
-        if (endShiftBtn) {
-            endShiftBtn.style.setProperty('display', canEndShift ? 'flex' : 'none', 'important');
-        }
-
         // 2. Spot Audit: Manager/Owner supervisory tool to audit register cash drawer
         const canSpotAudit = !isWorkerRole && hasShift && isManagerOrAdmin;
         const spotAuditBtn = document.getElementById('userMenuSpotAudit');
@@ -4044,11 +4066,11 @@ class PosApp {
             spotAuditBtn.style.setProperty('display', canSpotAudit ? 'flex' : 'none', 'important');
         }
 
-        // 3. Settings: POS hardware, printer & connection configs (Owner, Admin, Manager)
-        const canSettings = isManagerOrAdmin || this.hasPermission('settings.view') || this.hasPermission('settings.manage');
+        // 3. Settings: POS hardware, printer & connection configs
+        // Visible in dropdown for staff; non-manager/owner accounts require Owner / Manager / Admin PIN
         const settingsBtn = document.getElementById('userMenuSettings');
         if (settingsBtn) {
-            settingsBtn.style.setProperty('display', canSettings && !isWorkerRole ? 'flex' : 'none', 'important');
+            settingsBtn.style.setProperty('display', !isWorkerRole ? 'flex' : 'none', 'important');
         }
 
         // 4. Backoffice: Administrative management link (Owner, Admin, Manager)
@@ -4060,7 +4082,7 @@ class PosApp {
         // 5. Divider above Logout: Hide divider if all items above it are hidden
         const menuDivider = document.querySelector('#userMenuDropdown .menu-divider');
         if (menuDivider) {
-            const hasAnyAbove = canEndShift || canSpotAudit || (canSettings && !isWorkerRole) || isManagerOrAdmin;
+            const hasAnyAbove = !isWorkerRole || canSpotAudit || isManagerOrAdmin;
             menuDivider.style.display = hasAnyAbove ? 'block' : 'none';
         }
     }
@@ -4127,7 +4149,7 @@ class PosApp {
         const canQueueAccess = this.hasPermission('orders.list') || this.hasPermission('bays.view');
         const canOrdersAccess = this.hasPermission('orders.list');
         const canOilAccess = this.hasPermission('oil_care.list') || this.hasPermission('vehicle_history.list');
-        const canCloseDayAccess = (this.hasPermission('reports.daily_close') || this.hasPermission('pos.close_day') || this.hasPermission('reports.view')) && curRole !== 'washer' && curRole !== 'technical';
+        const canCloseDayAccess = (this.hasPermission('daily_close.close') || this.hasPermission('reports.daily_close') || this.hasPermission('pos.close_day') || this.hasPermission('reports.view') || curRole === 'cashier') && curRole !== 'washer' && curRole !== 'technical';
 
         // Apply tab visibility based on Back Office permissions
         const tabPos = mainNav?.querySelector('[data-view="pos"]');
@@ -4196,8 +4218,6 @@ class PosApp {
                 this.switchView('queue');
             } else if (canOrdersAccess) {
                 this.switchView('orders');
-            } else if (canCloseDayAccess) {
-                this.switchView('close');
             } else {
                 this.switchView('pos');
             }
@@ -4234,6 +4254,11 @@ class PosApp {
         if (viewName === 'appointments') {
             this.switchView('pos');
             setTimeout(() => this.openAppointmentModal(), 150);
+            return;
+        }
+        if (viewName === 'close') {
+            this.switchView('pos');
+            setTimeout(() => this.showEndDayModal(), 150);
             return;
         }
 
@@ -10473,17 +10498,6 @@ class PosApp {
         // 'waiting': vehicles waiting to be assigned to bay or currently in service
         // 'ready': vehicles where service/waiting is done and are ready for pickup
         // 'all': all active non-cancelled jobs
-        const waitingOrders = orders.filter(o => ['waiting', 'washing'].includes(o.status || 'waiting'));
-        const readyOrders = orders.filter(o => o.status === 'finished');
-        const allOrders = orders.filter(o => o.status !== 'cancelled');
-
-        const countWaitingEl = document.getElementById('tabCountWaiting');
-        const countReadyEl = document.getElementById('tabCountReady');
-        const countAllEl = document.getElementById('tabCountAll');
-        const queueTotalBadge = document.getElementById('queueTotalWaitingBadge');
-
-        if (countWaitingEl) countWaitingEl.textContent = waitingOrders.length;
-        if (countReadyEl) countReadyEl.textContent = readyOrders.length;
         if (countAllEl) countAllEl.textContent = allOrders.length;
         if (queueTotalBadge) queueTotalBadge.textContent = waitingOrders.length;
 
@@ -11807,7 +11821,7 @@ class PosApp {
         }
     }
 
-    // Requirement 6: Close Day with Manager PIN (Z-Report)
+    // Requirement 6: Close Day (Cashier or Manager PIN, Z-Report)
     static async closeDaySubmit() {
         const countUsd = parseFloat(document.getElementById('drawerCountUsd')?.value || 0);
         const countKhr = parseFloat(document.getElementById('drawerCountKhr')?.value || 0);
@@ -11815,7 +11829,7 @@ class PosApp {
 
         this.requestManagerPin(
             "Close Day (Z-Report)",
-            "Enter Manager PIN to authorize closing the business day. New sales will be locked.",
+            "Enter your PIN or Manager PIN to close the business day. All shifts must be closed first.",
             async (mgr) => {
                 try {
                     const res = await PosApi.closeDayZReport(mgr.username, mgr.pin, countUsd, countKhr, notes);
@@ -11823,9 +11837,24 @@ class PosApp {
                     if (res && res.success) {
                         this.isDayClosed = true;
                         this.isDayLocked = true;
-                        this.updateDayLockUI(true, `Sales are locked. Day closed by Manager ${res.manager_name || mgr.username}.`);
+                        const closerRole = res.closed_by_role || (mgr.role ? mgr.role.charAt(0).toUpperCase() + mgr.role.slice(1) : 'Staff');
+                        this.updateDayLockUI(true, `Sales are locked. Day closed by ${closerRole} ${res.closed_by_name || res.manager_name || mgr.username}.`);
                         this.showToastNotice('Daily Z-Report closed successfully! Register locked.', 'success');
                         await this.renderDailyClose();
+
+                        // Offer printing or auto-print
+                        if (res.slip && window.PosThermalPrinter) {
+                            PosThermalPrinter.printCloseDaySlip(res.slip);
+                        }
+
+                        // If current logged-in user is cashier, close day locks them out of POS:
+                        const curRole = (this.currentUser?.role || '').toLowerCase();
+                        if (curRole === 'cashier') {
+                            setTimeout(() => {
+                                alert("Today is closed. Sales will open again tomorrow.");
+                                this.handleLogout();
+                            }, 1000);
+                        }
                     } else {
                         this.showAppAlert(res?.error || 'Failed to close day', 'danger');
                     }
@@ -11833,7 +11862,8 @@ class PosApp {
                     this.lastCloseDayError = err.data?.message || err.message;
                     this.showAppAlert(err.data?.message || err.message, 'danger');
                 }
-            }
+            },
+            'close_day'
         );
     }
 
@@ -12197,17 +12227,13 @@ class PosApp {
             try {
                 const res = await PosApi.getQueue('washer', user.id);
                 if (res && res.success) {
-                    const earned = parseFloat(res.summary?.total_earned || 0);
                     const count = parseInt(res.summary?.jobs_count || 0);
-
-                    const earnedEl = document.getElementById('washerEarnedToday');
-                    if (earnedEl) earnedEl.textContent = `$${earned.toFixed(2)}`;
 
                     const subEl = document.getElementById('washerProfileSubtitle');
                     if (subEl) subEl.textContent = `${user.full_name} • ${count} completed jobs today`;
                 }
             } catch (e) {
-                console.warn('Could not load washer commission data', e);
+                console.warn('Could not load washer queue summary', e);
             }
         }
 
@@ -14407,6 +14433,9 @@ class PosApp {
                 this.updateShiftRegisterBlocked(true);
                 this.updateShiftStatusBadge('day_closed');
                 this.showAppAlert('Today is closed. Sales will open again tomorrow.', 'warning', 'Day Closed');
+                setTimeout(() => {
+                    this.handleLogout();
+                }, 1000);
                 return;
             }
 
@@ -14751,9 +14780,84 @@ class PosApp {
         }
     }
 
-    // 2. Manager PIN Window
-    static requestManagerPin(title, subtitle, onVerifiedCallback) {
+    static showEndDayModal() {
+        document.getElementById('modalCashierActions')?.classList.remove('open');
+        const modal = document.getElementById('modalEndDay');
+        if (!modal) return;
+        const curStaff = document.getElementById('endDayCurrentStaff');
+        const curDate = document.getElementById('endDayCurrentDate');
+        if (curStaff) curStaff.textContent = `${this.currentUser?.full_name || 'Staff'} (@${this.currentUser?.username || ''})`;
+        if (curDate) {
+            const d = new Date();
+            curDate.textContent = d.toISOString().substring(0, 10);
+        }
+        const countUsd = document.getElementById('endDayCountUsd');
+        const countKhr = document.getElementById('endDayCountKhr');
+        const pin = document.getElementById('endDayPin');
+        const notes = document.getElementById('endDayNotes');
+
+        if (countUsd) countUsd.value = '';
+        if (countKhr) countKhr.value = '';
+        if (pin) pin.value = '';
+        if (notes) notes.value = '';
+
+        modal.classList.add('open');
+    }
+
+    static async handleEndDaySubmit() {
+        const countUsd = parseFloat(document.getElementById('endDayCountUsd')?.value || 0);
+        const countKhr = parseInt(document.getElementById('endDayCountKhr')?.value || 0);
+        const pin = document.getElementById('endDayPin')?.value.trim() || '';
+        const notes = document.getElementById('endDayNotes')?.value.trim() || '';
+        const username = this.currentUser?.username || '';
+        const btn = document.getElementById('btnConfirmEndDay');
+
+        if (!pin || pin.length < 4) {
+            alert('Please enter your 6-digit security PIN');
+            return;
+        }
+
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Closing Day...`;
+        }
+
+        try {
+            const res = await PosApi.closeDayZReport(username, pin, countUsd, countKhr, notes);
+            if (res && res.success) {
+                document.getElementById('modalEndDay')?.classList.remove('open');
+                this.isDayClosed = true;
+                this.isDayLocked = true;
+                const closerName = res.closed_by_name || res.manager_name || this.currentUser?.full_name || username;
+                this.updateDayLockUI(true, `Sales are locked. Day closed by ${closerName}.`);
+
+                // Print Daily Z-Report Slip directly on thermal printer
+                if (res.slip && window.PosThermalPrinter && typeof PosThermalPrinter.printCloseDaySlip === 'function') {
+                    PosThermalPrinter.printCloseDaySlip(res.slip);
+                } else if (res.slip && typeof this.renderDailyCloseZReport === 'function') {
+                    this.renderDailyCloseZReport(res.slip);
+                    document.getElementById('modalReceipt')?.classList.add('open');
+                }
+
+                const diffMsg = (res.total_difference_usd !== undefined) ? ` Expected: $${parseFloat(res.expected_cash_usd || 0).toFixed(2)}, Counted: $${countUsd.toFixed(2)}, Diff: $${parseFloat(res.total_difference_usd || 0).toFixed(2)}.` : '';
+                this.showAppAlert(`Daily Z-Report closed successfully! Register locked.${diffMsg} Printing report...`, 'success', 'Day Closed');
+            } else {
+                alert(res?.error || res?.message || 'Failed to close day');
+            }
+        } catch (err) {
+            alert(err.data?.message || err.message || 'Failed to close day');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = `<i class="fa-solid fa-lock mr-1"></i> <span id="btnConfirmEndDayText">បិទបញ្ជីថ្ងៃ (Close Day)</span>`;
+            }
+        }
+    }
+
+    // 2. Manager / User PIN Window
+    static requestManagerPin(title, subtitle, onVerifiedCallback, purpose = '') {
         this.managerPinCallback = onVerifiedCallback;
+        this.managerPinPurpose = purpose;
         this.mgrPinInput = '';
 
         const modal = document.getElementById('modalManagerPin');
@@ -14763,11 +14867,11 @@ class PosApp {
         const uInp = document.getElementById('managerPinUsername');
         const errEl = document.getElementById('mgrPinError');
 
-        if (tEl) tEl.textContent = title || 'Manager Authorization';
-        if (sEl) sEl.textContent = subtitle || 'This action requires Manager or Owner PIN verification.';
+        if (tEl) tEl.textContent = title || 'Authorization Required';
+        if (sEl) sEl.textContent = subtitle || 'Enter 6-digit PIN to authorize this action.';
 
         const curRole = (this.currentUser?.role || '').toLowerCase();
-        if (curRole === 'manager' || curRole === 'owner') {
+        if (curRole === 'manager' || curRole === 'owner' || curRole === 'admin' || curRole === 'system_admin' || (purpose === 'close_day' && this.currentUser?.username)) {
             if (uInp) uInp.value = this.currentUser.username;
         } else {
             if (uInp) uInp.value = '';
@@ -14798,14 +14902,14 @@ class PosApp {
 
         if (!username) {
             if (errEl) {
-                errEl.textContent = 'Manager username is required.';
+                errEl.textContent = 'Username is required.';
                 errEl.style.display = 'block';
             }
             return;
         }
         if (!pin || pin.length !== 6) {
             if (errEl) {
-                errEl.textContent = 'Please enter 6-digit manager PIN.';
+                errEl.textContent = 'Please enter 6-digit PIN.';
                 errEl.style.display = 'block';
             }
             return;
@@ -14815,7 +14919,7 @@ class PosApp {
         btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Verifying...`;
 
         try {
-            const res = await PosApi.verifyManagerPin(username, pin);
+            const res = await PosApi.verifyManagerPin(username, pin, this.managerPinPurpose || '');
             if (res && res.success && res.manager) {
                 document.getElementById('modalManagerPin')?.classList.remove('open');
                 const mgr = {
@@ -14827,6 +14931,7 @@ class PosApp {
                 };
                 const cb = this.managerPinCallback;
                 this.managerPinCallback = null;
+                this.managerPinPurpose = '';
                 this.mgrPinInput = '';
                 if (typeof cb === 'function') {
                     await cb(mgr);
@@ -14859,17 +14964,22 @@ class PosApp {
     }
 
     static updateDayLockUI(isLocked, message = '') {
+        const lockedState = isLocked || this.isViewOnly;
         const banner = document.getElementById('posDayLockBanner');
         const bannerText = document.getElementById('posDayLockText');
         const payBtn = document.getElementById('btnOpenCheckout') || document.getElementById('btnOpenPaymentModal');
 
+        const effectiveMsg = this.isViewOnly
+            ? 'View-Only Mode — Today is closed. Sales will open again tomorrow.'
+            : (message || 'Today is closed. Sales will open again tomorrow.');
+
         if (banner) {
-            banner.style.display = isLocked ? 'flex' : 'none';
-            if (bannerText && message) bannerText.textContent = message;
+            banner.style.display = lockedState ? 'flex' : 'none';
+            if (bannerText) bannerText.textContent = effectiveMsg;
         }
 
         if (payBtn) {
-            if (isLocked) {
+            if (lockedState) {
                 payBtn.disabled = true;
                 payBtn.classList.remove('is-active');
                 payBtn.classList.add('is-disabled');
@@ -14878,13 +14988,13 @@ class PosApp {
                 payBtn.innerHTML = `
                     <span class="btn-checkout-content">
                         <i class="fa-solid fa-lock checkout-btn-icon"></i>
-                        <span class="checkout-btn-text">Sales Locked</span>
+                        <span class="checkout-btn-text">${this.isViewOnly ? 'View-Only (Day Closed)' : 'Sales Locked'}</span>
                     </span>
                 `;
                 const helperText = document.getElementById('checkoutHelperText');
                 if (helperText) {
                     helperText.style.display = 'flex';
-                    helperText.innerHTML = `<i class="fa-solid fa-lock"></i> <span>${this.escapeHtml(message || 'Sales are locked for today')}</span>`;
+                    helperText.innerHTML = `<i class="fa-solid fa-lock"></i> <span>${this.escapeHtml(effectiveMsg)}</span>`;
                 }
             } else if (!this.activeShift && this.currentUser?.role === 'cashier') {
                 this.updateShiftRegisterBlocked(true);
@@ -16333,12 +16443,6 @@ class PosApp {
         document.getElementById('btnOpenCashierActions')?.addEventListener('click', () => {
             this.showCashierActionsModal();
         });
-        document.getElementById('userMenuCashierActions')?.addEventListener('click', () => {
-            const dropdown = document.getElementById('userMenuDropdown');
-            if (dropdown) dropdown.style.display = 'none';
-            document.getElementById('userPill')?.classList.remove('active');
-            this.showCashierActionsModal();
-        });
 
         // Close Cashier Actions Modal
         const closeCashierActions = () => {
@@ -17010,20 +17114,11 @@ class PosApp {
         this.showEndShiftModal('solo');
     }
 
-    // 10. End Day (Manager Only)
+    // 10. End Day
     static handleActionEndDay() {
-        const isMgr = this.currentUser && ['manager', 'owner', 'admin'].includes(this.currentUser.role);
-        if (isMgr) {
-            this.switchView('close');
-        } else {
-            this.requestManagerPin(
-                "End Day Authorization",
-                "Enter Manager PIN to access Daily Close & Z-Report",
-                () => {
-                    this.switchView('close');
-                }
-            );
-        }
+        if (!this.checkCashierActionAllowed()) return;
+        document.getElementById('modalCashierActions')?.classList.remove('open');
+        this.showEndDayModal();
     }
 
 }

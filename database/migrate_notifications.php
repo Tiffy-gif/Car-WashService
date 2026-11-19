@@ -74,7 +74,7 @@ function migrateNotifications(bool $force = false): bool {
         }
     };
     $ensureSetting('tv_display_enabled', '1');
-    $ensureSetting('tv_display_code', 'tv-office-88');
+    $ensureSetting('tv_display_code', 'tv_' . bin2hex(random_bytes(16)));
     $ensureSetting('tv_display_language', 'both');
 
     // Record migration in schema_migrations

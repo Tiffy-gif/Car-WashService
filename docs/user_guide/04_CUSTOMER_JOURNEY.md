@@ -96,7 +96,7 @@ flowchart TD
     - If the vehicle's odometer is within 500 km of its scheduled oil change (or past due), a red alert tag appears: `🛢️ Oil Change Due! Recommended: Total Quartz 9000 5W-30`.
 * **Actions**:
   1. Tap the desired service cards to add them to the right-hand cart.
-  2. Offer the suggested upsell verbally. If accepted, tap the upsell badge to add it to the ticket. The system logs this upsell acceptance for staff commission reporting.
+  2. Offer the suggested upsell verbally. If accepted, tap the upsell badge to add it to the ticket. The system logs this upsell acceptance for sales performance reporting.
   3. Verify quantities and service items in the cart table.
 
 ---
@@ -146,12 +146,12 @@ flowchart TD
 5. Tap **[Upload Bank Slip Photo]** (`#bankSlipFileInput`). Cashier snaps a clear photo of the customer's transfer confirmation screen using the tablet/webcam.
 6. Tap **[Confirm Transfer Payment]**.
 
-#### Option C: KHQR Dynamic Scan
+#### Option C: KHQR Counter Stand Scan
 1. Select the **KHQR** tab.
-2. A high-contrast Bakong-compliant KHQR code appears on the screen (or on the customer-facing secondary display).
-3. The customer opens any Cambodian banking app (ABA, ACLEDA, Sathapana, Wing, Canadia, etc.) and scans the code.
-4. Cashier confirms the funds received notification on the shop's notification device.
-5. Tap **[Upload Bank Slip Photo]** and snap a photo of the successful confirmation screen.
+2. The shop's official KHQR stand image appears on the screen (or the customer scans the physical counter stand display).
+3. The customer opens any Cambodian banking app (ABA, ACLEDA, Sathapana, Wing, Canadia, Bakong, etc.) and scans the code.
+4. Cashier confirms the funds received on the shop's banking notification device.
+5. Tap **[Upload Bank Slip Photo]** and snap a photo of the successful confirmation screen or enter the reference number.
 6. Tap **[Complete KHQR Payment]**.
 
 * **What can go wrong and what to do**:
