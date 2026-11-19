@@ -24075,3 +24075,120 @@ body.pos-vk-dragging * {
   color: #f87171 !important;
 }
 
+/* Cashier Actions Modal Grid & Tiles */
+.btn-cashier-actions:hover {
+  background: #ffedd5 !important;
+  border-color: #fdba74 !important;
+  transform: translateY(-1px);
+}
+
+.cashier-actions-modal-content {
+  max-width: 840px !important;
+  border-radius: 20px !important;
+  overflow: hidden;
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+}
+
+.cashier-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 14px;
+  padding: 1.25rem 1.5rem 1.75rem;
+}
+
+@media (max-width: 640px) {
+  .cashier-actions-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    padding: 1rem;
+  }
+}
+
+.action-tile-btn {
+  background: var(--bg-surface, #ffffff);
+  border: 1.5px solid var(--border, #e2e8f0);
+  border-radius: 14px;
+  padding: 18px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  min-height: 125px;
+}
+
+.action-tile-btn:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary, #ea580c);
+  box-shadow: 0 8px 20px -6px rgba(0, 0, 0, 0.12);
+}
+
+.action-tile-btn:active {
+  transform: scale(0.98);
+}
+
+.action-tile-icon-box {
+  width: 48px;
+  height: 48px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  margin-bottom: 10px;
+  transition: transform 0.2s ease;
+}
+
+.action-tile-btn:hover .action-tile-icon-box {
+  transform: scale(1.08);
+}
+
+.action-tile-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--text-main, #0f172a);
+  margin-bottom: 2px;
+  line-height: 1.25;
+}
+
+.action-tile-subtitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+  line-height: 1.2;
+}
+
+.action-tile-badge-mgr {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  background: #fef2f2;
+  color: #dc2626;
+  font-size: 8.5px;
+  font-weight: 800;
+  padding: 2px 5px;
+  border-radius: 999px;
+  border: 1px solid #fecaca;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Color theme variants */
+.tile-emerald .action-tile-icon-box { background: #ecfdf5; color: #059669; }
+.tile-amber .action-tile-icon-box { background: #fffbeb; color: #d97706; }
+.tile-indigo .action-tile-icon-box { background: #eef2ff; color: #4f46e5; }
+.tile-rose .action-tile-icon-box { background: #fff1f2; color: #e11d48; }
+.tile-sky .action-tile-icon-box { background: #f0f9ff; color: #0284c7; }
+.tile-teal .action-tile-icon-box { background: #f0fdf4; color: #0d9488; }
+.tile-purple .action-tile-icon-box { background: #faf5ff; color: #7e22ce; }
+.tile-blue .action-tile-icon-box { background: #eff6ff; color: #2563eb; }
+.tile-orange .action-tile-icon-box { background: #fff7ed; color: #ea580c; }
+.tile-crimson .action-tile-icon-box { background: #fef2f2; color: #b91c1c; }
+.tile-crimson:hover { border-color: #dc2626; }
+
+

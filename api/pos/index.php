@@ -558,6 +558,9 @@ $ACTION_PERMISSIONS = [
     'spot_audit' => ['daily_close.view', 'reports.view'],
     'verify_manager_pin' => ['pos.access'],
     'record_cash_movement' => ['pos.access'],
+    'edit_opening_float' => ['pos.access'],
+    'reprint_receipt' => ['pos.access'],
+    'log_reprint_receipt' => ['pos.access'],
     'get_open_shift_slip' => ['pos.access'],
     'get_end_shift_slip' => ['pos.access'],
     'get_close_day_slip' => ['pos.access', 'daily_close.view', 'reports.view'],
@@ -3506,6 +3509,29 @@ if ($action === 'cancel_order') {
         exit;
     }
 
+    // Day Lock & Active Shift Guards
+    $dayLock = CashierControl::isDayLocked();
+    if (!empty($dayLock['locked'])) {
+        http_response_code(400);
+        echo json_encode([
+            'success' => false,
+            'error' => 'DAY_CLOSED',
+            'message' => 'Action rejected: Business day is closed.'
+        ]);
+        exit;
+    }
+
+    $activeShift = CashierControl::getActiveShift($staffId, $pdo);
+    if (!$activeShift) {
+        http_response_code(400);
+        echo json_encode([
+            'success' => false,
+            'error' => 'NO_ACTIVE_SHIFT',
+            'message' => 'Action rejected: No active shift is open. Please open a shift first.'
+        ]);
+        exit;
+    }
+
     // Cancellation reason must be at least 5 characters
     if (mb_strlen($reason) < 5) {
         http_response_code(400);
@@ -3518,26 +3544,21 @@ if ($action === 'cancel_order') {
     }
 
     // Manager / Owner physical authorization check:
-    // If requester role is NOT manager or owner, manager_username + manager_pin are mandatory.
-    // If manager credentials are provided (by any role), they are verified and self-approval is rejected.
     $mgrUser = trim((string)($inputData['manager_username'] ?? $_POST['manager_username'] ?? ''));
     $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
-    $isManagerOrOwner = in_array($stf['role'], ['manager', 'owner'], true);
-    $hasManagerCredentials = ($mgrUser !== '' || $mgrPin !== '');
 
-    if (!$isManagerOrOwner || $hasManagerCredentials) {
-        if ($mgrUser === '' || $mgrPin === '') {
-            http_response_code(403);
-            echo json_encode([
-                'success' => false,
-                'error' => 'Invalid manager credentials',
-                'message' => 'Invalid manager credentials'
-            ]);
-            exit;
-        }
+    if ($mgrUser === '' || $mgrPin === '') {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'MANAGER_PIN_REQUIRED',
+            'message' => 'Manager username and PIN are required to authorize void.'
+        ]);
+        exit;
+    }
 
-        try {
-            $mgr = CashierControl::verifyManagerPin($mgrUser, $mgrPin, $authDeviceId);
+    try {
+        $mgr = CashierControl::verifyManagerPin($mgrUser, $mgrPin, $authDeviceId);
         } catch (ManagerPinThrottledException $e) {
             http_response_code(429);
             echo json_encode([
@@ -3581,14 +3602,6 @@ if ($action === 'cancel_order') {
         $approverUsername = $mgr['manager_username'];
         $approverName = $mgr['manager_name'];
         $approverRole = $mgr['manager_role'];
-    } else {
-        // Direct cancellation by logged-in Manager or Owner session
-        $cancelledByUserId = $staffId;
-        $cancelApprovedByUserId = $staffId;
-        $approverUsername = $stf['username'];
-        $approverName = $stf['full_name'];
-        $approverRole = $stf['role'];
-    }
 
     $ord = null;
     if ($orderId > 0) {
@@ -4522,8 +4535,8 @@ if ($action === 'process_refund') {
 if ($action === 'close_day_zreport') {
     $countedUsd = max(0.00, (float)($inputData['counted_cash_usd'] ?? $_POST['counted_cash_usd'] ?? 0.00));
     $countedKhr = max(0, (int)($inputData['counted_cash_khr'] ?? $_POST['counted_cash_khr'] ?? 0));
-    $mgrUser = trim($inputData['manager_username'] ?? $_POST['manager_username'] ?? '');
-    $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
+    $mgrUser = trim($inputData['manager_username'] ?? $inputData['username'] ?? $_POST['manager_username'] ?? $_POST['username'] ?? '');
+    $mgrPin = (string)($inputData['manager_pin'] ?? $inputData['pin'] ?? $_POST['manager_pin'] ?? $_POST['pin'] ?? '');
     $notes = trim($inputData['notes'] ?? $_POST['notes'] ?? '');
 
     try {
@@ -4569,10 +4582,12 @@ if ($action === 'get_shift_status') {
     $shift = CashierControl::getActiveShift($cashierId);
     $oldShift = CashierControl::getOldShiftNeedingReview($cashierId);
     $shiftsNeedingReview = CashierControl::getAllShiftsNeedingReview();
+    $calculated = !empty($shift) ? CashierControl::calculateShiftExpectedCash($shift['id']) : null;
     echo json_encode([
         'success' => true,
         'has_active_shift' => !empty($shift),
         'shift' => $shift,
+        'calculated' => $calculated,
         'needs_manager_review' => !empty($oldShift),
         'old_shift' => $oldShift,
         'shifts_needing_review_count' => count($shiftsNeedingReview)
@@ -4622,18 +4637,32 @@ if ($action === 'manager_review_shift') {
 if ($action === 'verify_manager_pin') {
     $mgrUser = trim($inputData['manager_username'] ?? $_POST['manager_username'] ?? '');
     $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
+    $purpose = trim($inputData['purpose'] ?? $_POST['purpose'] ?? '');
 
     try {
-        $manager = CashierControl::verifyManagerPin($mgrUser, $mgrPin, $authDeviceId);
-        echo json_encode([
-            'success' => true,
-            'manager' => [
-                'id' => $manager['manager_id'],
-                'username' => $manager['manager_username'],
-                'full_name' => $manager['manager_name'],
-                'role' => $manager['manager_role']
-            ]
-        ]);
+        if ($purpose === 'close_day') {
+            $user = CashierControl::verifyCloseDayUser($mgrUser, $mgrPin, $authDeviceId);
+            echo json_encode([
+                'success' => true,
+                'manager' => [
+                    'id' => $user['user_id'],
+                    'username' => $user['username'],
+                    'full_name' => $user['user_name'],
+                    'role' => $user['user_role']
+                ]
+            ]);
+        } else {
+            $manager = CashierControl::verifyManagerPin($mgrUser, $mgrPin, $authDeviceId);
+            echo json_encode([
+                'success' => true,
+                'manager' => [
+                    'id' => $manager['manager_id'],
+                    'username' => $manager['manager_username'],
+                    'full_name' => $manager['manager_name'],
+                    'role' => $manager['manager_role']
+                ]
+            ]);
+        }
     } catch (ManagerPinThrottledException $e) {
         http_response_code(429);
         echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
@@ -4685,6 +4714,111 @@ if ($action === 'record_cash_movement') {
         http_response_code(400);
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
     }
+    exit;
+}
+
+// ========================================================
+// 28B-1. ACTION: edit_opening_float
+// ========================================================
+if ($action === 'edit_opening_float') {
+    $newUsd = max(0.0, (float)($inputData['opening_cash_usd'] ?? $_POST['opening_cash_usd'] ?? 0.0));
+    $newKhr = max(0, (int)($inputData['opening_cash_khr'] ?? $_POST['opening_cash_khr'] ?? 0));
+    $reason = trim($inputData['reason'] ?? $_POST['reason'] ?? '');
+    $mgrUser = trim($inputData['manager_username'] ?? $_POST['manager_username'] ?? '');
+    $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
+    $cashierId = (int)($inputData['cashier_id'] ?? $inputData['user_id'] ?? $_POST['cashier_id'] ?? 0);
+
+    if ($cashierId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Cashier staff ID is required.']);
+        exit;
+    }
+
+    try {
+        $res = CashierControl::editOpeningFloat($newUsd, $newKhr, $reason, $mgrUser, $mgrPin, $cashierId, $authDeviceId);
+        echo json_encode($res);
+    } catch (ManagerPinThrottledException $e) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
+    } catch (Exception $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// ========================================================
+// 28B-2. ACTION: reprint_receipt / log_reprint_receipt
+// ========================================================
+if ($action === 'reprint_receipt' || $action === 'log_reprint_receipt') {
+    $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
+    $orderNumber = trim($inputData['order_number'] ?? $_POST['order_number'] ?? '');
+    $cashierId = (int)($inputData['cashier_id'] ?? $inputData['user_id'] ?? $_POST['cashier_id'] ?? 0);
+
+    if ($cashierId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Cashier staff ID is required.']);
+        exit;
+    }
+
+    $dayLock = CashierControl::isDayLocked();
+    if (!empty($dayLock['locked'])) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'DAY_CLOSED', 'message' => 'Action rejected: Business day is closed.']);
+        exit;
+    }
+
+    $activeShift = CashierControl::getActiveShift($cashierId, $pdo);
+    if (!$activeShift) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'NO_ACTIVE_SHIFT', 'message' => 'Action rejected: No active shift is open. Please open a shift first.']);
+        exit;
+    }
+
+    $ord = null;
+    if ($orderId > 0) {
+        $stmt = $pdo->prepare("SELECT * FROM orders WHERE id = ?");
+        $stmt->execute([$orderId]);
+        $ord = $stmt->fetch(PDO::FETCH_ASSOC);
+    } elseif ($orderNumber !== '') {
+        $stmt = $pdo->prepare("SELECT * FROM orders WHERE order_number = ?");
+        $stmt->execute([$orderNumber]);
+        $ord = $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    if (!$ord) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'ORDER_NOT_FOUND', 'message' => 'Order not found']);
+        exit;
+    }
+
+    $cStmt = $pdo->prepare("SELECT full_name, username FROM users WHERE id = ?");
+    $cStmt->execute([$cashierId]);
+    $cashier = $cStmt->fetch(PDO::FETCH_ASSOC);
+    $cashierName = $cashier['full_name'] ?? ('Cashier #' . $cashierId);
+
+    AuditLogger::log(
+        'REPRINT_RECEIPT',
+        "Reprinted receipt for Order #{$ord['order_number']} by Cashier {$cashierName} in Shift #{$activeShift['id']}",
+        'order',
+        (string)$ord['id'],
+        $cashierId,
+        $cashier['username'] ?? '',
+        'cashier'
+    );
+
+    $itemStmt = $pdo->prepare("SELECT * FROM order_items WHERE order_id = ?");
+    $itemStmt->execute([$ord['id']]);
+    $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+    $ord['items'] = $items;
+
+    echo json_encode([
+        'success'  => true,
+        'order'    => $ord,
+        'shift_id' => $activeShift['id'],
+        'cashier'  => $cashierName,
+        'message'  => 'Reprint logged and order retrieved.'
+    ]);
     exit;
 }
 

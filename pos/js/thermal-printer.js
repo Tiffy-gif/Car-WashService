@@ -1627,6 +1627,257 @@ class PosThermalPrinter {
             return { success: false, fallback: true, error: err.message };
         }
     }
+
+    /**
+     * Render Cash Movement Slip (Cash In / Cash Out Voucher)
+     */
+    static async renderCashMovementSlipToCanvas(movementData) {
+        if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+            try { await document.fonts.ready; } catch (e) {}
+        }
+
+        const width = this.DOT_WIDTH; // 576 dots
+        const estHeight = 720;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = estHeight;
+        const ctx = canvas.getContext('2d');
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, estHeight);
+        ctx.fillStyle = '#000000';
+
+        const margin = 30;
+        let y = 30;
+
+        const isCashIn = (movementData.type || '').toLowerCase() === 'cash_in';
+        const shop = movementData.shop || {};
+        const shopKm = shop.shop_name_km || 'សេវាកម្មលាងរថយន្ត និងម៉ូតូ';
+        const shopEn = shop.shop_name_en || 'My Car Wash';
+        const shopPhone = shop.shop_phone || '012 334 556';
+        const shopAddr = shop.shop_address || 'Phnom Penh, Cambodia';
+
+        // Shop header
+        ctx.textAlign = 'center';
+        ctx.font = `bold 22px ${this.KHMER_FONT_STACK}`;
+        ctx.fillText(shopKm, width / 2, y);
+        y += 28;
+        ctx.font = 'bold 18px "Segoe UI", sans-serif';
+        ctx.fillText(shopEn, width / 2, y);
+        y += 22;
+        ctx.font = `14px ${this.KHMER_FONT_STACK}`;
+        ctx.fillText(shopAddr, width / 2, y);
+        y += 20;
+        ctx.fillText(`Tel: ${shopPhone}`, width / 2, y);
+        y += 24;
+
+        this.drawSolidLine(ctx, y, width, margin);
+        y += 24;
+
+        // Title
+        ctx.font = 'bold 22px "Segoe UI", sans-serif';
+        ctx.fillText(isCashIn ? 'CASH IN VOUCHER' : 'CASH OUT / EXPENSE VOUCHER', width / 2, y);
+        y += 24;
+        ctx.font = `bold 18px ${this.KHMER_FONT_STACK}`;
+        ctx.fillText(isCashIn ? 'ប័ណ្ណបង់ប្រាក់ចូលថត' : 'ប័ណ្ណដកប្រាក់ចំណាយ', width / 2, y);
+        y += 24;
+
+        this.drawDashedLine(ctx, y, width, margin);
+        y += 24;
+
+        // Details
+        ctx.font = '16px "Segoe UI", sans-serif';
+        if (movementData.event_uid) {
+            this.drawTwoColumns(ctx, 'Ref #:', movementData.event_uid, margin, width - margin, y);
+            y += 22;
+        }
+        if (movementData.shift_id) {
+            this.drawTwoColumns(ctx, 'Shift ID:', `#${movementData.shift_id}`, margin, width - margin, y);
+            y += 22;
+        }
+        this.drawTwoColumns(ctx, 'Cashier:', movementData.cashier_name || 'Staff', margin, width - margin, y);
+        y += 22;
+        if (movementData.manager_name) {
+            this.drawTwoColumns(ctx, 'Authorized By:', movementData.manager_name, margin, width - margin, y);
+            y += 22;
+        }
+        const timeStr = movementData.created_at ? new Date(movementData.created_at.replace(/-/g, '/')).toLocaleString() : new Date().toLocaleString();
+        this.drawTwoColumns(ctx, 'Date & Time:', timeStr, margin, width - margin, y);
+        y += 24;
+
+        // Reason
+        ctx.textAlign = 'left';
+        ctx.font = `15px "Segoe UI", ${this.KHMER_FONT_STACK}`;
+        ctx.fillText(`Reason: ${movementData.reason || 'General'}`, margin, y);
+        y += 26;
+
+        // Amount Box
+        const boxHeight = 60;
+        ctx.strokeRect(margin, y, width - (margin * 2), boxHeight);
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 24px "Segoe UI", sans-serif';
+        const usdVal = parseFloat(movementData.amount_usd || 0).toFixed(2);
+        const khrVal = parseInt(movementData.amount_khr || 0).toLocaleString();
+        let amtStr = `$${usdVal} USD`;
+        if (parseInt(movementData.amount_khr || 0) > 0) {
+            amtStr += ` / ${khrVal} ៛`;
+        }
+        ctx.fillText(amtStr, width / 2, y + 38);
+        y += boxHeight + 35;
+
+        // Signatures
+        ctx.font = '14px "Segoe UI", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Cashier Signature:', margin, y);
+        ctx.textAlign = 'right';
+        ctx.fillText(isCashIn ? 'Received By:' : 'Manager / Paid To:', width - margin, y);
+        y += 40;
+        ctx.textAlign = 'left';
+        ctx.fillText('___________________', margin, y);
+        ctx.textAlign = 'right';
+        ctx.fillText('___________________', width - margin, y);
+        y += 35;
+
+        // Footer
+        ctx.textAlign = 'center';
+        ctx.font = '12px "Segoe UI", sans-serif';
+        ctx.fillText('POWERED BY GOTPOS', width / 2, y);
+        y += 20;
+
+        return this.cropCanvasHeight(canvas, y + 20);
+    }
+
+    /**
+     * Print Cash Movement Slip Directly
+     */
+    static async printCashMovementSlip(movementData) {
+        const config = PosConfig.get();
+        try {
+            const canvas = await this.renderCashMovementSlipToCanvas(movementData);
+            const isCashOut = (movementData.type || '').toLowerCase() === 'cash_out';
+            const bytes = this.canvasToEscPos(canvas, { cut: true, drawer: true });
+            return await this.sendPayload(bytes);
+        } catch (err) {
+            console.warn('Direct print cash movement slip failed:', err);
+            return { success: false, error: err.message };
+        }
+    }
+
+    /**
+     * Render Void / Cancelled Slip
+     */
+    static async renderVoidSlipToCanvas(voidData) {
+        if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+            try { await document.fonts.ready; } catch (e) {}
+        }
+
+        const width = this.DOT_WIDTH;
+        const estHeight = 650;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = estHeight;
+        const ctx = canvas.getContext('2d');
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, estHeight);
+        ctx.fillStyle = '#000000';
+
+        const margin = 30;
+        let y = 30;
+
+        const shop = voidData.shop || {};
+        const shopKm = shop.shop_name_km || 'សេវាកម្មលាងរថយន្ត និងម៉ូតូ';
+        const shopEn = shop.shop_name_en || 'My Car Wash';
+
+        ctx.textAlign = 'center';
+        ctx.font = `bold 22px ${this.KHMER_FONT_STACK}`;
+        ctx.fillText(shopKm, width / 2, y);
+        y += 28;
+        ctx.font = 'bold 18px "Segoe UI", sans-serif';
+        ctx.fillText(shopEn, width / 2, y);
+        y += 24;
+
+        this.drawSolidLine(ctx, y, width, margin);
+        y += 24;
+
+        // Void Title
+        ctx.font = 'bold 22px "Segoe UI", sans-serif';
+        ctx.fillText('*** VOID / CANCELLED RECEIPT ***', width / 2, y);
+        y += 24;
+        ctx.font = `bold 18px ${this.KHMER_FONT_STACK}`;
+        ctx.fillText('*** ប័ណ្ណលុបចោល ***', width / 2, y);
+        y += 24;
+
+        this.drawDashedLine(ctx, y, width, margin);
+        y += 24;
+
+        ctx.font = '16px "Segoe UI", sans-serif';
+        this.drawTwoColumns(ctx, 'Order #:', voidData.order_number || '', margin, width - margin, y);
+        y += 22;
+        if (voidData.plate_number) {
+            this.drawTwoColumns(ctx, 'Plate #:', voidData.plate_number, margin, width - margin, y);
+            y += 22;
+        }
+        if (voidData.shift_id) {
+            this.drawTwoColumns(ctx, 'Shift ID:', `#${voidData.shift_id}`, margin, width - margin, y);
+            y += 22;
+        }
+        this.drawTwoColumns(ctx, 'Cashier:', voidData.cashier_name || 'Staff', margin, width - margin, y);
+        y += 22;
+        this.drawTwoColumns(ctx, 'Manager Approver:', voidData.manager_name || 'Manager', margin, width - margin, y);
+        y += 22;
+        const timeStr = voidData.cancelled_at ? new Date(voidData.cancelled_at.replace(/-/g, '/')).toLocaleString() : new Date().toLocaleString();
+        this.drawTwoColumns(ctx, 'Voided At:', timeStr, margin, width - margin, y);
+        y += 24;
+
+        ctx.textAlign = 'left';
+        ctx.font = `15px "Segoe UI", ${this.KHMER_FONT_STACK}`;
+        ctx.fillText(`Reason: ${voidData.reason || 'Customer requested cancel'}`, margin, y);
+        y += 26;
+
+        // Boxed Total Voided
+        const boxHeight = 56;
+        ctx.strokeRect(margin, y, width - (margin * 2), boxHeight);
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 22px "Segoe UI", sans-serif';
+        const usdVal = parseFloat(voidData.total_usd || 0).toFixed(2);
+        ctx.fillText(`VOIDED TOTAL: $${usdVal} USD`, width / 2, y + 36);
+        y += boxHeight + 35;
+
+        // Signatures
+        ctx.font = '14px "Segoe UI", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Cashier Signature:', margin, y);
+        ctx.textAlign = 'right';
+        ctx.fillText('Manager Sign-off:', width - margin, y);
+        y += 40;
+        ctx.textAlign = 'left';
+        ctx.fillText('___________________', margin, y);
+        ctx.textAlign = 'right';
+        ctx.fillText('___________________', width - margin, y);
+        y += 35;
+
+        ctx.textAlign = 'center';
+        ctx.font = '12px "Segoe UI", sans-serif';
+        ctx.fillText('POWERED BY GOTPOS', width / 2, y);
+        y += 20;
+
+        return this.cropCanvasHeight(canvas, y + 20);
+    }
+
+    /**
+     * Print Void Slip Directly
+     */
+    static async printVoidSlip(voidData) {
+        try {
+            const canvas = await this.renderVoidSlipToCanvas(voidData);
+            const bytes = this.canvasToEscPos(canvas, { cut: true, drawer: false });
+            return await this.sendPayload(bytes);
+        } catch (err) {
+            console.warn('Direct print void slip failed:', err);
+            return { success: false, error: err.message };
+        }
+    }
 }
 
 // Expose globally

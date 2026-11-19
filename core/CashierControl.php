@@ -195,7 +195,7 @@ class CashierControl {
 
         $pdo = Database::getInstance();
         $stmt = $pdo->prepare("
-            SELECT id, username, full_name, role, password_hash, status, failed_login_attempts, locked_until
+            SELECT id, username, full_name, role, password_hash, local_pin_hash, status, failed_login_attempts, locked_until
             FROM users
             WHERE username = ?
             LIMIT 1
@@ -232,7 +232,8 @@ class CashierControl {
             throw new Exception("Manager account is temporarily locked ({$remMins} minutes remaining).");
         }
 
-        if (!password_verify($managerPin, $mgr['password_hash'])) {
+        $pinValid = password_verify($managerPin, $mgr['password_hash']) || (!empty($mgr['local_pin_hash']) && password_verify($managerPin, $mgr['local_pin_hash']));
+        if (!$pinValid) {
             $attempts = (int)$mgr['failed_login_attempts'] + 1;
             if ($devId !== null && (int)$devId > 0) {
                 self::recordFailedPinAttempt((int)$devId);
@@ -261,6 +262,106 @@ class CashierControl {
             'username'         => $mgr['username'],
             'manager_name'     => $mgr['full_name'],
             'manager_role'     => $mgr['role']
+        ];
+    }
+
+    /**
+     * Verify credentials for Close Day (Z-Report).
+     * Allows Owner, Manager, Admin, or Cashier with daily_close.close permission.
+     */
+    public static function verifyCloseDayUser(string $username, string $pin, ?int $deviceId = null): array {
+        $username = trim($username);
+        $pin = trim($pin);
+
+        $devId = $deviceId ?? ($GLOBALS['authDeviceId'] ?? null);
+        if ($devId !== null && (int)$devId > 0 && self::isDeviceThrottled((int)$devId)) {
+            throw new ManagerPinThrottledException("Too many failed PIN attempts from this device. Please wait 10 minutes.");
+        }
+
+        if ($username === '' || $pin === '') {
+            if ($devId !== null && (int)$devId > 0) {
+                self::recordFailedPinAttempt((int)$devId);
+            }
+            throw new Exception("Invalid credentials");
+        }
+
+        $pdo = Database::getInstance();
+        $stmt = $pdo->prepare("
+            SELECT id, username, full_name, role, password_hash, local_pin_hash, status, failed_login_attempts, locked_until
+            FROM users
+            WHERE username = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$username]);
+        $u = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$u) {
+            AuditLogger::log('CLOSE_DAY_PIN_FAILED', "PIN verification failed for unknown username '{$username}'", 'auth');
+            if ($devId !== null && (int)$devId > 0) {
+                self::recordFailedPinAttempt((int)$devId);
+            }
+            throw new Exception("Invalid credentials");
+        }
+
+        // Role / Permission check: Owner, Admin, Manager, or Cashier with daily_close.close permission
+        $isAllowedRole = in_array($u['role'], ['owner', 'manager', 'admin', 'system_admin', 'cashier'], true);
+        $hasPermission = (class_exists('Auth') && (Auth::userHasPermission((int)$u['id'], 'daily_close.close') || Auth::userHasPermission((int)$u['id'], 'pos.close_day')));
+        if (!$isAllowedRole && !$hasPermission) {
+            AuditLogger::log('CLOSE_DAY_PIN_FAILED', "User '{$username}' has role '{$u['role']}' and cannot close day.", 'auth');
+            if ($devId !== null && (int)$devId > 0) {
+                self::recordFailedPinAttempt((int)$devId);
+            }
+            throw new Exception("User does not have permission to close the day.");
+        }
+
+        if ($u['status'] !== 'active') {
+            if ($devId !== null && (int)$devId > 0) {
+                self::recordFailedPinAttempt((int)$devId);
+            }
+            throw new Exception("Invalid credentials");
+        }
+
+        // Lock check
+        if (!empty($u['locked_until']) && strtotime($u['locked_until']) > time()) {
+            $remMins = (int)ceil((strtotime($u['locked_until']) - time()) / 60);
+            throw new Exception("Account is temporarily locked ({$remMins} minutes remaining).");
+        }
+
+        $pinValid = password_verify($pin, $u['password_hash']) || (!empty($u['local_pin_hash']) && password_verify($pin, $u['local_pin_hash']));
+        if (!$pinValid) {
+            $attempts = (int)$u['failed_login_attempts'] + 1;
+            if ($devId !== null && (int)$devId > 0) {
+                self::recordFailedPinAttempt((int)$devId);
+            }
+            if ($attempts >= 5) {
+                $lockUntil = date('Y-m-d H:i:s', time() + 600);
+                $pdo->prepare("UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?")->execute([$attempts, $lockUntil, $u['id']]);
+                AuditLogger::log('ACCOUNT_LOCKED', "Account '{$username}' locked for 10 minutes due to 5 failed PIN attempts", 'auth', (string)$u['id']);
+                throw new Exception("Account locked for 10 minutes due to 5 wrong PIN attempts.");
+            } else {
+                $pdo->prepare("UPDATE users SET failed_login_attempts = ? WHERE id = ?")->execute([$attempts, $u['id']]);
+                AuditLogger::log('CLOSE_DAY_PIN_FAILED', "PIN authorization failed ({$attempts}/5) for '{$username}'", 'auth', (string)$u['id']);
+                throw new Exception("Invalid credentials");
+            }
+        }
+
+        if ((int)$u['failed_login_attempts'] > 0) {
+            $pdo->prepare("UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?")->execute([$u['id']]);
+        }
+        if ($devId !== null && (int)$devId > 0) {
+            self::clearFailedPinAttempts((int)$devId);
+        }
+
+        $resolvedName = !empty($u['full_name']) ? $u['full_name'] : $u['username'];
+        return [
+            'user_id'          => (int)$u['id'],
+            'username'         => $u['username'],
+            'user_name'        => $resolvedName,
+            'user_role'        => $u['role'],
+            'manager_id'       => (int)$u['id'],
+            'manager_username' => $u['username'],
+            'manager_name'     => $resolvedName,
+            'manager_role'     => $u['role']
         ];
     }
 
@@ -661,13 +762,29 @@ class CashierControl {
         $cashier = $cStmt->fetch(PDO::FETCH_ASSOC);
         $cashierName = $cashier['full_name'] ?? ('Cashier #' . $cashierId);
 
-        $mgrInfo = null;
-        if (!empty($mgrUser) && !empty($mgrPin)) {
-            $mgrInfo = self::verifyManagerPin($mgrUser, $mgrPin);
+        $dayLock = self::isDayLocked();
+        if (!empty($dayLock['locked'])) {
+            throw new Exception("Action rejected: Business day is closed.");
         }
 
         $activeShift = self::getActiveShift($cashierId, $pdo);
-        $shiftId = $activeShift ? (int)$activeShift['id'] : null;
+        if (!$activeShift) {
+            throw new Exception("Action rejected: No active shift is open for this cashier. Please open a shift first.");
+        }
+        $shiftId = (int)$activeShift['id'];
+
+        $rate = (int)($activeShift['exchange_rate'] ?: get_exchange_rate());
+        $totalUsdEquivalent = $amountUsd + ($amountKhr > 0 ? ($amountKhr / max(1, $rate)) : 0.0);
+
+        $mgrInfo = null;
+        if ($type === 'cash_out' && $totalUsdEquivalent > 10.00) {
+            if (empty($mgrUser) || empty($mgrPin)) {
+                throw new Exception("Manager authorization (username & PIN) is required for Cash Out greater than $10.");
+            }
+            $mgrInfo = self::verifyManagerPin($mgrUser, $mgrPin, $deviceId);
+        } elseif (!empty($mgrUser) && !empty($mgrPin)) {
+            $mgrInfo = self::verifyManagerPin($mgrUser, $mgrPin, $deviceId);
+        }
 
         $eventUid = generate_unique_id('DRW');
         $ins = $pdo->prepare("
@@ -719,6 +836,10 @@ class CashierControl {
             'amount_usd' => $amountUsd,
             'amount_khr' => $amountKhr,
             'shift_id' => $shiftId,
+            'cashier_name' => $cashierName,
+            'manager_name' => $mgrInfo['manager_name'] ?? null,
+            'reason' => $reason,
+            'created_at' => date('Y-m-d H:i:s'),
             'message' => "Drawer {$typeLabel} of \${$amountUsd} / " . number_format($amountKhr) . " KHR recorded."
         ];
     }
@@ -1259,9 +1380,20 @@ class CashierControl {
             throw new Exception("Reason for opening cash drawer without sale is required.");
         }
 
-        $mgr = self::verifyManagerPin($managerUsername, $managerPin);
+        $dayLock = self::isDayLocked();
+        if (!empty($dayLock['locked'])) {
+            throw new Exception("Action rejected: Business day is closed.");
+        }
 
         $pdo = Database::getInstance();
+        $activeShift = self::getActiveShift($cashierId, $pdo);
+        if (!$activeShift) {
+            throw new Exception("Action rejected: No active shift is open for this cashier. Please open a shift first.");
+        }
+        $shiftId = (int)$activeShift['id'];
+
+        $mgr = self::verifyManagerPin($managerUsername, $managerPin, $deviceId);
+
         $cStmt = $pdo->prepare("SELECT full_name, username FROM users WHERE id = ?");
         $cStmt->execute([$cashierId]);
         $cashier = $cStmt->fetch(PDO::FETCH_ASSOC);
@@ -1270,13 +1402,14 @@ class CashierControl {
         $eventUid = generate_unique_id('DRW');
         $ins = $pdo->prepare("
             INSERT INTO drawer_events (
-                event_uid, event_type, pos_device_id, cashier_id, cashier_name,
+                event_uid, event_type, pos_device_id, shift_id, cashier_id, cashier_name,
                 manager_id, manager_name, reason, is_active, created_at
-            ) VALUES (?, 'no_sale_open', ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+            ) VALUES (?, 'no_sale_open', ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
         ");
         $ins->execute([
             $eventUid,
             $deviceId,
+            $shiftId,
             $cashierId,
             $cashierName,
             $mgr['manager_id'],
@@ -1284,13 +1417,80 @@ class CashierControl {
             $reason
         ]);
 
-        $logMsg = "Cash drawer opened without sale by Cashier {$cashierName} authorized by Manager {$mgr['manager_name']}. Reason: {$reason}";
+        $logMsg = "Cash drawer opened without sale for Shift #{$shiftId} by Cashier {$cashierName} authorized by Manager {$mgr['manager_name']}. Reason: {$reason}";
         AuditLogger::log('DRAWER_OPEN_NO_SALE', $logMsg, 'drawer', $eventUid, $cashierId, $cashier['username'] ?? '', 'cashier');
 
         return [
-            'success'   => true,
-            'event_uid' => $eventUid,
-            'message'   => 'Cash drawer opening authorized and logged.'
+            'success'      => true,
+            'event_uid'    => $eventUid,
+            'shift_id'     => $shiftId,
+            'cashier_name' => $cashierName,
+            'manager_name' => $mgr['manager_name'],
+            'reason'       => $reason,
+            'created_at'   => date('Y-m-d H:i:s'),
+            'message'      => 'Cash drawer opening authorized and logged.'
+        ];
+    }
+
+    /**
+     * Edit Opening Float for active shift.
+     * Strictly requires Manager PIN authorization and reason.
+     */
+    public static function editOpeningFloat(
+        float $newUsd,
+        int $newKhr,
+        string $reason,
+        string $managerUsername,
+        string $managerPin,
+        int $cashierId,
+        ?int $deviceId = null
+    ): array {
+        $reason = trim($reason);
+        if ($reason === '') {
+            throw new Exception("Reason for editing opening float is required.");
+        }
+        if ($newUsd < 0 || $newKhr < 0) {
+            throw new Exception("Opening float amounts cannot be negative.");
+        }
+
+        $dayLock = self::isDayLocked();
+        if (!empty($dayLock['locked'])) {
+            throw new Exception("Action rejected: Business day is closed.");
+        }
+
+        $pdo = Database::getInstance();
+        $activeShift = self::getActiveShift($cashierId, $pdo);
+        if (!$activeShift) {
+            throw new Exception("Action rejected: No active shift is open for this cashier. Please open a shift first.");
+        }
+        $shiftId = (int)$activeShift['id'];
+
+        $mgr = self::verifyManagerPin($managerUsername, $managerPin, $deviceId);
+
+        $cStmt = $pdo->prepare("SELECT full_name, username FROM users WHERE id = ?");
+        $cStmt->execute([$cashierId]);
+        $cashier = $cStmt->fetch(PDO::FETCH_ASSOC);
+        $cashierName = $cashier['full_name'] ?? (string)$cashierId;
+
+        $oldUsd = (float)$activeShift['opening_cash_usd'];
+        $oldKhr = (int)$activeShift['opening_cash_khr'];
+
+        $upd = $pdo->prepare("UPDATE cashier_shifts SET opening_cash_usd = ?, opening_cash_khr = ? WHERE id = ?");
+        $upd->execute([$newUsd, $newKhr, $shiftId]);
+
+        $logMsg = "Opening float edited for Shift #{$shiftId} by Cashier {$cashierName} authorized by Manager {$mgr['manager_name']}. Old: \${$oldUsd} / {$oldKhr} KHR -> New: \${$newUsd} / {$newKhr} KHR. Reason: {$reason}";
+        AuditLogger::log('EDIT_OPENING_FLOAT', $logMsg, 'shift', (string)$shiftId, $cashierId, $cashier['username'] ?? '', 'cashier');
+
+        return [
+            'success'      => true,
+            'shift_id'     => $shiftId,
+            'old_usd'      => $oldUsd,
+            'old_khr'      => $oldKhr,
+            'new_usd'      => $newUsd,
+            'new_khr'      => $newKhr,
+            'cashier_name' => $cashierName,
+            'manager_name' => $mgr['manager_name'],
+            'message'      => "Opening float updated to \${$newUsd} / " . number_format($newKhr) . " KHR."
         ];
     }
 
@@ -1421,7 +1621,7 @@ class CashierControl {
         ?string $notes = null,
         ?string $closeDate = null
     ): array {
-        $mgr = self::verifyManagerPin($managerUsername, $managerPin);
+        $mgr = self::verifyCloseDayUser($managerUsername, $managerPin);
         $date = $closeDate ?? date('Y-m-d');
         $pdo = Database::getInstance();
         $rate = get_exchange_rate();
@@ -1572,6 +1772,7 @@ class CashierControl {
             $upd = $pdo->prepare("
                 UPDATE pos_daily_closes SET
                     closed_by_user_id = ?, closed_by_name = ?, manager_id = ?, manager_name = ?,
+                    role = ?,
                     closed_at = CURRENT_TIMESTAMP, exchange_rate = ?, opening_cash_usd = ?, opening_cash_khr = ?,
                     total_sales_usd = ?, total_sales_khr = ?, cash_sales_usd = ?, aba_sales_usd = ?, khqr_sales_usd = ?,
                     expenses_usd = ?, discount_total_usd = ?, expected_cash_usd = ?, expected_cash_khr = ?,
@@ -1584,7 +1785,8 @@ class CashierControl {
                 WHERE id = ?
             ");
             $upd->execute([
-                $mgr['manager_id'], $mgr['manager_name'], $mgr['manager_id'], $mgr['manager_name'],
+                $mgr['user_id'], $mgr['user_name'], $mgr['manager_id'], $mgr['manager_name'],
+                $mgr['user_role'],
                 $rate, $sumOpeningUsd, $sumOpeningKhr,
                 (float)$t['total_sales_usd'], (int)$t['total_sales_khr'], (float)$t['cash_usd'], (float)$t['aba_usd'], (float)$t['khqr_usd'],
                 $sumCashOutUsd, (float)$t['discount_usd'], $dayExpectedUsd, $dayExpectedKhr,
@@ -1612,7 +1814,7 @@ class CashierControl {
                     shifts_summary_json, reopen_history_json, created_at
                 ) VALUES (
                     ?, ?, ?, ?, ?,
-                    'manager', CURRENT_TIMESTAMP, ?, ?, ?,
+                    ?, CURRENT_TIMESTAMP, ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
@@ -1624,8 +1826,8 @@ class CashierControl {
                 )
             ");
             $ins->execute([
-                $date, $mgr['manager_id'], $mgr['manager_name'], $mgr['manager_id'], $mgr['manager_name'],
-                $rate, $sumOpeningUsd, $sumOpeningKhr,
+                $date, $mgr['user_id'], $mgr['user_name'], $mgr['manager_id'], $mgr['manager_name'],
+                $mgr['user_role'], $rate, $sumOpeningUsd, $sumOpeningKhr,
                 (float)$t['total_sales_usd'], (int)$t['total_sales_khr'], (float)$t['cash_usd'], (float)$t['aba_usd'], (float)$t['khqr_usd'],
                 $sumCashOutUsd, (float)$t['discount_usd'], $dayExpectedUsd, $dayExpectedKhr,
                 $countedUsd, $countedKhr, $diffUsd, $diffKhr, $totalDiffUsd,
@@ -1638,11 +1840,12 @@ class CashierControl {
             $closeId = (int)$pdo->lastInsertId();
         }
 
-        $logMsg = "Day {$date} closed by Manager {$mgr['manager_name']}. Final Z-Report generated: {$zReportNumber}. Total Sales: $" . number_format((float)$t['total_sales_usd'], 2) . ", Expected Cash: $" . number_format($dayExpectedUsd, 2) . ", Counted: $" . number_format($countedUsd, 2) . ", Diff: $" . number_format($diffUsd, 2);
-        AuditLogger::log('DAY_CLOSED', $logMsg, 'z_report', $zReportNumber, $mgr['manager_id'], $mgr['manager_name'], $mgr['manager_role']);
+        $closerRoleLabel = ucfirst($mgr['user_role']);
+        $logMsg = "Day {$date} closed by {$closerRoleLabel} {$mgr['user_name']}. Final Z-Report generated: {$zReportNumber}. Total Sales: $" . number_format((float)$t['total_sales_usd'], 2) . ", Expected Cash: $" . number_format($dayExpectedUsd, 2) . ", Counted: $" . number_format($countedUsd, 2) . ", Diff: $" . number_format($diffUsd, 2);
+        AuditLogger::log('DAY_CLOSED', $logMsg, 'z_report', $zReportNumber, $mgr['user_id'], $mgr['user_name'], $mgr['user_role']);
 
         if ($shortageOwedUsd > 0) {
-            AuditLogger::log('DAY_SHORTAGE', "Day {$date} final close recorded cash shortage of $" . number_format($shortageOwedUsd, 2), 'z_report', $zReportNumber, $mgr['manager_id'], $mgr['manager_name'], $mgr['manager_role']);
+            AuditLogger::log('DAY_SHORTAGE', "Day {$date} final close recorded cash shortage of $" . number_format($shortageOwedUsd, 2) . " by {$mgr['user_name']}", 'z_report', $zReportNumber, $mgr['user_id'], $mgr['user_name'], $mgr['user_role']);
         }
 
         $slip = self::getCloseDaySlipData((string)$closeId);
@@ -1652,7 +1855,10 @@ class CashierControl {
             'close_id'             => $closeId,
             'close_date'           => $date,
             'z_report_number'      => $zReportNumber,
-            'manager_name'         => $mgr['manager_name'],
+            'closed_by_name'       => $mgr['user_name'],
+            'closed_by_user_id'    => $mgr['user_id'],
+            'role'                 => $mgr['user_role'],
+            'manager_name'         => $mgr['user_name'],
             'total_sales_usd'      => (float)$t['total_sales_usd'],
             'cash_sales_usd'       => (float)$t['cash_usd'],
             'aba_sales_usd'        => (float)$t['aba_usd'],

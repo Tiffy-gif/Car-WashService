@@ -518,10 +518,11 @@ class PosApi {
     /**
      * Cashier Control: Verify Manager PIN
      */
-    static async verifyManagerPin(managerUsername, managerPin) {
+    static async verifyManagerPin(managerUsername, managerPin, purpose = '') {
         return await this.request('verify_manager_pin', {
             manager_username: managerUsername,
-            manager_pin: managerPin
+            manager_pin: managerPin,
+            purpose: purpose
         });
     }
 
@@ -537,6 +538,43 @@ class PosApi {
             cashier_id: data.cashierId,
             manager_username: data.managerUsername || '',
             manager_pin: data.managerPin || ''
+        });
+    }
+
+    /**
+     * Cashier Control: Open Drawer Without Sale
+     */
+    static async openDrawerNoSale(data) {
+        return await this.request('open_drawer_no_sale', {
+            reason: data.reason || '',
+            manager_username: data.managerUsername || '',
+            manager_pin: data.managerPin || '',
+            cashier_id: data.cashierId
+        });
+    }
+
+    /**
+     * Cashier Control: Edit Opening Float
+     */
+    static async editOpeningFloat(data) {
+        return await this.request('edit_opening_float', {
+            opening_cash_usd: data.openingCashUsd || 0,
+            opening_cash_khr: data.openingCashKhr || 0,
+            reason: data.reason || '',
+            manager_username: data.managerUsername || '',
+            manager_pin: data.managerPin || '',
+            cashier_id: data.cashierId
+        });
+    }
+
+    /**
+     * Cashier Control: Log & Retrieve Receipt for Reprint
+     */
+    static async reprintReceipt(orderId, orderNumber = '', cashierId = null) {
+        return await this.request('reprint_receipt', {
+            order_id: orderId,
+            order_number: orderNumber,
+            cashier_id: cashierId
         });
     }
 

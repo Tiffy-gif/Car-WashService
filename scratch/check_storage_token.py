@@ -1,0 +1,5 @@
+with open('pos/js/storage.js', 'r', encoding='utf-8') as f:
+    text = f.read()
+
+pos = text.find('setSessionToken')
+print(text[pos-50:pos+300])
