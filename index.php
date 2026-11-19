@@ -29,9 +29,11 @@ if ($action === 'logout') {
 // 2. Handle Login POST (6-Digit PIN)
 if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = trim($_POST['username'] ?? '');
-    $pin = trim($_POST['pin'] ?? $_POST['password'] ?? '');
+    $rawPin = trim((string)($_POST['pin'] ?? ''));
+    $rawPass = trim((string)($_POST['password'] ?? ''));
+    $credential = ($rawPin !== '') ? $rawPin : $rawPass;
 
-    if (Auth::login($username, $pin)) {
+    if (Auth::login($username, $credential)) {
         if (Auth::mustChangePin()) {
             header('Location: ' . APP_URL . '/index.php?view=change_pin');
             exit;

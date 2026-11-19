@@ -43,8 +43,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action']) 
 
 // Handle New Order Submission (Legacy route blocked - Rule 2.2)
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action']) && $_POST['action'] === 'create_order') {
-    $message = 'Pay Later and unpaid order creation is permanently decommissioned. All service orders must be paid upfront and issued an electronic receipt via the POS Counter Terminal (pos/index.html).';
-    $messageType = 'danger';
+    if (!$currentShift && Auth::getRole() === 'cashier') {
+        $message = 'Cannot create order: No active shift open for today. You must start your shift with starting change fund first.';
+        $messageType = 'danger';
+    } else {
+        $message = 'Pay Later and unpaid order creation is permanently decommissioned. All service orders must be paid upfront and issued an electronic receipt via the POS Counter Terminal (pos/index.html).';
+        $messageType = 'danger';
+    }
 } elseif (false && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action']) && $_POST['action'] === 'legacy_create_order' && !isset($csrfError)) {
     if (!empty($dayLock['locked'])) {
         $message = 'Cannot create order: ' . $dayLock['message'];
@@ -1012,6 +1017,10 @@ include dirname(__DIR__) . '/layouts/header.php';
                 <?php if (!empty($dayLock['locked'])): ?>
                     <button type="button" class="btn btn-secondary btn-lg" style="width: 100%; font-size: 15px; opacity: 0.7; cursor: not-allowed; background: #fee2e2; color: #991b1b; border-color: #fca5a5;" disabled>
                         <i class="fa-solid fa-lock mr-1"></i> Sales Locked (Manager Action Required)
+                    </button>
+                <?php elseif (!$currentShift && Auth::getRole() === 'cashier'): ?>
+                    <button type="button" class="btn btn-secondary btn-lg" style="width: 100%; font-size: 15px; background: #fffbeb; color: #92400e; border-color: #fde68a;" onclick="location.href='index.php?view=shift'">
+                        <i class="fa-solid fa-play mr-1"></i> Shift Required - Click to Open Shift
                     </button>
                 <?php else: ?>
                     <button type="submit" class="btn btn-primary btn-lg" style="width: 100%; font-size: 16px;" id="btnCreateOrder">

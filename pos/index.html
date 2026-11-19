@@ -15,6 +15,7 @@
     <!-- Offline FontAwesome & Google Fonts -->
     <link rel="stylesheet" href="css/font-awesome.min.css">
     <link rel="stylesheet" href="css/app.css?v=20261117_washer_ui">
+    <link rel="stylesheet" href="../public/css/receipt-unified.css">
     <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
 </head>
 
@@ -135,6 +136,12 @@
             <!-- Hidden compatibility button for btnLangToggle -->
             <button class="btn btn-outline btn-sm" id="btnLangToggle" style="display: none;"
                 title="Change Language">EN</button>
+
+            <!-- POS Shift Status Badge -->
+            <button type="button" class="pos-shift-badge-btn" id="posShiftStatusBadge" style="display: none; align-items: center; gap: 7px; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; border: 1px solid #fecaca; background: #fef2f2; color: #dc2626; cursor: pointer; transition: all 0.2s ease;">
+                <i class="fa-solid fa-cash-register" id="posShiftStatusIcon"></i>
+                <span id="posShiftStatusText">No Active Shift - Click to Open</span>
+            </button>
 
             <!-- User Pill with Dropdown Menu (Option A) -->
             <div class="user-menu-container" id="userMenuContainer" style="position: relative; display: inline-block;">
@@ -3684,48 +3691,117 @@
                     </div>
                 </div>
 
+                <!-- Shift Close Mode Selector (Solo vs Handover) -->
+                <div style="margin-bottom: 1rem; padding: 4px; background: var(--bg-hover); border-radius: var(--radius-md); display: flex; gap: 4px;">
+                    <button type="button" id="endShiftModeSoloBtn" class="btn btn-sm active" style="flex: 1; font-weight: 700; border-radius: var(--radius-sm); background: var(--primary); color: #fff;">
+                        <i class="fa-solid fa-user mr-1"></i> Solo End Shift
+                    </button>
+                    <button type="button" id="endShiftModeHandoverBtn" class="btn btn-sm" style="flex: 1; font-weight: 600; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted);">
+                        <i class="fa-solid fa-handshake mr-1"></i> Handover Next Cashier
+                    </button>
+                </div>
+
                 <!-- Handover Sign-off -->
                 <div style="border-top: 1px solid var(--border); padding-top: 1rem; margin-bottom: 1rem;">
                     <div style="font-weight: 800; font-size: 0.88rem; color: var(--text-main); margin-bottom: 0.75rem;"
-                        data-i18n="handoverSignoff">
-                        <i class="fa-solid fa-key mr-1"></i> ការចុះហត្ថលេខាផ្ទេរវេន (Handover Sign-off)
+                        id="endShiftSignoffTitle">
+                        <i class="fa-solid fa-key mr-1"></i> Cashier Sign-off (PIN)
                     </div>
                     <div style="margin-bottom: 0.75rem;">
                         <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);"
-                            data-i18n="outgoingCashierPin">PIN របស់បេឡាករបញ្ចប់វេន (Outgoing PIN) *</label>
+                            id="endShiftOutPinLabel">Cashier Security PIN (Outgoing PIN) *</label>
                         <input type="password" id="endShiftOutPin" maxlength="6" class="form-control"
                             placeholder="6-digit PIN"
                             style="letter-spacing: 4px; font-weight: 700; text-align: center;">
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-                        <div>
-                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);"
-                                data-i18n="incomingUsername">ឈ្មោះបេឡាករបន្ត (Next User) *</label>
-                            <input type="text" id="endShiftInUser" class="form-control" placeholder="username">
-                        </div>
-                        <div>
-                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);"
-                                data-i18n="incomingPin">PIN បេឡាករបន្ត (Next PIN) *</label>
-                            <input type="password" id="endShiftInPin" maxlength="6" class="form-control"
-                                placeholder="6-digit PIN"
-                                style="letter-spacing: 4px; font-weight: 700; text-align: center;">
+                    <div id="endShiftIncomingWrap" style="display: none;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                            <div>
+                                <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);"
+                                    data-i18n="incomingUsername">ឈ្មោះបេឡាករបន្ត (Next User) *</label>
+                                <input type="text" id="endShiftInUser" class="form-control" placeholder="username">
+                            </div>
+                            <div>
+                                <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);"
+                                    data-i18n="incomingPin">PIN បេឡាករបន្ត (Next PIN) *</label>
+                                <input type="password" id="endShiftInPin" maxlength="6" class="form-control"
+                                    placeholder="6-digit PIN"
+                                    style="letter-spacing: 4px; font-weight: 700; text-align: center;">
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <div class="form-group">
                     <label style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.3rem; display: block;"
-                        data-i18n="shiftNotes">កំណត់ចំណាំ (Handover Notes):</label>
+                        data-i18n="shiftNotes">កំណត់ចំណាំ (Shift Notes):</label>
                     <input type="text" id="endShiftNotes" class="form-control"
-                        placeholder="Handover notes (optional)...">
+                        placeholder="Shift closing notes (optional)...">
                 </div>
             </div>
             <div class="modal-footer" style="padding: 1rem 1.25rem; gap: 0.75rem;">
                 <button type="button" class="btn btn-outline" id="btnCancelEndShift" style="flex: 1;"
                     data-i18n="cancel">បោះបង់</button>
                 <button type="button" class="btn btn-danger" id="btnConfirmEndShift"
-                    style="flex: 1.5; font-weight: 800;" data-i18n="completeHandover">
-                    <i class="fa-solid fa-arrow-right-from-bracket mr-1"></i> បញ្ចប់វេន និងផ្ទេរវេន
+                    style="flex: 1.5; font-weight: 800;">
+                    <i class="fa-solid fa-lock mr-1"></i> <span id="btnConfirmEndShiftText">End Shift (Solo)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Overnight Shift Left Open (Needs Manager Review) -->
+    <div class="modal-backdrop" id="modalOldShiftAlert" style="z-index: 9995;">
+        <div class="modal-content" style="max-width: 480px; text-align: left;">
+            <div class="modal-header" style="background: #fef2f2; border-bottom: 1px solid #fecaca; display: flex; align-items: center; justify-content: space-between;">
+                <h3 style="display: flex; align-items: center; gap: 0.5rem; color: #b91c1c; margin: 0; font-size: 1.1rem;">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <span>Overnight Shift Left Open</span>
+                </h3>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem;">
+                <div style="background: #fff1f2; border: 1px solid #fecdd3; border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 1rem; color: #9f1239; font-size: 13.5px; line-height: 1.5;">
+                    <div style="font-weight: 800; margin-bottom: 4px;"><i class="fa-solid fa-shield-halved mr-1"></i> Manager Review Required</div>
+                    <div>This shift was started on a previous day and was not closed. A manager must count the cash in drawer and close it with a written review reason before normal sales can resume.</div>
+                </div>
+                <div id="oldShiftDetailsBox" style="background: var(--bg-hover); border-radius: var(--radius-md); padding: 12px; font-size: 13px; margin-bottom: 1rem;">
+                    <!-- Filled dynamically -->
+                </div>
+                <div id="oldShiftManagerForm" style="display: none; border-top: 1px dashed var(--border); padding-top: 1rem;">
+                    <div style="font-weight: 800; margin-bottom: 0.5rem; color: var(--text-main); font-size: 13.5px;">Manager Count &amp; Sign-off:</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+                        <div>
+                            <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted);">Counted USD ($) *</label>
+                            <input type="number" id="reviewCountUsd" class="form-control" placeholder="0.00" step="0.5" style="text-align: center; font-weight: 700;">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted);">Counted KHR (៛) *</label>
+                            <input type="number" id="reviewCountKhr" class="form-control" placeholder="0" step="100" style="text-align: center; font-weight: 700;">
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+                        <div>
+                            <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted);">Manager Username *</label>
+                            <input type="text" id="reviewMgrUsername" class="form-control" placeholder="owner / manager">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted);">Manager PIN *</label>
+                            <input type="password" id="reviewMgrPin" maxlength="6" class="form-control" placeholder="6-digit PIN" style="letter-spacing: 3px; text-align: center;">
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.25rem; display: block;">Written Reason for Late Close * (min 3 chars)</label>
+                        <input type="text" id="reviewReason" class="form-control" placeholder="e.g. Forgot to close shift after night shift">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 1rem 1.25rem; display: flex; gap: 0.75rem;">
+                <button type="button" class="btn btn-outline" id="btnCancelOldShiftAlert" style="flex: 1;">Close</button>
+                <button type="button" class="btn btn-primary" id="btnShowManagerReviewForm" style="flex: 1.5; font-weight: 700;">
+                    <i class="fa-solid fa-user-shield mr-1"></i> Manager Review &amp; Close
+                </button>
+                <button type="button" class="btn btn-danger" id="btnSubmitManagerReview" style="flex: 1.5; font-weight: 800; display: none;">
+                    <i class="fa-solid fa-circle-check mr-1"></i> Close Overnight Shift
                 </button>
             </div>
         </div>

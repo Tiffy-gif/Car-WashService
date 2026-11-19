@@ -1,0 +1,127 @@
+<!-- ======================================================== -->
+<!-- GROUP 2: RECEIPT SETTINGS -->
+<!-- ======================================================== -->
+<div id="tab_receipt" class="tab-pane" style="display: <?= ($activeTab === 'receipt') ? 'block' : 'none' ?>;">
+    <div style="display: grid; grid-template-columns: 1fr 310px; gap: 24px; align-items: start;">
+        <!-- Left: Receipt Configuration Form Card -->
+        <div class="settings-content-card">
+            <div style="border-bottom: 1px solid var(--border); padding-bottom: 14px; margin-bottom: 24px;">
+                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-main, #0f172a); margin: 0 0 4px 0;">
+                    <i class="fa-solid fa-receipt mr-2" style="color: var(--primary);"></i>Receipt &amp; 80mm Thermal Print
+                </h2>
+                <p style="font-size: 13px; color: var(--text-muted, #64748b); margin: 0;">
+                    Control logo display, bilingual output, and custom thank-you footer on customer receipts.
+                </p>
+            </div>
+
+            <form action="<?= APP_URL ?>/index.php?view=settings" method="POST">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="save_receipt">
+                <input type="hidden" name="tab" value="receipt">
+
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: var(--text-main, #1e293b); margin-bottom: 6px;">
+                        Thank-You Footer Message
+                    </label>
+                    <textarea name="receipt_footer" class="form-input" rows="3" style="width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; font-size: 14px; font-family: 'Kantumruy Pro', sans-serif; resize: vertical;"><?= htmlspecialchars($settings['receipt_footer'] ?? 'Thank you for choosing AquaGleam! / សូមអរគុណ!') ?></textarea>
+                    <div style="font-size: 12px; color: #94a3b8; margin-top: 5px;">Prints at the very bottom of every 80mm thermal receipt.</div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                    <div>
+                        <label style="display: block; font-size: 13px; font-weight: 600; color: var(--text-main, #1e293b); margin-bottom: 6px;">
+                            Show Shop Logo on Receipt
+                        </label>
+                        <select name="receipt_show_logo" class="form-select" style="width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; font-size: 14px;">
+                            <option value="1" <?= (($settings['receipt_show_logo'] ?? '1') === '1') ? 'selected' : '' ?>>Show Logo at Top</option>
+                            <option value="0" <?= (($settings['receipt_show_logo'] ?? '1') === '0') ? 'selected' : '' ?>>Hide Logo (Text Only)</option>
+                        </select>
+                        <div style="font-size: 12px; color: #94a3b8; margin-top: 5px;">Hiding the logo saves paper on compact 80mm printers.</div>
+                    </div>
+
+                    <div>
+                        <label style="display: block; font-size: 13px; font-weight: 600; color: var(--text-main, #1e293b); margin-bottom: 6px;">
+                            Receipt Language Mode
+                        </label>
+                        <select name="receipt_language" class="form-select" style="width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; font-size: 14px;">
+                            <option value="both" <?= (($settings['receipt_language'] ?? 'both') === 'both') ? 'selected' : '' ?>>Bilingual (Both Khmer &amp; English)</option>
+                            <option value="km" <?= (($settings['receipt_language'] ?? '') === 'km') ? 'selected' : '' ?>>Khmer Only (ភាសាខ្មែរ)</option>
+                            <option value="en" <?= (($settings['receipt_language'] ?? '') === 'en') ? 'selected' : '' ?>>English Only</option>
+                        </select>
+                        <div style="font-size: 12px; color: #94a3b8; margin-top: 5px;">Controls headings and labels on printed customer receipts.</div>
+                    </div>
+                </div>
+
+                <div style="background: var(--bg-hover, #f8fafc); border: 1px dashed var(--border, #cbd5e1); border-radius: 10px; padding: 16px 18px; margin: 24px 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                    <div>
+                        <div style="font-weight: 700; font-size: 14px; color: var(--text-main);">
+                            <i class="fa-solid fa-print mr-1" style="color: #0284c7;"></i> Test Print Receipt on 80mm Paper
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-muted, #64748b); margin-top: 2px;">
+                            Preview sample order receipt with your current logo, language, and footer before handing to customers.
+                        </div>
+                    </div>
+                    <a href="<?= APP_URL ?>/index.php?view=receipt&test=1" target="_blank" class="btn btn-secondary" style="background: var(--bg-surface, #fff); border: 1px solid #cbd5e1; color: var(--text-main, #334155); font-weight: 500; font-size: 13px; padding: 8px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; text-decoration: none;">
+                        <i class="fa-solid fa-arrow-up-right-from-square text-muted"></i> Open Test Receipt (80mm)
+                    </a>
+                </div>
+
+                <div style="margin-top: 28px; display: flex; justify-content: flex-end; gap: 10px;">
+                    <button type="submit" class="btn btn-primary" style="background: #0284c7; border: 1px solid #0284c7; color: #ffffff; padding: 9px 20px; border-radius: 8px; font-weight: 600; font-size: 13.5px; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 1px 2px rgba(2,132,199,0.2);">
+                        <i class="fa-solid fa-floppy-disk"></i> Save Receipt Settings
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Right Edge: Live 80mm Receipt Preview Ticket -->
+        <div style="position: sticky; top: 20px;">
+            <div class="settings-receipt-preview-card" id="settingsReceiptPreview" style="margin-top: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+                    <div style="font-weight: 700; font-size: 14px; color: var(--text-main, #0f172a);">Receipt preview</div>
+                    <span class="badge" style="background: #e0f2fe; color: #0284c7; font-size: 10px; padding: 2px 7px; border-radius: 999px; font-weight: 600;">80mm Paper</span>
+                </div>
+                <div style="font-size: 12px; color: var(--text-muted, #64748b); margin-bottom: 14px;">How the receipt looks on 80mm paper</div>
+
+                <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 22px 16px 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); text-align: center;">
+                    <div id="receiptPreviewLogoWrap" style="margin: 0 auto 12px; width: 44px; height: 44px; border-radius: 10px; background: #e0f2fe; display: <?= (($settings['receipt_show_logo'] ?? '1') === '0') ? 'none' : 'flex' ?>; align-items: center; justify-content: center; overflow: hidden;">
+                        <?php if (!empty($settings['shop_logo'])): ?>
+                            <img id="receiptPreviewLogoImg" src="<?= APP_URL ?>/<?= htmlspecialchars($settings['shop_logo']) ?>" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+                            <i id="receiptPreviewLogoIcon" class="fa-solid fa-droplet" style="display: none; color: #0284c7; font-size: 20px;"></i>
+                        <?php else: ?>
+                            <i id="receiptPreviewLogoIcon" class="fa-solid fa-droplet" style="color: #0284c7; font-size: 20px;"></i>
+                            <img id="receiptPreviewLogoImg" src="" style="display: none; max-width: 100%; max-height: 100%; object-fit: contain;">
+                        <?php endif; ?>
+                    </div>
+
+                    <div id="receiptPreviewNameKm" style="font-family: 'Kantumruy Pro', sans-serif; font-size: 13.5px; font-weight: 700; color: #0f172a; line-height: 1.35; margin-bottom: 4px;">
+                        <?= htmlspecialchars($settings['shop_name_km'] ?? 'សេវាកម្មលាងរថយន្ត') ?>
+                    </div>
+                    <div id="receiptPreviewNameEn" style="font-size: 11px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px;">
+                        <?= htmlspecialchars($settings['shop_name_en'] ?? 'MY CAR WASH') ?>
+                    </div>
+                    <div id="receiptPreviewAddress" style="font-size: 11px; color: #64748b; line-height: 1.35; margin-bottom: 4px;">
+                        <?= htmlspecialchars(!empty($settings['shop_address']) ? $settings['shop_address'] : 'St. 271, Sangkat Boeung Tumpun, Khan Mean Chey, Phnom Penh') ?>
+                    </div>
+                    <div id="receiptPreviewPhone" style="font-size: 11px; color: #64748b;">
+                        Tel: <?= htmlspecialchars(!empty($settings['shop_phone']) ? $settings['shop_phone'] : '012 334 556 / 098 776 543') ?>
+                    </div>
+
+                    <div style="border-top: 1px dashed #cbd5e1; margin: 16px 0 12px;"></div>
+
+                    <!-- Skeleton preview ticket items -->
+                    <div style="height: 6px; background: #e2e8f0; border-radius: 3px; width: 85%; margin: 6px auto;"></div>
+                    <div style="height: 6px; background: #e2e8f0; border-radius: 3px; width: 60%; margin: 6px auto;"></div>
+                    <div style="height: 6px; background: #e2e8f0; border-radius: 3px; width: 75%; margin: 6px auto;"></div>
+
+                    <div style="border-top: 1px dashed #e2e8f0; margin: 16px 0 10px;"></div>
+
+                    <div id="receiptPreviewFooter" style="font-family: 'Kantumruy Pro', sans-serif; font-size: 11px; color: #64748b; line-height: 1.35;">
+                        <?= htmlspecialchars($settings['receipt_footer'] ?? 'Thank you for choosing AquaGleam! / សូមអរគុណ!') ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+

@@ -142,6 +142,73 @@ function get_exchange_rate(): int {
     return $rate > 0 ? $rate : 4100;
 }
 
+/**
+ * Get unified customer receipt configuration with defaults matching master thermal printout
+ */
+function get_receipt_config(): array {
+    return [
+        // Show / Hide switches
+        'show_logo'          => (get_setting('receipt_show_logo', '1') !== '0'),
+        'show_shop_name'     => (get_setting('receipt_show_shop_name', '1') !== '0'),
+        'show_address'       => (get_setting('receipt_show_address', '1') !== '0'),
+        'show_phone'         => (get_setting('receipt_show_phone', '1') !== '0'),
+        'show_invoice_no'    => (get_setting('receipt_show_invoice_no', '1') !== '0'),
+        'show_date'          => (get_setting('receipt_show_date', '1') !== '0'),
+        'show_cashier'       => (get_setting('receipt_show_cashier', '1') !== '0'),
+        'show_customer'      => (get_setting('receipt_show_customer', '1') !== '0'),
+        'show_plate'         => (get_setting('receipt_show_plate', '1') !== '0'),
+        'show_vehicle_type'  => (get_setting('receipt_show_vehicle_type', '0') === '1'),
+        'show_washer'        => (get_setting('receipt_show_washer', '0') === '1'),
+        'show_item_count'    => (get_setting('receipt_show_item_count', '0') === '1'),
+        'show_discount'      => (get_setting('receipt_show_discount', '1') !== '0'),
+        'show_tax'           => (get_setting('receipt_show_tax', '0') === '1'),
+        'show_exchange_rate' => (get_setting('receipt_show_exchange_rate', '0') === '1'),
+        'show_payment'       => (get_setting('receipt_show_payment', '1') !== '0'),
+        'show_oil_reminder'  => (get_setting('receipt_show_oil_reminder', '1') !== '0'),
+        'show_notes'         => (get_setting('receipt_show_notes', '1') !== '0'),
+        'show_footer'        => (get_setting('receipt_show_footer', '1') !== '0'),
+
+        // Custom Labels & Messages
+        'welcome_line'       => (string)get_setting('receipt_welcome_line', ''),
+        'footer_msg'         => (string)get_setting('receipt_footer', 'Thank you for your visit!'),
+        'bottom_line'        => (string)get_setting('receipt_bottom_line', 'Powered by Counter POS'),
+        'label_invoice'      => (string)get_setting('receipt_label_invoice', ''),
+        'label_date'         => (string)get_setting('receipt_label_date', ''),
+        'label_cashier'      => (string)get_setting('receipt_label_cashier', ''),
+        'label_customer'     => (string)get_setting('receipt_label_customer', ''),
+        'label_plate'        => (string)get_setting('receipt_label_plate', ''),
+        'label_vehicle_type' => (string)get_setting('receipt_label_vehicle_type', ''),
+        'label_washer'       => (string)get_setting('receipt_label_washer', ''),
+        'label_item'         => (string)get_setting('receipt_label_item', ''),
+        'label_qty'          => (string)get_setting('receipt_label_qty', ''),
+        'label_price'        => (string)get_setting('receipt_label_price', ''),
+        'label_subtotal'     => (string)get_setting('receipt_label_subtotal', ''),
+        'label_discount'     => (string)get_setting('receipt_label_discount', ''),
+        'label_tax'          => (string)get_setting('receipt_label_tax', ''),
+        'label_total_usd'    => (string)get_setting('receipt_label_total_usd', ''),
+        'label_total_khr'    => (string)get_setting('receipt_label_total_khr', ''),
+        'label_rate'         => (string)get_setting('receipt_label_rate', ''),
+        'label_payment'      => (string)get_setting('receipt_label_payment', ''),
+        'label_tendered'     => (string)get_setting('receipt_label_tendered', ''),
+        'label_change'       => (string)get_setting('receipt_label_change', ''),
+
+        // Extra lines
+        'header_extra'       => (string)get_setting('receipt_header_extra', ''),
+        'footer_extra'       => (string)get_setting('receipt_footer_extra', ''),
+
+        // Style choices
+        'font_size'          => (string)get_setting('receipt_font_size', 'normal'),
+        'bold_mode'          => (get_setting('receipt_bold_mode', '1') !== '0'),
+        'header_align'       => (string)get_setting('receipt_header_align', 'center'),
+        'line_spacing'       => (string)get_setting('receipt_line_spacing', 'normal'),
+        'logo_size'          => (string)get_setting('receipt_logo_size', 'medium'),
+
+        // Paper & Language
+        'paper_size'         => (string)get_setting('receipt_paper_size', '80mm'),
+        'language'           => (string)get_setting('receipt_language', 'en'),
+    ];
+}
+
 function update_setting(PDO $pdo, string $key, ?string $newValue, ?int $userId, string $userName): bool {
     $curStmt = $pdo->prepare("SELECT setting_value FROM settings WHERE setting_key = ?");
     $curStmt->execute([$key]);

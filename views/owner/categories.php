@@ -223,6 +223,9 @@ include dirname(__DIR__) . '/layouts/header.php';
 <?php endif; ?>
 
 <!-- Tabs Header & Actions Bar -->
+<?php
+$addBtnLabel = ($activeTab === 'service') ? 'Add Service Category' : (($activeTab === 'product') ? 'Add Product Category' : 'Add Category');
+?>
 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 24px; flex-wrap: wrap; gap: 12px;">
     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
         <a href="?view=categories&tab=service" class="btn btn-sm <?= ($activeTab === 'service') ? 'btn-primary' : 'btn-secondary' ?>">
@@ -236,7 +239,7 @@ include dirname(__DIR__) . '/layouts/header.php';
         </a>
     </div>
     <button type="button" class="btn btn-primary" onclick="openNewCategoryModal('<?= $activeTab ?>')">
-        <i class="fa-solid fa-plus mr-1"></i> <?= htmlspecialchars(__('add_category')) ?>
+        <i class="fa-solid fa-plus mr-1"></i> <?= htmlspecialchars($addBtnLabel) ?>
     </button>
 </div>
 
@@ -248,7 +251,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                 <tr>
                     <th style="width: 60px;">Sort</th>
                     <th style="width: 280px;">Category Name</th>
-                    <th>Code / Slug</th>
+                    <th>Identifier</th>
                     <th style="width: 140px;">Assigned Items</th>
                     <th style="width: 120px;">Status</th>
                     <th style="text-align: right; width: 150px;">Actions</th>
@@ -257,9 +260,19 @@ include dirname(__DIR__) . '/layouts/header.php';
             <tbody>
                 <?php if (empty($categories)): ?>
                     <tr>
-                        <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 40px;">
-                            <i class="fa-solid fa-folder-open" style="font-size: 32px; opacity: 0.3; margin-bottom: 8px;"></i>
-                            <p>No categories found for this section. Click "+ Add New Category" to create one.</p>
+                        <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 48px 20px;">
+                            <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--bg-subtle); display: inline-flex; align-items: center; justify-content: center; font-size: 24px; color: var(--primary); margin-bottom: 12px;">
+                                <i class="fa-solid fa-folder-plus"></i>
+                            </div>
+                            <h4 style="font-size: 16px; font-weight: 700; color: var(--text-main); margin-bottom: 4px;">
+                                <?= ($activeTab === 'service') ? 'No Service Categories Yet' : (($activeTab === 'product') ? 'No Product Categories Yet' : 'No Categories Found') ?>
+                            </h4>
+                            <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px; max-width: 420px; margin-left: auto; margin-right: auto;">
+                                <?= ($activeTab === 'service') ? 'Create categories like Washing, Detailing, or Basic Maintenance to group your vehicle services.' : (($activeTab === 'product') ? 'Create categories like Engine Oils, Filters, or Fluids to organize your warehouse inventory.' : 'Click below to create your first category.') ?>
+                            </p>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="openNewCategoryModal('<?= $activeTab ?>')">
+                                <i class="fa-solid fa-plus mr-1"></i> <?= htmlspecialchars($addBtnLabel) ?>
+                            </button>
                         </td>
                     </tr>
                 <?php else: ?>
@@ -351,7 +364,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 
 <!-- Add / Edit Category Modal -->
 <div class="modal-backdrop" id="categoryModal">
-    <div class="modal" style="max-width: 560px;">
+    <div class="modal" style="max-width: 520px;">
         <div class="modal-header">
             <h3 class="modal-title" id="catModalTitle"><?= htmlspecialchars(__('add_category')) ?></h3>
             <button type="button" class="modal-close" onclick="closeModal('categoryModal')">&times;</button>
@@ -360,17 +373,10 @@ include dirname(__DIR__) . '/layouts/header.php';
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="save_category">
             <input type="hidden" name="category_id" id="cat_id" value="">
+            <input type="hidden" name="type" id="cat_type" value="<?= htmlspecialchars($activeTab) ?>">
+            <input type="hidden" name="code" id="cat_code" value="">
 
             <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label"><?= htmlspecialchars(__('category_type')) ?> *</label>
-                    <select name="type" id="cat_type" class="form-select" required>
-                        <option value="service" <?= ($activeTab === 'service') ? 'selected' : '' ?>>Service Category</option>
-                        <option value="product" <?= ($activeTab === 'product') ? 'selected' : '' ?>>Product / Stock Category</option>
-                        <option value="expense" <?= ($activeTab === 'expense') ? 'selected' : '' ?>>Expense Category</option>
-                    </select>
-                </div>
-
                 <div class="grid grid-cols-2" style="gap: 16px;">
                     <div class="form-group">
                         <label class="form-label"><?= htmlspecialchars(__('category_name_en')) ?> *</label>
@@ -382,48 +388,40 @@ include dirname(__DIR__) . '/layouts/header.php';
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2" style="gap: 16px;">
-                    <div class="form-group">
-                        <label class="form-label"><?= htmlspecialchars(__('category_code')) ?> *</label>
-                        <input type="text" name="code" id="cat_code" class="form-input" placeholder="e.g. engine_detailing" required pattern="[a-zA-Z0-9_]+" title="Only alphanumeric and underscore allowed">
-                        <span class="text-xs text-muted">Unique key used in catalog and POS</span>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label"><?= htmlspecialchars(__('sort_order')) ?></label>
-                        <input type="number" name="sort_order" id="cat_sort_order" class="form-input" value="0">
-                        <span class="text-xs text-muted">Lower numbers appear first</span>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2" style="gap: 16px;">
+                <div class="grid grid-cols-3" style="gap: 16px;">
                     <div class="form-group">
                         <label class="form-label"><?= htmlspecialchars(__('icon')) ?></label>
                         <div style="display: flex; gap: 8px; align-items: center;">
-                            <div id="iconPreviewBadge" style="width: 40px; height: 40px; border-radius: var(--radius-md); background: var(--bg-subtle); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; color: var(--primary);">
+                            <div id="iconPreviewBadge" style="width: 38px; height: 38px; border-radius: var(--radius-md); background: var(--bg-subtle); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; color: var(--primary);">
                                 <i class="fa-solid fa-tag" id="previewIcon"></i>
                             </div>
-                            <input type="text" name="icon" id="cat_icon" class="form-input" value="fa-tag" placeholder="fa-shower, fa-wrench..." oninput="updateIconPreview(this.value)">
+                            <input type="text" name="icon" id="cat_icon" class="form-input" value="fa-tag" placeholder="fa-tag" oninput="updateIconPreview(this.value)">
                         </div>
                     </div>
 
                     <div class="form-group">
                         <label class="form-label"><?= htmlspecialchars(__('color')) ?></label>
                         <div style="display: flex; gap: 8px; align-items: center;">
-                            <input type="color" id="cat_color_picker" value="#0284c7" style="width: 40px; height: 40px; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer;" oninput="document.getElementById('cat_color').value = this.value; updateColorPreview(this.value)">
+                            <input type="color" id="cat_color_picker" value="#0284c7" style="width: 38px; height: 38px; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer;" oninput="document.getElementById('cat_color').value = this.value; updateColorPreview(this.value)">
                             <input type="text" name="color" id="cat_color" class="form-input" value="#0284c7" placeholder="#0284c7" oninput="document.getElementById('cat_color_picker').value = this.value; updateColorPreview(this.value)">
                         </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label"><?= htmlspecialchars(__('sort_order')) ?></label>
+                        <input type="number" name="sort_order" id="cat_sort_order" class="form-input" value="0">
                     </div>
                 </div>
 
                 <!-- Quick Icon Presets -->
-                <div class="form-group" style="margin-bottom: 12px;">
+                <div class="form-group" style="margin-bottom: 16px;">
                     <label class="text-xs text-muted" style="margin-bottom: 6px; display: block;">Suggested Icons (Click to select):</label>
                     <div style="display: flex; gap: 6px; flex-wrap: wrap;">
                         <?php 
                         $suggestedIcons = [
                             'fa-shower', 'fa-broom', 'fa-sparkles', 'fa-gears', 'fa-wrench',
                             'fa-oil-can', 'fa-filter', 'fa-bottle-droplet', 'fa-spray-can-sparkles',
-                            'fa-water', 'fa-bolt', 'fa-soap', 'fa-money-bill-wave', 'fa-screwdriver-wrench',
+                            'fa-water', 'fa-bolt', 'fa-soap', 'fa-screwdriver-wrench',
                             'fa-shield-halved', 'fa-battery-full', 'fa-box', 'fa-tag'
                         ];
                         foreach ($suggestedIcons as $si): ?>
@@ -453,7 +451,6 @@ include dirname(__DIR__) . '/layouts/header.php';
 <script>
 function autoSuggestSlug(val) {
     const codeField = document.getElementById('cat_code');
-    // Only auto-fill if adding new category (not editing)
     if (!document.getElementById('cat_id').value) {
         let slug = val.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
         codeField.value = slug;
@@ -476,19 +473,33 @@ function updateColorPreview(colorHex) {
 }
 
 function openNewCategoryModal(defaultType) {
-    document.getElementById('catModalTitle').innerText = <?= json_encode(__('add_category')) ?>;
+    const type = defaultType || '<?= $activeTab ?>';
+    let title = 'Add Category';
+    let defaultIcon = 'fa-tag';
+    if (type === 'service') {
+        title = 'Add Service Category';
+        defaultIcon = 'fa-shower';
+    } else if (type === 'product') {
+        title = 'Add Product Category';
+        defaultIcon = 'fa-box';
+    } else if (type === 'expense') {
+        title = 'Add Expense Category';
+        defaultIcon = 'fa-wallet';
+    }
+
+    document.getElementById('catModalTitle').innerText = title;
     document.getElementById('cat_id').value = '';
-    document.getElementById('cat_type').value = defaultType || 'service';
+    document.getElementById('cat_type').value = type;
     document.getElementById('cat_name_en').value = '';
     document.getElementById('cat_name_km').value = '';
     document.getElementById('cat_code').value = '';
     document.getElementById('cat_sort_order').value = '0';
-    document.getElementById('cat_icon').value = 'fa-tag';
+    document.getElementById('cat_icon').value = defaultIcon;
     document.getElementById('cat_color').value = '#0284c7';
     document.getElementById('cat_color_picker').value = '#0284c7';
     document.getElementById('cat_is_active').checked = true;
 
-    updateIconPreview('fa-tag');
+    updateIconPreview(defaultIcon);
     updateColorPreview('#0284c7');
     openModal('categoryModal');
 }
@@ -505,9 +516,15 @@ function editCategory(btnOrCat) {
     }
     if (!cat) return;
 
-    document.getElementById('catModalTitle').innerText = <?= json_encode(__('edit_category')) ?>;
+    const type = cat.type || 'service';
+    let title = 'Edit Category';
+    if (type === 'service') title = 'Edit Service Category';
+    else if (type === 'product') title = 'Edit Product Category';
+    else if (type === 'expense') title = 'Edit Expense Category';
+
+    document.getElementById('catModalTitle').innerText = title;
     document.getElementById('cat_id').value = cat.id || '';
-    document.getElementById('cat_type').value = cat.type || 'service';
+    document.getElementById('cat_type').value = type;
     document.getElementById('cat_name_en').value = cat.name_en || '';
     document.getElementById('cat_name_km').value = cat.name_km || '';
     document.getElementById('cat_code').value = cat.code || '';

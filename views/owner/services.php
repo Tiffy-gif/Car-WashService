@@ -404,27 +404,42 @@ include dirname(__DIR__) . '/layouts/header.php';
                 <div class="grid grid-cols-2" style="gap: 16px;">
                     <!-- Custom Category Dropdown -->
                     <div class="form-group" style="position: relative;">
-                        <label class="form-label">Service Category *</label>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <label class="form-label" style="margin-bottom: 0;">Service Category *</label>
+                            <a href="?view=categories&tab=service" target="_blank" style="font-size: 11px; font-weight: 600; color: var(--primary); text-decoration: none;">
+                                <i class="fa-solid fa-plus-circle mr-1"></i> New Category
+                            </a>
+                        </div>
                         <input type="hidden" name="category" id="category" value="">
                         <input type="hidden" name="category_id" id="category_id" value="">
                         <div id="categoryTrigger" class="form-input" tabindex="0" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none;">
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <i id="categoryIconPreview" class="fa-solid fa-shower" style="color: var(--primary); width: 16px; text-align: center;"></i>
-                                <span id="categoryLabelText">Car Wash &amp; Detailing</span>
+                                <span id="categoryLabelText">Select Category</span>
                             </div>
                             <i class="fa-solid fa-chevron-down" style="font-size: 11px; color: var(--text-muted);"></i>
                         </div>
                         <div id="categoryDropdownList" style="display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-md); z-index: 100; max-height: 220px; overflow-y: auto;">
-                            <?php foreach ($serviceCategories as $sc): 
-                                $scName = (Language::current() === 'km') ? $sc['name_km'] : $sc['name_en'];
-                                $scIcon = !empty($sc['icon']) ? $sc['icon'] : 'fa-tag';
-                                $scColor = !empty($sc['color']) ? $sc['color'] : '#0284c7';
-                            ?>
-                                <div class="cat-choice-item" data-id="<?= $sc['id'] ?>" data-value="<?= htmlspecialchars($sc['code']) ?>" data-icon="<?= htmlspecialchars($scIcon) ?>" data-color="<?= htmlspecialchars($scColor) ?>" data-label="<?= htmlspecialchars($scName) ?>" style="padding: 10px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background 0.15s ease; border-bottom: 1px solid var(--border-light);">
-                                    <i class="fa-solid <?= htmlspecialchars($scIcon) ?>" style="color: <?= htmlspecialchars($scColor) ?>; width: 18px; text-align: center;"></i>
-                                    <span><?= htmlspecialchars($scName) ?></span>
+                            <?php if (empty($serviceCategories)): ?>
+                                <div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 13px;">
+                                    <i class="fa-solid fa-folder-open mb-1" style="font-size: 20px; opacity: 0.4; display: block;"></i>
+                                    <div>No service categories found.</div>
+                                    <a href="?view=categories&tab=service" class="btn btn-sm btn-primary mt-2" style="font-size: 11px; padding: 4px 10px;">
+                                        <i class="fa-solid fa-plus mr-1"></i> Add Category First
+                                    </a>
                                 </div>
-                            <?php endforeach; ?>
+                            <?php else: ?>
+                                <?php foreach ($serviceCategories as $sc): 
+                                    $scName = (Language::current() === 'km') ? $sc['name_km'] : $sc['name_en'];
+                                    $scIcon = !empty($sc['icon']) ? $sc['icon'] : 'fa-tag';
+                                    $scColor = !empty($sc['color']) ? $sc['color'] : '#0284c7';
+                                ?>
+                                    <div class="cat-choice-item" data-id="<?= $sc['id'] ?>" data-value="<?= htmlspecialchars($sc['code']) ?>" data-icon="<?= htmlspecialchars($scIcon) ?>" data-color="<?= htmlspecialchars($scColor) ?>" data-label="<?= htmlspecialchars($scName) ?>" style="padding: 10px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background 0.15s ease; border-bottom: 1px solid var(--border-light);">
+                                        <i class="fa-solid <?= htmlspecialchars($scIcon) ?>" style="color: <?= htmlspecialchars($scColor) ?>; width: 18px; text-align: center;"></i>
+                                        <span><?= htmlspecialchars($scName) ?></span>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
                         </div>
                     </div>
 

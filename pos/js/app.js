@@ -2941,6 +2941,35 @@ class PosApp {
         });
         document.getElementById('btnConfirmEndShift')?.addEventListener('click', () => this.handleEndShiftSubmit());
 
+        // Shift Badge in top bar
+        document.getElementById('posShiftStatusBadge')?.addEventListener('click', () => {
+            if (this.shiftBadgeState === 'needs_review' && this.oldShiftNeedingReview) {
+                this.showOldShiftAlert(this.oldShiftNeedingReview);
+            } else if (this.shiftBadgeState === 'active') {
+                this.showEndShiftModal();
+            } else {
+                this.showStartShiftModal();
+            }
+        });
+
+        // Solo vs Handover mode in End Shift modal
+        document.getElementById('endShiftModeSoloBtn')?.addEventListener('click', () => this.setEndShiftMode('solo'));
+        document.getElementById('endShiftModeHandoverBtn')?.addEventListener('click', () => this.setEndShiftMode('handover'));
+
+        // Old Shift Alert events
+        document.getElementById('btnCancelOldShiftAlert')?.addEventListener('click', () => {
+            document.getElementById('modalOldShiftAlert')?.classList.remove('open');
+        });
+        document.getElementById('btnShowManagerReviewForm')?.addEventListener('click', () => {
+            const form = document.getElementById('oldShiftManagerForm');
+            if (form) form.style.display = 'block';
+            const btnShow = document.getElementById('btnShowManagerReviewForm');
+            if (btnShow) btnShow.style.display = 'none';
+            const btnSubmit = document.getElementById('btnSubmitManagerReview');
+            if (btnSubmit) btnSubmit.style.display = 'inline-flex';
+        });
+        document.getElementById('btnSubmitManagerReview')?.addEventListener('click', () => this.handleSubmitManagerReview());
+
         // 2. Manager PIN Modal
         document.getElementById('btnCancelMgrPin')?.addEventListener('click', () => {
             document.getElementById('modalManagerPin')?.classList.remove('open');
@@ -5672,16 +5701,16 @@ class PosApp {
                     summaryText.textContent = template.replace('{free}', freeBays).replace('{waiting}', totalWaiting);
                 }
 
-                // Next waiting vehicle without a bay assigned
-                const nextWaitingCar = allQueue.find(q => (!q.bay_id || q.bay_id == 0) && (q.status === 'waiting' || !q.status || q.status === 'pending')) || null;
-
-                // Render Bays Grid (4 Bays)
+                // Render Bays Grid (4 Bays) with Skill/Type Matching Candidates
                 let bayHtml = '';
                 bays.forEach(bay => {
                     const isFree = (bay.status === 'free');
-                    const isWash = (bay.bay_type === 'wash');
+                    const skill = bay.skill_tag || '';
+                    const isOil = (bay.bay_type === 'oil' || bay.bay_type === 'oil_change' || skill === 'oil_only');
+                    const isWash = (bay.bay_type === 'wash' || skill === 'wash_only' || (!isOil && skill !== 'wash_and_oil' && skill !== 'all'));
+                    const isHybrid = (skill === 'wash_and_oil' || skill === 'all');
                     const bayName = bay.bay_name || `Bay ${bay.bay_number || bay.id}`;
-                    const typeLabel = isWash ? 'Wash Bay' : 'Oil / Tech';
+                    const typeLabel = isOil ? 'Oil / Tech' : (isHybrid ? 'Wash & Oil' : 'Wash Bay');
 
                     const freeLabel = (window.I18nManager && typeof window.I18nManager.t === 'function')
                         ? window.I18nManager.t('free')
@@ -5689,6 +5718,10 @@ class PosApp {
                     const inUseLabel = (window.I18nManager && typeof window.I18nManager.t === 'function')
                         ? window.I18nManager.t('busy')
                         : 'IN USE';
+
+                    // Skill-matching queue candidate: techQ for oil/tech bays, washQ for wash bays, allQueue for hybrid bays
+                    const candidateQueue = isOil ? techQ : (isWash ? washQ : allQueue);
+                    const nextWaitingCar = candidateQueue.find(q => (!q.bay_id || q.bay_id == 0) && (q.status === 'waiting' || !q.status || q.status === 'pending')) || null;
 
                     let freeActionHtml = '';
                     if (isFree) {
@@ -8561,239 +8594,367 @@ class PosApp {
         const isReprint = !!options.isReprint;
         const isCancelled = order.status === 'cancelled';
         const isUnpaid = (order.payment_status === 'unpaid' || order.status === 'unpaid') && !isCancelled;
-        const settings = this.getSettings();
-        const currentLang = I18nManager.getLang();
+        const settings = this.getSettings() || {};
         const rate = this.getExchangeRate();
+
+        const isSettingOn = (val, defaultVal = true) => {
+            if (val === undefined || val === null || val === '') return defaultVal;
+            return val === '1' || val === 1 || val === true;
+        };
+
+        const rcptLang = settings.receipt_language || 'en';
+        const getLbl = (key, fallbackKm, fallbackEn, fallbackBoth) => {
+            if (settings['receipt_label_' + key]) return this.escapeHtml(settings['receipt_label_' + key]);
+            if (rcptLang === 'km') return fallbackKm;
+            if (rcptLang === 'en') return fallbackEn;
+            return fallbackBoth;
+        };
 
         // Update modal title and button visibility
         const modalTitle = document.querySelector('#modalReceipt h3');
-        if (modalTitle) modalTitle.textContent = I18nManager.t('printReceipt') || 'វិក្កយបត្រ';
+        if (modalTitle) modalTitle.textContent = (rcptLang === 'km') ? 'វិក្កយបត្រ' : ((rcptLang === 'en') ? 'Receipt' : 'វិក្កយបត្រ / Receipt');
         const btnWasher = document.getElementById('btnPrintWasherReceipt');
         if (btnWasher) btnWasher.style.display = 'inline-flex';
 
-        // 1. Shop Logo in Black & White, Small & Centered (Requirement 2)
-        const showLogo = (settings.receipt_show_logo !== 0 && settings.receipt_show_logo !== '0' && settings.receipt_show_logo !== false);
+        // 1. Logo
+        const showLogo = isSettingOn(settings.receipt_show_logo, true);
         const logoSrc = PosStorage.getLogoDataUri() || this.resolveAssetUrl(settings.shop_logo_url || settings.shop_logo);
+        const logoSizeClass = ' logo-' + (settings.receipt_logo_size || 'medium');
         const logoHtml = (showLogo && logoSrc) ? `
-            <div style="text-align: center; margin-bottom: 6px;">
-                <img src="${logoSrc}" alt="Shop Logo" class="receipt-logo"
-                    style="max-height: 44px; max-width: 130px; object-fit: contain; margin: 0 auto; display: block; filter: grayscale(100%) contrast(140%); -webkit-filter: grayscale(100%) contrast(140%);">
+            <div class="receipt-logo-wrap">
+                <img src="${logoSrc}" alt="Shop Logo" class="receipt-logo-img${logoSizeClass}">
             </div>
         ` : '';
 
         // 2. Shop Name (Respects Language Selection)
-        const rcptLangSetting = settings.receipt_language || 'both';
+        const showShopName = isSettingOn(settings.receipt_show_shop_name, true);
         let shopNameHtml = '';
-        if (currentLang === 'km' && rcptLangSetting !== 'en') {
-            shopNameHtml = `<div class="receipt-shop-name">${this.escapeHtml(settings.shop_name_km || 'សេវាកម្មលាងរថយន្ត និងម៉ូតូទំនើប')}</div>`;
-        } else if (currentLang === 'en' && rcptLangSetting !== 'km') {
-            shopNameHtml = `<div class="receipt-shop-name">${this.escapeHtml(settings.shop_name_en || 'Car Wash & Detailing')}</div>`;
-        } else {
-            shopNameHtml = `
-                <div class="receipt-shop-name">${this.escapeHtml(settings.shop_name_km || 'សេវាកម្មលាងរថយន្ត និងម៉ូតូទំនើប')}</div>
-                <div style="font-size: 13px; font-weight: bold; margin-top: 2px;">${this.escapeHtml(settings.shop_name_en || 'Car Wash & Detailing')}</div>
-            `;
+        if (showShopName) {
+            if (rcptLang !== 'en') {
+                shopNameHtml += `<div class="receipt-shop-name-km">${this.escapeHtml(settings.shop_name_km || 'សេវាកម្មលាងរថយន្ត')}</div>`;
+            }
+            if (rcptLang !== 'km') {
+                shopNameHtml += `<div class="receipt-shop-name-en">${this.escapeHtml(settings.shop_name_en || 'Car Wash & Detailing')}</div>`;
+            }
         }
 
-        const shopAddressHtml = settings.shop_address ? `<div style="font-size: 10px; margin-top: 2px;">${this.escapeHtml(settings.shop_address)}</div>` : '';
-        const shopPhoneHtml = settings.shop_phone ? `<div style="font-size: 10px;">Tel: ${this.escapeHtml(settings.shop_phone)}</div>` : '';
+        const showAddress = isSettingOn(settings.receipt_show_address, true);
+        const shopAddressHtml = (showAddress && settings.shop_address) ? `<div class="receipt-shop-address">${this.escapeHtml(settings.shop_address)}</div>` : '';
+
+        const showPhone = isSettingOn(settings.receipt_show_phone, true);
+        const shopPhoneHtml = (showPhone && settings.shop_phone) ? `<div class="receipt-shop-phone">Tel: ${this.escapeHtml(settings.shop_phone)}</div>` : '';
+
+        // Welcome Line & Extra Header Lines
+        const welcomeLineHtml = (settings.receipt_welcome_line && settings.receipt_welcome_line.trim()) ? `<div class="receipt-welcome-line">${this.escapeHtml(settings.receipt_welcome_line.trim())}</div>` : '';
+        const headerExtraHtml = (settings.receipt_header_extra && settings.receipt_header_extra.trim()) ? `<div class="receipt-extra-lines">${this.escapeHtml(settings.receipt_header_extra.trim()).replace(/\n/g, '<br>')}</div>` : '';
 
         // 3. Status Banners (Reprint, Cancelled, Unpaid)
         let bannersHtml = '';
         if (isReprint) {
+            const reprintTitle = rcptLang === 'km' ? '*** ច្បាប់ចម្លង ***' : (rcptLang === 'en' ? '*** COPY / REPRINT ***' : '*** ច្បាប់ចម្លង / COPY / REPRINT ***');
             bannersHtml += `
-                <div class="receipt-badge-banner reprint">
-                    ${I18nManager.t('copyReprint')}
-                    <div style="font-size: 9px; font-weight: normal; margin-top: 2px;">
-                        ${I18nManager.t('reprintedAt')} ${new Date().toLocaleString()}
+                <div class="receipt-status-banner">
+                    ${reprintTitle}
+                    <div style="font-size: 9px; font-weight: 600; margin-top: 2px;">
+                        ${rcptLang === 'km' ? 'បោះពុម្ពឡើងវិញនៅ៖' : 'Reprinted:'} ${new Date().toLocaleString()}
                     </div>
                 </div>
             `;
         }
         if (isCancelled) {
-            bannersHtml += `<div class="receipt-badge-banner cancelled">${I18nManager.t('orderCancelledBadge')}</div>`;
+            bannersHtml += `<div class="receipt-status-banner cancelled">*** ${rcptLang === 'km' ? 'បានបោះបង់' : (rcptLang === 'en' ? 'CANCELLED' : 'បានបោះបង់ / ORDER CANCELLED')} ***</div>`;
         } else if (isUnpaid) {
-            bannersHtml += `<div class="receipt-badge-banner unpaid">${I18nManager.t('orderUnpaidBadge')}</div>`;
+            bannersHtml += `<div class="receipt-status-banner">*** ${rcptLang === 'km' ? 'មិនទាន់ទូទាត់' : (rcptLang === 'en' ? 'UNPAID' : 'មិនទាន់ទូទាត់ / UNPAID')} ***</div>`;
         }
 
         // 4. Order Information
-        const metaHtml = `
-            <div style="font-size: 11px; line-height: 1.45;">
-                <div style="display: flex; justify-content: space-between;">
-                    <span>${I18nManager.t('invoiceNo')}</span>
-                    <strong style="font-family: monospace;">${this.escapeHtml(order.order_number || 'ORD-000')}</strong>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                    <span>${I18nManager.t('dateTimeLabel')}</span>
-                    <span>${this.escapeHtml(order.created_at || order.paid_at || new Date().toLocaleString())}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                    <span>${I18nManager.t('cashierLabel')}</span>
-                    <span>${this.escapeHtml(order.cashier_name || this.currentUser?.full_name || 'Cashier')}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; border-top: 1px dashed #000; padding-top: 3px; margin-top: 3px;">
-                    <span>${I18nManager.t('plateNoLabel')}</span>
-                    <strong style="font-size: 13px;">${this.escapeHtml(order.plate_number || 'WALK-IN')}</strong>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                    <span>${I18nManager.t('customerLabel')}</span>
-                    <span>${this.formatCustomerName(order.customer_name || 'Walk-in Guest')}</span>
-                </div>
-            </div>
-        `;
+        const showInvoiceNo = isSettingOn(settings.receipt_show_invoice_no, true);
+        const showDate = isSettingOn(settings.receipt_show_date, true);
+        const showCashier = isSettingOn(settings.receipt_show_cashier, true);
+        const showCustomer = isSettingOn(settings.receipt_show_customer, true);
+        const showWasher = isSettingOn(settings.receipt_show_washer, false);
 
-        // 5. Items Table (Word-wrap, Right aligned price, Tabular font)
+        let metaRowsHtml = '';
+        if (showInvoiceNo || showDate) {
+            metaRowsHtml += `
+                <div class="receipt-meta-row">
+                    ${showInvoiceNo ? `<span>${getLbl('invoice', 'វិក្កយបត្រ៖', 'Invoice #:', 'វិក្កយបត្រ / Invoice #:')} <strong>${this.escapeHtml(order.order_number || 'ORD-000')}</strong></span>` : '<span></span>'}
+                    ${showDate ? `<span>${this.escapeHtml(order.created_at || order.paid_at || new Date().toLocaleString())}</span>` : ''}
+                </div>
+            `;
+        }
+        if (showCashier || showCustomer) {
+            metaRowsHtml += `
+                <div class="receipt-meta-row">
+                    ${showCashier ? `<span>${getLbl('cashier', 'បេឡា៖', 'Cashier:', 'បេឡា / Cashier:')} ${this.escapeHtml(order.cashier_name || this.currentUser?.full_name || 'Cashier')}</span>` : '<span></span>'}
+                    ${showCustomer ? `<span>${getLbl('customer', 'អតិថិជន៖', 'Customer:', 'អតិថិជន / Customer:')} ${this.formatCustomerName(order.customer_name || 'Walk-in Guest')}</span>` : ''}
+                </div>
+            `;
+        }
+        if (showWasher && (order.washers || order.washer_name)) {
+            const catalog = (typeof PosStorage !== 'undefined' ? PosStorage.getCatalog() : {}) || {};
+            const washers = catalog.washers || [];
+            let wName = order.washer_name || '';
+            if (!wName && Array.isArray(order.washers)) {
+                wName = order.washers.map(id => washers.find(w => w.id == id)?.full_name || `#${id}`).join(', ');
+            }
+            if (wName) {
+                metaRowsHtml += `
+                    <div class="receipt-meta-row">
+                        <span>${getLbl('washer', 'ជាងលាង៖', 'Washer:', 'ជាងលាង / Washer:')} ${this.escapeHtml(wName)}</span>
+                    </div>
+                `;
+            }
+        }
+        const metaHtml = metaRowsHtml ? `<div class="receipt-meta-grid">${metaRowsHtml}</div>` : '';
+
+        // License Plate Badge
+        const showPlate = isSettingOn(settings.receipt_show_plate, true);
+        const showVehicleType = isSettingOn(settings.receipt_show_vehicle_type, false);
+        let plateHtml = '';
+        if (showPlate) {
+            const vtypeStr = (showVehicleType && order.vehicle_type) ? ` (${order.vehicle_type.replace(/_/g, ' ').toUpperCase()})` : '';
+            plateHtml = `
+                <div class="receipt-plate-badge">
+                    <span class="receipt-plate-label">
+                        <span>${getLbl('plate', 'ស្លាកលេខ៖', 'PLATE #:', 'PLATE #:')}</span>
+                        ${vtypeStr ? `<span class="receipt-plate-sub">${this.escapeHtml(vtypeStr)}</span>` : ''}
+                    </span>
+                    <span class="receipt-plate-number">${this.escapeHtml(order.plate_number || 'WALK-IN')}</span>
+                </div>
+            `;
+        }
+
+        // 5. Items Table (3 columns: Item / Qty / Price)
         const items = order.items || [];
         const itemsHtml = items.map(it => {
             const lineTotal = ((it.price_usd || 0) * (it.qty || 1)).toFixed(2);
-            const itemName = (currentLang === 'km' && it.name_km) ? it.name_km : (it.name || it.name_en || 'Item');
+            const itemName = (rcptLang === 'km' && it.name_km) ? it.name_km : ((rcptLang === 'en' && it.name_en) ? it.name_en : (it.name || it.name_en || it.service_name || 'Item'));
+            const qty = it.qty || 1;
+            const unitPrice = qty > 1 ? ((it.price_usd || 0)).toFixed(2) : null;
             return `
                 <tr>
-                    <td class="text-left" style="word-break: break-word; overflow-wrap: break-word; padding-right: 4px;">
+                    <td class="col-item">
                         ${this.escapeHtml(itemName)}
+                        ${unitPrice ? `<div style="font-size: 9px; font-weight: 600; font-family: monospace;">(${qty} x $${unitPrice})</div>` : ''}
                     </td>
-                    <td class="text-center" style="width: 28px; white-space: nowrap;">${it.qty || 1}</td>
-                    <td class="text-right" style="width: 58px; white-space: nowrap; font-family: monospace;">$${lineTotal}</td>
+                    <td class="col-qty">${qty}</td>
+                    <td class="col-price">$${lineTotal}</td>
                 </tr>
             `;
         }).join('');
 
+        // Item count summary
+        const showItemCount = isSettingOn(settings.receipt_show_item_count, false);
+        const itemCountHtml = showItemCount ? `
+            <div class="receipt-summary-row" style="font-size: 9.5px; margin: 3px 0;">
+                <span>Total Items: ${items.length} (${items.reduce((s, it) => s + (it.qty || 1), 0)} Units)</span>
+            </div>
+        ` : '';
+
         // 6. Totals & Payment Calculations
         const subtotal = items.reduce((sum, it) => sum + ((it.price_usd || 0) * (it.qty || 1)), 0);
         const discountUsd = parseFloat(order.discount_usd || 0);
+        const showDiscount = isSettingOn(settings.receipt_show_discount, true);
         const totalUsd = parseFloat(order.total_usd !== undefined ? order.total_usd : (subtotal - discountUsd));
         const totalKhr = parseInt(order.total_khr || Math.round(totalUsd * rate));
 
         let discHtml = '';
-        if (discountUsd > 0) {
+        if (showDiscount && discountUsd > 0) {
             discHtml = `
-                <div style="display: flex; justify-content: space-between;">
-                    <span>${I18nManager.t('discountLabel')}</span>
-                    <span style="font-family: monospace;">-$${discountUsd.toFixed(2)}</span>
+                <div class="receipt-summary-row">
+                    <span>${getLbl('discount', 'បញ្ចុះតម្លៃ៖', 'Discount:', 'បញ្ចុះតម្លៃ / Discount:')}</span>
+                    <span style="font-family: monospace; font-weight: 700;">-$${discountUsd.toFixed(2)}</span>
                 </div>
             `;
         }
 
-        let methodStr = (order.payment_method || 'cash').toUpperCase();
-        if (methodStr === 'CASH') methodStr = I18nManager.t('cash') || 'CASH';
-        else if (methodStr === 'ABA') methodStr = 'ABA PAY';
-        else if (methodStr === 'KHQR') methodStr = 'KHQR SCAN';
-
-        if (isUnpaid) {
-            methodStr = `${I18nManager.t('unpaid') || 'UNPAID'} (PAY LATER)`;
-        }
-
-        let paymentDetailHtml = '';
-        if (!isUnpaid && (order.payment_method || 'cash').toLowerCase() === 'cash') {
-            const tendered = parseFloat(order.amount_tendered_usd || totalUsd);
-            const change = parseFloat(order.change_usd || 0);
-            paymentDetailHtml = `
-                <div style="display: flex; justify-content: space-between;">
-                    <span>${I18nManager.t('tenderedLabel')}</span>
-                    <span style="font-family: monospace;">$${tendered.toFixed(2)}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                    <span>${I18nManager.t('changeLabel')}</span>
-                    <span style="font-family: monospace;">$${change.toFixed(2)}</span>
+        const showTax = isSettingOn(settings.receipt_show_tax, false);
+        let taxHtml = '';
+        if (showTax) {
+            const taxAmt = (subtotal - discountUsd) * 0.10;
+            taxHtml = `
+                <div class="receipt-summary-row">
+                    <span>${getLbl('tax', 'ពន្ធ / Tax (10%):', 'Tax / VAT (10%):', 'ពន្ធ / Tax (10%):')}</span>
+                    <span style="font-family: monospace; font-weight: 700;">$${taxAmt.toFixed(2)}</span>
                 </div>
             `;
-        } else if (isUnpaid) {
-            paymentDetailHtml = `
-                <div style="display: flex; justify-content: space-between; font-weight: bold; color: #b45309; margin-top: 2px;">
-                    <span>${I18nManager.t('amountDueLabel')}</span>
-                    <span style="font-family: monospace;">$${totalUsd.toFixed(2)} (${totalKhr.toLocaleString()} ៛)</span>
+        }
+
+        const showPayment = isSettingOn(settings.receipt_show_payment, true);
+        let paymentBlockHtml = '';
+        if (showPayment) {
+            let methodStr = (order.payment_method || 'cash').toUpperCase();
+            if (methodStr === 'CASH') methodStr = (rcptLang === 'en') ? 'CASH' : ((rcptLang === 'km') ? 'សាច់ប្រាក់' : 'សាច់ប្រាក់ (CASH)');
+            else if (methodStr === 'ABA') methodStr = 'ABA PAY';
+            else if (methodStr === 'KHQR') methodStr = 'KHQR SCAN';
+
+            if (isUnpaid) {
+                methodStr = (rcptLang === 'km') ? 'មិនទាន់ទូទាត់' : 'UNPAID';
+            }
+
+            let paymentDetailHtml = '';
+            if (!isUnpaid && (order.payment_method || 'cash').toLowerCase() === 'cash') {
+                const tendered = parseFloat(order.amount_tendered_usd || totalUsd);
+                const change = parseFloat(order.change_usd || 0);
+                const changeKhr = Math.round(change * rate);
+                paymentDetailHtml = `
+                    <div class="receipt-summary-row">
+                        <span>${getLbl('tendered', 'ប្រាក់ទទួល៖', 'Tendered:', 'ប្រាក់ទទួល / Tendered:')}</span>
+                        <span style="font-family: monospace; font-weight: 700;">$${tendered.toFixed(2)}</span>
+                    </div>
+                    <div class="receipt-summary-row" style="font-weight: 700;">
+                        <span>${getLbl('change', 'ប្រាក់អាប់៖', 'Change:', 'ប្រាក់អាប់ / Change:')}</span>
+                        <span style="font-family: monospace;">$${change.toFixed(2)}${rcptLang !== 'en' && changeKhr > 0 ? ` (${changeKhr.toLocaleString()} ៛)` : ''}</span>
+                    </div>
+                `;
+            } else if (isUnpaid) {
+                paymentDetailHtml = `
+                    <div class="receipt-summary-row" style="font-weight: 800;">
+                        <span>${rcptLang === 'km' ? 'ប្រាក់ត្រូវបង់៖' : 'Amount Due:'}</span>
+                        <span style="font-family: monospace;">$${totalUsd.toFixed(2)} (${totalKhr.toLocaleString()} ៛)</span>
+                    </div>
+                `;
+            }
+
+            paymentBlockHtml = `
+                <div class="receipt-payment-block">
+                    <div class="receipt-summary-row" style="font-weight: 700;">
+                        <span>${getLbl('payment', 'វិធីទូទាត់៖', 'Payment:', 'វិធីទូទាត់ / Payment:')}</span>
+                        <span>${methodStr}</span>
+                    </div>
+                    ${paymentDetailHtml}
                 </div>
             `;
         }
 
         // 7. Mileage & Next Oil Care Reminder
+        const showOilReminder = isSettingOn(settings.receipt_show_oil_reminder, true);
         let oilCareHtml = '';
-        if (order.current_mileage && order.current_mileage > 0) {
-            const nextMileageVal = order.next_oil_mileage || (order.current_mileage + (parseInt(settings.default_oil_mileage) || 5000));
-            const nextDateVal = order.next_oil_date ? ` (${order.next_oil_date})` : '';
+        if (showOilReminder) {
+            const oilTitle = rcptLang === 'km' ? 'រំលឹកប្តូរប្រេង' : (rcptLang === 'en' ? 'OIL CARE REMINDER' : 'រំលឹកប្តូរប្រេង / OIL CARE REMINDER');
+            let mileageLine = '';
+            if (order.current_mileage && parseFloat(order.current_mileage) > 0) {
+                const curKm = parseFloat(order.current_mileage);
+                const nextMileageVal = order.next_oil_mileage || (curKm + (parseInt(settings.default_oil_mileage) || 5000));
+                const nextDateVal = order.next_oil_date ? ` (Due: ${order.next_oil_date})` : '';
+                mileageLine = `Current: ${curKm.toLocaleString()} km | Next: ${nextMileageVal.toLocaleString()} km${nextDateVal}`;
+            } else {
+                mileageLine = 'Current: ________ km | Next: ________ km';
+            }
             oilCareHtml = `
-                <div style="border: 1px dashed #000; padding: 4px; margin-top: 6px; font-size: 10px; text-align: center;">
-                    <div style="font-weight: bold;">${I18nManager.t('oilCareReminderTitle')}</div>
-                    <div>${I18nManager.t('currentMileageLabel')} ${order.current_mileage.toLocaleString()} km | ${I18nManager.t('nextDueMileageLabel')} ${nextMileageVal.toLocaleString()} km${nextDateVal}</div>
+                <div class="receipt-oil-reminder-box">
+                    <div class="receipt-oil-reminder-title"><i class="fa-solid fa-oil-can"></i> ${oilTitle}</div>
+                    <div>${mileageLine}</div>
+                    ${rcptLang !== 'en' ? '<div style="font-size: 9px; margin-top: 2px;">សូមប្តូរប្រេងម៉ាស៊ីនពេលដល់កាលកំណត់ ឬគីឡូម៉ែត្រកំណត់</div>' : ''}
                 </div>
             `;
         }
 
         // 8. Repair Notes Box
+        const showNotes = isSettingOn(settings.receipt_show_notes, true);
         let repairNotesHtml = '';
-        if (order.repair_notes) {
+        if (showNotes && order.repair_notes) {
+            const noteTitle = rcptLang === 'km' ? 'ចំណាំត្រួតពិនិត្យ៖' : (rcptLang === 'en' ? 'INSPECTION NOTE:' : 'ចំណាំត្រួតពិនិត្យ / INSPECTION NOTE:');
             repairNotesHtml = `
-                <div style="border: 1px dashed #000; padding: 4px; margin-top: 6px; font-size: 10px;">
-                    <strong>${I18nManager.t('repairNotes')}:</strong> ${this.escapeHtml(order.repair_notes)}
+                <div class="receipt-notes-box">
+                    <div style="font-weight: 800; text-transform: uppercase; margin-bottom: 2px;">${noteTitle}</div>
+                    <div>${this.escapeHtml(order.repair_notes)}</div>
                 </div>
             `;
         }
 
-        const footerMsg = settings.receipt_footer || 'Thank you for your visit! / សូមអរគុណ!';
+        // Extra Footer Lines
+        const footerExtraHtml = (settings.receipt_footer_extra && settings.receipt_footer_extra.trim()) ? `<div class="receipt-extra-lines">${this.escapeHtml(settings.receipt_footer_extra.trim()).replace(/\n/g, '<br>')}</div>` : '';
 
-        // Assemble into the 80mm printable wrapper
+        // 9. Footer
+        const showFooter = isSettingOn(settings.receipt_show_footer, true);
+        const footerMsg = settings.receipt_footer || 'Thank you for your visit!';
+        const bottomLine = settings.receipt_bottom_line || 'Powered by Counter POS';
+        const footerHtml = showFooter ? `
+            <div class="receipt-divider-dashed"></div>
+            <div class="receipt-footer">
+                <div class="receipt-footer-msg">${this.escapeHtml(footerMsg)}</div>
+                <div class="receipt-footer-sub">${this.escapeHtml(bottomLine)}</div>
+            </div>
+        ` : '';
+
+        // Dynamic classes
+        const paperClass = (settings.receipt_paper_size === '58mm') ? ' paper-58mm' : '';
+        const fontClass = ' font-' + (settings.receipt_font_size || 'normal');
+        const boldClass = (settings.receipt_bold_mode === '0') ? ' bold-off' : '';
+        const spacingClass = ' spacing-' + (settings.receipt_line_spacing || 'normal');
+        const headerAlignClass = ' align-' + (settings.receipt_header_align || 'center');
+
+        const showExchangeRate = isSettingOn(settings.receipt_show_exchange_rate, false) || order.exchange_rate || order.show_exchange_rate;
+
+        // Assemble into the unified printable wrapper
         const printArea = document.getElementById('receiptPrintArea');
         if (printArea) {
+            printArea.className = `unified-receipt receipt-paper${paperClass}${fontClass}${boldClass}${spacingClass}`;
             printArea.innerHTML = `
-                <div class="receipt-header">
+                <div class="receipt-header${headerAlignClass}">
                     ${logoHtml}
                     ${shopNameHtml}
                     ${shopAddressHtml}
                     ${shopPhoneHtml}
+                    ${welcomeLineHtml}
+                    ${headerExtraHtml}
+                    <div class="receipt-divider-dashed"></div>
                 </div>
 
                 ${bannersHtml}
                 ${metaHtml}
+                ${plateHtml}
 
-                <div class="receipt-divider"></div>
-
-                <table class="receipt-table">
+                <table class="receipt-items-table">
                     <thead>
                         <tr>
-                            <th class="text-left">${I18nManager.t('itemLabel')}</th>
-                            <th class="text-center" style="width: 28px;">${I18nManager.t('qtyLabel')}</th>
-                            <th class="text-right" style="width: 58px;">${I18nManager.t('priceLabel')}</th>
+                            <th style="text-align: left;">${getLbl('item', 'ទំនិញ/សេវា', 'ITEM', 'ITEM / ទំនិញ')}</th>
+                            <th style="text-align: center; width: 36px;">${getLbl('qty', 'ចំនួន', 'QTY', 'QTY')}</th>
+                            <th style="text-align: right; width: 68px;">${getLbl('price', 'តម្លៃ', 'PRICE', 'PRICE')}</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${itemsHtml}
                     </tbody>
                 </table>
+                ${itemCountHtml}
 
-                <div class="receipt-divider"></div>
+                <div class="receipt-totals-block">
+                    <div class="receipt-divider-dashed"></div>
 
-                <div style="font-size: 11px; line-height: 1.45;">
-                    <div style="display: flex; justify-content: space-between;">
-                        <span>${I18nManager.t('subtotalLabel')}</span>
-                        <span style="font-family: monospace;">$${subtotal.toFixed(2)}</span>
+                    <div class="receipt-summary-row">
+                        <span>${getLbl('subtotal', 'សរុបបឋម៖', 'Subtotal:', 'សរុបបឋម / Subtotal:')}</span>
+                        <span style="font-family: monospace; font-weight: 700;">$${subtotal.toFixed(2)}</span>
                     </div>
                     ${discHtml}
-                    <div class="receipt-divider"></div>
-                    <div style="display: flex; justify-content: space-between; font-size: 13.5px; font-weight: bold;">
-                        <span>${I18nManager.t('totalUsdLabel')}</span>
-                        <span style="font-family: monospace;">$${totalUsd.toFixed(2)}</span>
+                    ${taxHtml}
+
+                    <div class="receipt-divider-dashed"></div>
+
+                    <div class="receipt-total-usd-row">
+                        <span>${getLbl('total_usd', 'សរុប USD៖', 'TOTAL USD:', 'សរុប USD / TOTAL USD:')}</span>
+                        <span class="amount">$${totalUsd.toFixed(2)}</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 11.5px;">
-                        <span>${I18nManager.t('totalKhrLabel')}</span>
-                        <span style="font-family: monospace;">${totalKhr.toLocaleString()} ៛</span>
+                    <div class="receipt-total-khr-row">
+                        <span>${getLbl('total_khr', 'សរុប រៀល៖', 'TOTAL KHR:', 'សរុប រៀល / TOTAL KHR:')}</span>
+                        <span>${totalKhr.toLocaleString()} ៛</span>
                     </div>
-                    <div class="receipt-divider"></div>
-                    <div style="display: flex; justify-content: space-between;">
-                        <span>${I18nManager.t('paymentMethodLabel')}</span>
-                        <span style="text-transform: uppercase; font-weight: bold;">${methodStr}</span>
-                    </div>
-                    ${paymentDetailHtml}
+
+                    ${showExchangeRate ? `
+                    <div class="receipt-exchange-rate">
+                        ${getLbl('rate', 'អត្រាប្តូរប្រាក់៖', 'Rate:', 'អត្រាប្តូរប្រាក់ / Rate:')} $1.00 = ${rate.toLocaleString()} ៛
+                    </div>` : ''}
+
+                    <div class="receipt-divider-solid"></div>
+                    ${paymentBlockHtml}
                 </div>
 
                 ${oilCareHtml}
                 ${repairNotesHtml}
-
-                <div class="receipt-divider"></div>
-
-                <div class="text-center" style="font-size: 10px; margin-top: 6px;">
-                    <div style="white-space: pre-line; line-height: 1.4;">${this.escapeHtml(footerMsg)}</div>
-                    <div style="margin-top: 4px; font-size: 9px; color: #555;">${this.escapeHtml(I18nManager.t('appSubtitle'))}</div>
-                </div>
+                ${footerExtraHtml}
+                ${footerHtml}
             `;
         }
     }
@@ -9276,15 +9437,20 @@ class PosApp {
         let html = '';
         bays.forEach(bay => {
             const isFree = (bay.status === 'free');
-            const isWash = (bay.bay_type === 'wash');
-            const typeLabel = isWash ? 'Wash Bay' : 'Oil / Tech';
+            const skill = bay.skill_tag || '';
+            const isOil = (bay.bay_type === 'oil' || bay.bay_type === 'oil_change' || skill === 'oil_only');
+            const isWash = (bay.bay_type === 'wash' || skill === 'wash_only' || (!isOil && skill !== 'wash_and_oil' && skill !== 'all'));
+            const isHybrid = (skill === 'wash_and_oil' || skill === 'all');
+            const typeLabel = isOil ? 'Oil / Tech' : (isHybrid ? 'Wash & Oil' : 'Wash Bay');
             const typeClass = isWash ? 'wash' : 'oil_change';
             const typeIcon = isWash ? 'fa-shower' : 'fa-wrench';
             const statusLabel = isFree ? (I18nManager.t('free') || 'FREE') : (I18nManager.t('busy') || 'BUSY');
             const bayNum = bay.bay_number || bay.id;
 
-            const relevantQueue = isWash ? washQueue : techQueue;
-            const nextCar = relevantQueue && relevantQueue.length > 0 ? relevantQueue[0] : null;
+            const relevantQueue = isOil ? techQueue : (isWash ? washQueue : (allQueue || []));
+            const nextCar = relevantQueue && relevantQueue.length > 0
+                ? (relevantQueue.find(q => (!q.bay_id || q.bay_id == 0) && (q.status === 'waiting' || !q.status || q.status === 'pending')) || null)
+                : null;
 
             let cardContentHtml = '';
             if (isFree) {
@@ -12511,10 +12677,10 @@ class PosApp {
                         queueHtml = `
                             <div class="empty-state-modern">
                                 <div class="empty-icon-circle blue">
-                                    <i class="fa-solid fa-soap"></i>
+                                    <i class="fa-solid fa-wrench"></i>
                                 </div>
-                                <div class="empty-title">${isKm ? 'មិនទាន់មានយានយន្តផ្ទេរពីកន្លែងលាងទេ' : 'No Cars Waiting from Wash'}</div>
-                                <div class="empty-desc">${isKm ? 'យានយន្តដែលលាងរួចហើយត្រូវជួសជុល ឬប្តូរប្រេង នឹងបង្ហាញនៅទីនេះដោយស្វ័យប្រវត្តិ។' : 'Vehicles moving from wash to technical service will arrive here automatically.'}</div>
+                                <div class="empty-title">${isKm ? 'មិនទាន់មានយានយន្តក្នុងជួរទេ' : 'No Cars Waiting'}</div>
+                                <div class="empty-desc">${isKm ? 'យានយន្តមកដល់ថ្មី ឬផ្ទេរចេញពីកន្លែងលាង នឹងបង្ហាញនៅទីនេះដោយស្វ័យប្រវត្តិ។' : 'New arrivals and vehicles moving from wash will arrive here automatically.'}</div>
                             </div>
                         `;
                     } else {
@@ -12522,14 +12688,18 @@ class PosApp {
                             const cName = this.escapeHtml(car.customer_name || (isKm ? 'ភ្ញៀវទូទៅ' : 'Walk-in Guest'));
                             const vType = this.escapeHtml(car.vehicle_type || 'Car');
                             const pullBtnTxt = isKm ? 'ទាញឡើងលើស្ទូចបន្ទប់ទី ៤' : 'PULL ONTO BAY 4 LIFT';
-                            const readyTxt = isKm ? 'លាងរួចរាល់ • ត្រៀម' : 'Wash Finished &bull; Ready';
+                            const isHandover = (car.tech_task_status === 'ready_for_tech' || car.is_waiting_wash_handover);
+                            const readyTxt = isHandover 
+                                ? (isKm ? 'លាងរួចរាល់ • ត្រៀម' : 'Wash Finished &bull; Ready') 
+                                : (isKm ? 'មកដល់ថ្មី • ត្រៀម' : 'New Arrival &bull; Ready');
+                            const readyIcon = isHandover ? 'fa-water' : 'fa-car-side';
 
                             queueHtml += `
                                 <div class="queue-card card-shadow">
                                     <div class="queue-card-top">
                                         <span class="queue-plate-dark mono"><i class="fa-solid fa-car mr-1"></i>${this.escapeHtml(car.plate_number)}</span>
                                         <span class="queue-origin-badge">
-                                            <i class="fa-solid fa-water"></i> ${readyTxt}
+                                            <i class="fa-solid ${readyIcon}"></i> ${readyTxt}
                                         </span>
                                     </div>
                                     <div>
@@ -12647,7 +12817,7 @@ class PosApp {
                         });
                     }
 
-                    const tabQueueTxt = isKm ? 'ជួរផ្ទេរពីលាង' : 'Wash Queue';
+                    const tabQueueTxt = isKm ? 'ជួរយានយន្តរង់ចាំ' : 'Incoming Queue';
                     const tabInspectTxt = isKm ? 'ត្រួតពិនិត្យ' : 'Inspection';
                     const tabCompTxt = isKm ? 'បានបញ្ចប់' : 'Completed';
 
@@ -14175,22 +14345,179 @@ class PosApp {
     static mgrPinInput = '';
     static managerPinCallback = null;
 
-    // 1. Shift Controls
+    // 1. Shift Controls & Badge Management
+    static shiftBadgeState = 'no_shift';
+    static oldShiftNeedingReview = null;
+    static endShiftMode = 'solo';
+
+    static updateShiftStatusBadge(state, data = null) {
+        this.shiftBadgeState = state;
+        const badge = document.getElementById('posShiftStatusBadge');
+        const icon = document.getElementById('posShiftStatusIcon');
+        const text = document.getElementById('posShiftStatusText');
+        if (!badge || !icon || !text) return;
+
+        badge.style.display = 'inline-flex';
+
+        if (state === 'day_closed') {
+            badge.style.border = '1px solid #cbd5e1';
+            badge.style.background = '#f1f5f9';
+            badge.style.color = '#475569';
+            icon.className = 'fa-solid fa-lock';
+            text.textContent = 'Today Closed (Opens Tomorrow)';
+        } else if (state === 'needs_review') {
+            this.oldShiftNeedingReview = data;
+            badge.style.border = '1px solid #fdba74';
+            badge.style.background = '#fff7ed';
+            badge.style.color = '#c2410c';
+            icon.className = 'fa-solid fa-triangle-exclamation';
+            text.textContent = 'Shift Needs Manager Review';
+        } else if (state === 'active') {
+            const floatUsd = parseFloat(data?.opening_cash_usd || 0).toFixed(2);
+            badge.style.border = '1px solid #a7f3d0';
+            badge.style.background = '#ecfdf5';
+            badge.style.color = '#059669';
+            icon.className = 'fa-solid fa-cash-register';
+            text.textContent = `Shift Active (Float: $${floatUsd})`;
+        } else {
+            // no_shift
+            badge.style.border = '1px solid #fecaca';
+            badge.style.background = '#fef2f2';
+            badge.style.color = '#dc2626';
+            icon.className = 'fa-solid fa-cash-register';
+            text.textContent = 'No Active Shift - Click to Open';
+        }
+    }
+
     static async checkCashierShift() {
-        if (!this.currentUser || this.currentUser.role !== 'cashier') return;
+        if (!this.currentUser || this.currentUser.role !== 'cashier') {
+            const badge = document.getElementById('posShiftStatusBadge');
+            if (badge) badge.style.display = 'none';
+            return;
+        }
         try {
+            // First check if today's business day is already closed
+            const lockCheck = await PosApi.request('get_day_lock_status', {});
+            if (lockCheck && lockCheck.is_locked && lockCheck.lock_reason === 'day_closed') {
+                this.activeShift = null;
+                PosStorage.removeCurrentShift();
+                this.updateShiftRegisterBlocked(true);
+                this.updateShiftStatusBadge('day_closed');
+                this.showAppAlert('Today is closed. Sales will open again tomorrow.', 'warning', 'Day Closed');
+                return;
+            }
+
             const res = await PosApi.getShiftStatus(this.currentUser.id);
+            if (res && res.needs_manager_review && res.old_shift) {
+                this.activeShift = null;
+                this.oldShiftNeedingReview = res.old_shift;
+                PosStorage.removeCurrentShift();
+                this.updateShiftRegisterBlocked(true);
+                this.updateShiftStatusBadge('needs_review', res.old_shift);
+                this.showOldShiftAlert(res.old_shift);
+                return;
+            }
+
             if (res && res.has_active_shift && res.shift) {
                 this.activeShift = res.shift;
                 PosStorage.setCurrentShift(res.shift);
                 this.updateShiftRegisterBlocked(false);
+                this.updateShiftStatusBadge('active', res.shift);
             } else {
                 this.activeShift = null;
                 PosStorage.removeCurrentShift();
+                this.updateShiftRegisterBlocked(true);
+                this.updateShiftStatusBadge('no_shift');
                 this.showStartShiftModal();
             }
         } catch (err) {
             console.warn('Could not verify shift status from backend:', err);
+        }
+    }
+
+    static showOldShiftAlert(oldShift) {
+        const modal = document.getElementById('modalOldShiftAlert');
+        if (!modal) return;
+        const details = document.getElementById('oldShiftDetailsBox');
+        if (details) {
+            const started = oldShift?.started_at || 'Previous Day';
+            const floatUsd = parseFloat(oldShift?.opening_cash_usd || 0).toFixed(2);
+            details.innerHTML = `
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="color: var(--text-muted);">Shift ID:</span>
+                    <strong style="font-family: monospace;">${oldShift?.shift_uid || ('#' + oldShift?.id)}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="color: var(--text-muted);">Cashier:</span>
+                    <strong>${oldShift?.cashier_name || 'Cashier'}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="color: var(--text-muted);">Started At:</span>
+                    <span>${started}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">Opening Float:</span>
+                    <strong style="color: var(--primary);">$${floatUsd}</strong>
+                </div>
+            `;
+        }
+        const mgrForm = document.getElementById('oldShiftManagerForm');
+        if (mgrForm) mgrForm.style.display = 'none';
+        const btnShow = document.getElementById('btnShowManagerReviewForm');
+        if (btnShow) btnShow.style.display = 'inline-flex';
+        const btnSubmit = document.getElementById('btnSubmitManagerReview');
+        if (btnSubmit) btnSubmit.style.display = 'none';
+
+        modal.classList.add('open');
+    }
+
+    static async handleSubmitManagerReview() {
+        if (!this.oldShiftNeedingReview) return;
+        const countUsd = parseFloat(document.getElementById('reviewCountUsd')?.value || 0);
+        const countKhr = parseInt(document.getElementById('reviewCountKhr')?.value || 0);
+        const mgrUser = document.getElementById('reviewMgrUsername')?.value.trim() || '';
+        const mgrPin = document.getElementById('reviewMgrPin')?.value.trim() || '';
+        const reason = document.getElementById('reviewReason')?.value.trim() || '';
+        const btn = document.getElementById('btnSubmitManagerReview');
+
+        if (!mgrUser) {
+            alert('Please enter Manager Username');
+            return;
+        }
+        if (!mgrPin || mgrPin.length < 4) {
+            alert('Please enter Manager PIN');
+            return;
+        }
+        if (!reason || reason.length < 3) {
+            alert('Please enter a written review reason (minimum 3 characters)');
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Closing shift...`;
+
+        try {
+            const res = await PosApi.managerReviewShift({
+                shiftId: this.oldShiftNeedingReview.id,
+                countedCashUsd: countUsd,
+                countedCashKhr: countKhr,
+                managerUsername: mgrUser,
+                managerPin: mgrPin,
+                reason
+            });
+            if (res && res.success) {
+                document.getElementById('modalOldShiftAlert')?.classList.remove('open');
+                this.oldShiftNeedingReview = null;
+                this.showToastNotice('Overnight shift reviewed and closed. You can now open today\'s shift.', 'success');
+                await this.checkCashierShift();
+            } else {
+                alert(res?.error || 'Failed to review and close shift');
+            }
+        } catch (err) {
+            alert(err.message || 'Failed to review and close shift');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-circle-check mr-1"></i> Close Overnight Shift`;
         }
     }
 
@@ -14271,6 +14598,7 @@ class PosApp {
             if (res && res.success) {
                 this.activeShift = res.shift || {
                     id: res.shift_id,
+                    shift_uid: res.shift_uid,
                     cashier_id: this.currentUser?.id,
                     cashier_name: this.currentUser?.full_name,
                     opening_cash_usd: openingUsd,
@@ -14280,7 +14608,13 @@ class PosApp {
                 PosStorage.setCurrentShift(this.activeShift);
                 document.getElementById('modalStartShift')?.classList.remove('open');
                 this.updateShiftRegisterBlocked(false);
+                this.updateShiftStatusBadge('active', this.activeShift);
                 this.showToastNotice('Shift started successfully! Starting cash recorded.', 'success');
+
+                // Print Open Float Slip directly on 80mm thermal printer
+                if (res.slip && window.PosThermalPrinter && PosThermalPrinter.printOpenShiftSlip) {
+                    PosThermalPrinter.printOpenShiftSlip(res.slip);
+                }
             } else {
                 alert(res?.error || 'Failed to start shift');
             }
@@ -14289,6 +14623,48 @@ class PosApp {
         } finally {
             btn.disabled = false;
             btn.innerHTML = `<i class="fa-solid fa-door-open mr-1"></i> <span data-i18n="openShiftBtn">បើកវេនការងារ (Open Shift)</span>`;
+        }
+    }
+
+    static setEndShiftMode(mode) {
+        this.endShiftMode = mode;
+        const soloBtn = document.getElementById('endShiftModeSoloBtn');
+        const handoverBtn = document.getElementById('endShiftModeHandoverBtn');
+        const incWrap = document.getElementById('endShiftIncomingWrap');
+        const signoffTitle = document.getElementById('endShiftSignoffTitle');
+        const outPinLabel = document.getElementById('endShiftOutPinLabel');
+        const submitText = document.getElementById('btnConfirmEndShiftText');
+
+        if (mode === 'solo') {
+            if (soloBtn) {
+                soloBtn.className = 'btn btn-sm active';
+                soloBtn.style.background = 'var(--primary)';
+                soloBtn.style.color = '#fff';
+            }
+            if (handoverBtn) {
+                handoverBtn.className = 'btn btn-sm';
+                handoverBtn.style.background = 'transparent';
+                handoverBtn.style.color = 'var(--text-muted)';
+            }
+            if (incWrap) incWrap.style.display = 'none';
+            if (signoffTitle) signoffTitle.innerHTML = `<i class="fa-solid fa-key mr-1"></i> Cashier Sign-off (Solo PIN)`;
+            if (outPinLabel) outPinLabel.textContent = `Cashier Security PIN *`;
+            if (submitText) submitText.textContent = `End Shift (Solo)`;
+        } else {
+            if (soloBtn) {
+                soloBtn.className = 'btn btn-sm';
+                soloBtn.style.background = 'transparent';
+                soloBtn.style.color = 'var(--text-muted)';
+            }
+            if (handoverBtn) {
+                handoverBtn.className = 'btn btn-sm active';
+                handoverBtn.style.background = 'var(--primary)';
+                handoverBtn.style.color = '#fff';
+            }
+            if (incWrap) incWrap.style.display = 'block';
+            if (signoffTitle) signoffTitle.innerHTML = `<i class="fa-solid fa-key mr-1"></i> Handover Sign-off (Both PINs)`;
+            if (outPinLabel) outPinLabel.textContent = `Outgoing Cashier PIN *`;
+            if (submitText) submitText.textContent = `Complete Handover`;
         }
     }
 
@@ -14316,6 +14692,7 @@ class PosApp {
         if (inPin) inPin.value = '';
         if (notes) notes.value = '';
 
+        this.setEndShiftMode('solo');
         modal.classList.add('open');
     }
 
@@ -14329,22 +14706,25 @@ class PosApp {
         const inPin = document.getElementById('endShiftInPin')?.value.trim() || '';
         const notes = document.getElementById('endShiftNotes')?.value.trim() || '';
         const btn = document.getElementById('btnConfirmEndShift');
+        const isSolo = (this.endShiftMode === 'solo');
 
-        if (!outPin || outPin.length !== 6) {
-            alert('Please enter your 6-digit outgoing cashier PIN');
+        if (!outPin || outPin.length < 4) {
+            alert('Please enter your cashier security PIN');
             return;
         }
-        if (!inUser) {
-            alert('Please enter the incoming next cashier username');
-            return;
-        }
-        if (!inPin || inPin.length !== 6) {
-            alert('Please enter the incoming next cashier 6-digit PIN');
-            return;
+        if (!isSolo) {
+            if (!inUser) {
+                alert('Please enter the incoming next cashier username');
+                return;
+            }
+            if (!inPin || inPin.length < 4) {
+                alert('Please enter the incoming next cashier PIN');
+                return;
+            }
         }
 
         btn.disabled = true;
-        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Handing over shift...`;
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Closing shift...`;
 
         try {
             const res = await PosApi.endShift({
@@ -14352,24 +14732,34 @@ class PosApp {
                 countedCashUsd: countUsd,
                 countedCashKhr: countKhr,
                 outgoingPin: outPin,
-                incomingUsername: inUser,
-                incomingPin: inPin,
+                incomingUsername: isSolo ? '' : inUser,
+                incomingPin: isSolo ? '' : inPin,
+                isSolo,
                 notes
             });
             if (res && res.success) {
                 document.getElementById('modalEndShift')?.classList.remove('open');
                 this.activeShift = null;
                 PosStorage.removeCurrentShift();
-                this.showAppAlert(`Shift ended and handed over successfully from ${res.outgoing_cashier} to ${res.incoming_cashier}. The app will now log out.`, 'success', 'Shift Handover Complete');
-                this.handleLogout();
+                this.updateShiftRegisterBlocked(true);
+                this.updateShiftStatusBadge('no_shift');
+
+                // Print End Shift Slip directly on 80mm thermal printer
+                if (res.slip && window.PosThermalPrinter && PosThermalPrinter.printEndShiftSlip) {
+                    PosThermalPrinter.printEndShiftSlip(res.slip);
+                }
+
+                const diffMsg = (res.total_difference_usd !== undefined) ? ` Expected: $${parseFloat(res.expected_cash_usd || 0).toFixed(2)}, Counted: $${countUsd.toFixed(2)}, Diff: $${parseFloat(res.total_difference_usd || 0).toFixed(2)}.` : '';
+                this.showAppAlert(`Shift ended successfully (${isSolo ? 'Solo' : 'Handover'}).${diffMsg} Printing slip...`, 'success', 'Shift Closed');
+                setTimeout(() => this.handleLogout(), 2500);
             } else {
-                alert(res?.error || 'Failed to end shift and handover');
+                alert(res?.error || 'Failed to end shift');
             }
         } catch (err) {
-            alert(err.message || 'Failed to end shift and handover');
+            alert(err.message || 'Failed to end shift');
         } finally {
             btn.disabled = false;
-            btn.innerHTML = `<i class="fa-solid fa-arrow-right-from-bracket mr-1"></i> បញ្ចប់វេន និងផ្ទេរវេន`;
+            btn.innerHTML = `<i class="fa-solid fa-lock mr-1"></i> <span id="btnConfirmEndShiftText">${isSolo ? 'End Shift (Solo)' : 'Complete Handover'}</span>`;
         }
     }
 

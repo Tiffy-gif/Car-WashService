@@ -33,7 +33,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $notes = trim($_POST['notes'] ?? '');
 
             $res = CashierControl::startShift($currentUserId, $currentFullName, $openingUsd, $openingKhr, null, null, $notes);
-            $message = $res['message'] ?? 'Shift started successfully.';
+            $message = "Shift started successfully with starting cash $" . number_format($openingUsd, 2) . ". <a href='slip.php?type=open&id=" . (int)$res['shift_id'] . "' target='_blank' class='btn btn-xs btn-primary ml-2' style='display:inline-flex;align-items:center;margin-left:8px;'><i class='fa-solid fa-print mr-1'></i> Print Open Float Slip</a>";
             $messageType = 'success';
         }
 
@@ -48,19 +48,55 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $notes = trim($_POST['notes'] ?? '');
 
             $res = CashierControl::endShift($shiftId, $countedUsd, $countedKhr, $outgoingPin, $incomingUsername, $incomingPin, $notes);
+            $printBtn = " <a href='slip.php?type=end&id={$shiftId}' target='_blank' class='btn btn-xs btn-primary ml-2' style='display:inline-flex;align-items:center;margin-left:8px;'><i class='fa-solid fa-print mr-1'></i> Print Slip</a>";
 
             if (!empty($res['has_shortage'])) {
                 if ($isManagerOrOwner) {
-                    $message = "Shift handover complete. Warning: Cash shortage of $" . number_format($res['shortage_owed_usd'], 2) . " recorded as owed by outgoing cashier.";
+                    $message = "Shift handover complete. Warning: Cash shortage of $" . number_format($res['shortage_owed_usd'], 2) . " recorded." . $printBtn;
                     $messageType = 'warning';
                 } else {
-                    $message = "Shift handover successfully signed off by both cashiers.";
+                    $message = "Shift handover successfully signed off by both cashiers." . $printBtn;
                     $messageType = 'success';
                 }
             } else {
-                $message = "Shift handover successfully completed and signed off.";
+                $message = "Shift handover successfully completed and signed off." . $printBtn;
                 $messageType = 'success';
             }
+        }
+
+        // 2B. Solo End Shift (Single cashier / day end - requires only cashier's own PIN)
+        elseif ($action === 'end_shift_solo') {
+            $shiftId = (int)($_POST['shift_id'] ?? 0);
+            $countedUsd = max(0.00, (float)($_POST['counted_cash_usd'] ?? 0.00));
+            $countedKhr = max(0, (int)($_POST['counted_cash_khr'] ?? 0));
+            $cashierPin = (string)($_POST['cashier_pin'] ?? '');
+            $notes = trim($_POST['notes'] ?? '');
+
+            $res = CashierControl::endShiftSolo($shiftId, $countedUsd, $countedKhr, $cashierPin, $notes);
+            $printBtn = " <a href='slip.php?type=end&id={$shiftId}' target='_blank' class='btn btn-xs btn-primary ml-2' style='display:inline-flex;align-items:center;margin-left:8px;'><i class='fa-solid fa-print mr-1'></i> Print Slip</a>";
+
+            if (!empty($res['has_shortage'])) {
+                $message = "Solo shift ended. Warning: Cash shortage of $" . number_format($res['shortage_owed_usd'], 2) . " recorded." . $printBtn;
+                $messageType = 'warning';
+            } else {
+                $message = "Solo shift ended successfully. Cash drawer closed." . $printBtn;
+                $messageType = 'success';
+            }
+        }
+
+        // 2C. Manager Review & Close Overnight Shift (Requires written reason + manager PIN)
+        elseif ($action === 'manager_review_shift') {
+            $shiftId = (int)($_POST['shift_id'] ?? 0);
+            $countedUsd = max(0.00, (float)($_POST['counted_cash_usd'] ?? 0.00));
+            $countedKhr = max(0, (int)($_POST['counted_cash_khr'] ?? 0));
+            $mgrUsername = trim($_POST['manager_username'] ?? '');
+            $mgrPin = (string)($_POST['manager_pin'] ?? '');
+            $reason = trim($_POST['review_reason'] ?? '');
+
+            $res = CashierControl::managerCloseReviewShift($shiftId, $countedUsd, $countedKhr, $mgrUsername, $mgrPin, $reason);
+            $printBtn = " <a href='slip.php?type=end&id={$shiftId}' target='_blank' class='btn btn-xs btn-primary ml-2' style='display:inline-flex;align-items:center;margin-left:8px;'><i class='fa-solid fa-print mr-1'></i> Print Slip</a>";
+            $message = "Overnight shift #{$shiftId} reviewed and closed by manager. Written reason recorded." . $printBtn;
+            $messageType = 'success';
         }
 
         // 3. Trigger Spot Audit (Manager PIN required, cashier counts drawer blindly)
@@ -98,7 +134,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $notes = trim($_POST['notes'] ?? '');
 
             $res = CashierControl::closeDayZReport($mgrUsername, $mgrPin, $countedUsd, $countedKhr, $notes);
-            $message = "Day closed successfully! Final Z-Report: {$res['z_report_number']}. Total Sales: $" . number_format($res['total_sales_usd'], 2);
+            $closeRef = $res['close_id'] ?? $res['z_report_number'];
+            $printBtn = " <a href='slip.php?type=close_day&id={$closeRef}' target='_blank' class='btn btn-xs btn-primary ml-2' style='display:inline-flex;align-items:center;margin-left:8px;'><i class='fa-solid fa-print mr-1'></i> Print Z-Report Slip</a>";
+            $message = "Day closed successfully! Final Z-Report: {$res['z_report_number']}. Total Sales: $" . number_format($res['total_sales_usd'], 2) . $printBtn;
             $messageType = 'success';
         }
 
@@ -127,6 +165,10 @@ if ($activeShift && $isManagerOrOwner) {
     // Only Managers and Owners can see expected cash
     $expectedShiftCash = CashierControl::calculateShiftExpectedCash((int)$activeShift['id']);
 }
+
+// Fetch shifts needing manager review (left open overnight)
+$shiftsNeedingReview = CashierControl::getAllShiftsNeedingReview();
+$oldShiftNeedingReview = CashierControl::getOldShiftNeedingReview($currentUserId);
 
 // Check day lock status
 $dayLock = CashierControl::isDayLocked();
@@ -222,6 +264,71 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 <?php endif; ?>
 
+<!-- Old Shift Needing Manager Review Banner -->
+<?php if ($oldShiftNeedingReview): ?>
+    <div style="background: #fff7ed; border: 2px solid #ea580c; border-radius: var(--radius-md); padding: 16px 20px; margin-bottom: 24px; display: flex; align-items: flex-start; gap: 14px;">
+        <i class="fa-solid fa-triangle-exclamation" style="color: #ea580c; font-size: 24px; margin-top: 2px;"></i>
+        <div style="flex: 1;">
+            <div style="font-weight: 800; color: #9a3412; font-size: 15px;">OVERNIGHT SHIFT REQUIRES MANAGER REVIEW</div>
+            <div style="color: #7c2d12; font-size: 13.5px; margin-top: 4px;">
+                Your shift (<strong><?= htmlspecialchars($oldShiftNeedingReview['shift_uid']) ?></strong> started on <?= htmlspecialchars($oldShiftNeedingReview['started_at']) ?>) was left open overnight from a previous day.
+                System policy requires a manager to count the drawer and sign off with a written reason before you can start a new shift for today.
+            </div>
+            <?php if ($isManagerOrOwner): ?>
+                <div style="margin-top: 10px;">
+                    <button type="button" class="btn btn-sm btn-primary" onclick="openReviewModal(<?= (int)$oldShiftNeedingReview['id'] ?>, '<?= htmlspecialchars($oldShiftNeedingReview['shift_uid']) ?>', '<?= htmlspecialchars($oldShiftNeedingReview['cashier_name']) ?>', '<?= htmlspecialchars($oldShiftNeedingReview['started_at']) ?>', <?= (float)$oldShiftNeedingReview['opening_cash_usd'] ?>)">
+                        <i class="fa-solid fa-user-shield mr-1"></i> Review &amp; Close This Shift
+                    </button>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+<?php endif; ?>
+
+<!-- Manager Review List of Overnight Shifts -->
+<?php if ($isManagerOrOwner && !empty($shiftsNeedingReview)): ?>
+    <div class="card" style="border: 2px solid #f97316; margin-bottom: 24px;">
+        <div class="card-header" style="background: #fff7ed;">
+            <h2 class="card-title" style="color: #c2410c;">
+                <i class="fa-solid fa-triangle-exclamation mr-1"></i> Shifts Left Open from Previous Days (Needs Manager Review)
+            </h2>
+            <span class="badge badge-warning"><?= count($shiftsNeedingReview) ?> Pending Review</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table" style="font-size: 13px;">
+                <thead>
+                    <tr>
+                        <th>Shift UID</th>
+                        <th>Cashier</th>
+                        <th>Terminal</th>
+                        <th>Started At</th>
+                        <th>Opening Float</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($shiftsNeedingReview as $nr): ?>
+                        <tr>
+                            <td style="font-family: var(--font-mono); font-weight: 700;"><?= htmlspecialchars($nr['shift_uid']) ?></td>
+                            <td><strong><?= htmlspecialchars($nr['cashier_name']) ?></strong></td>
+                            <td><?= htmlspecialchars($nr['pos_device_name'] ?? 'Counter') ?></td>
+                            <td class="text-xs"><?= htmlspecialchars($nr['started_at']) ?></td>
+                            <td><?= formatUSD((float)$nr['opening_cash_usd']) ?></td>
+                            <td><span class="badge badge-danger">Needs Review</span></td>
+                            <td>
+                                <button type="button" class="btn btn-sm btn-primary" onclick="openReviewModal(<?= (int)$nr['id'] ?>, '<?= htmlspecialchars($nr['shift_uid']) ?>', '<?= htmlspecialchars($nr['cashier_name']) ?>', '<?= htmlspecialchars($nr['started_at']) ?>', <?= (float)$nr['opening_cash_usd'] ?>)">
+                                    <i class="fa-solid fa-user-shield mr-1"></i> Review &amp; Close
+                                </button>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+<?php endif; ?>
+
 <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; align-items: start;">
     
     <!-- Active Shift Card -->
@@ -253,7 +360,12 @@ include dirname(__DIR__) . '/layouts/header.php';
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
                     <span class="text-muted">Starting Cash (Float):</span>
-                    <strong style="color: var(--primary);"><?= formatUSD((float)$activeShift['opening_cash_usd']) ?></strong>
+                    <strong style="color: var(--primary);"><?= formatUSD((float)$activeShift['opening_cash_usd']) ?> / <?= number_format((int)($activeShift['opening_cash_khr'] ?? 0)) ?> ៛</strong>
+                </div>
+                <div style="margin-bottom: 12px; text-align: right;">
+                    <a href="slip.php?type=open&id=<?= (int)$activeShift['id'] ?>" target="_blank" class="btn btn-secondary btn-sm" style="font-weight: 600;">
+                        <i class="fa-solid fa-print mr-1"></i> Print / Reprint Open Slip
+                    </a>
                 </div>
 
                 <!-- Blind Cashiering Enforcement: Manager/Owner sees expected totals, Cashier NEVER sees it -->
@@ -282,52 +394,95 @@ include dirname(__DIR__) . '/layouts/header.php';
                 <?php endif; ?>
             </div>
 
-            <!-- Handover Form -->
+            <!-- Handover / Solo Close Shift Forms -->
             <div style="border-top: 1px solid var(--border); padding-top: 16px;">
-                <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--text-main);">
-                    <i class="fa-solid fa-handshake mr-1" style="color: var(--primary);"></i> Handover Shift to Incoming Cashier
-                </h3>
-                <form action="" method="POST" onsubmit="return confirm('Confirm shift handover? Both outgoing and incoming cashiers must sign off with their PIN.');">
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="action" value="end_shift">
-                    <input type="hidden" name="shift_id" value="<?= (int)$activeShift['id'] ?>">
-
-                    <div class="grid grid-cols-2" style="gap: 12px; margin-bottom: 12px;">
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label class="form-label">Blind Counted USD ($) *</label>
-                            <input type="number" step="0.01" min="0" name="counted_cash_usd" class="form-input" placeholder="0.00" required>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label class="form-label">Blind Counted KHR (៛)</label>
-                            <input type="number" step="100" min="0" name="counted_cash_khr" class="form-input" value="0">
-                        </div>
-                    </div>
-
-                    <div class="form-group" style="margin-bottom: 12px;">
-                        <label class="form-label">Outgoing Cashier PIN (<?= htmlspecialchars($activeShift['cashier_name']) ?>) *</label>
-                        <input type="password" maxlength="6" name="outgoing_pin" class="form-input" placeholder="6-digit PIN" required style="font-family: var(--font-mono); letter-spacing: 4px;">
-                    </div>
-
-                    <div class="grid grid-cols-2" style="gap: 12px; margin-bottom: 14px;">
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label class="form-label">Incoming Cashier Username *</label>
-                            <input type="text" name="incoming_username" class="form-input" placeholder="e.g. cashier2" required>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label class="form-label">Incoming Cashier PIN *</label>
-                            <input type="password" maxlength="6" name="incoming_pin" class="form-input" placeholder="6-digit PIN" required style="font-family: var(--font-mono); letter-spacing: 4px;">
-                        </div>
-                    </div>
-
-                    <div class="form-group" style="margin-bottom: 16px;">
-                        <label class="form-label">Handover Notes</label>
-                        <input type="text" name="notes" class="form-input" placeholder="Optional notes for manager">
-                    </div>
-
-                    <button type="submit" class="btn btn-primary" style="width: 100%;">
-                        <i class="fa-solid fa-signature mr-1"></i> Sign Off Shift Handover (Both PINs)
+                <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+                    <button type="button" class="btn btn-sm btn-primary" id="btnTabSolo" onclick="switchShiftCloseTab('solo')" style="font-weight: 700;">
+                        <i class="fa-solid fa-user mr-1"></i> Solo End Shift
                     </button>
-                </form>
+                    <button type="button" class="btn btn-sm btn-secondary" id="btnTabHandover" onclick="switchShiftCloseTab('handover')" style="font-weight: 600;">
+                        <i class="fa-solid fa-handshake mr-1"></i> Handover to Next Cashier
+                    </button>
+                </div>
+
+                <!-- Form 1: Solo End Shift (Cashier's PIN only) -->
+                <div id="shiftCloseSoloForm">
+                    <form action="" method="POST" onsubmit="return confirm('Confirm closing your shift alone? Your counted cash and personal PIN will be recorded.');">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="action" value="end_shift_solo">
+                        <input type="hidden" name="shift_id" value="<?= (int)$activeShift['id'] ?>">
+
+                        <div class="grid grid-cols-2" style="gap: 12px; margin-bottom: 12px;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label">Counted USD ($) *</label>
+                                <input type="number" step="0.01" min="0" name="counted_cash_usd" class="form-input" placeholder="0.00" required>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label">Counted KHR (៛)</label>
+                                <input type="number" step="100" min="0" name="counted_cash_khr" class="form-input" value="0">
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label class="form-label">Cashier Security PIN (<?= htmlspecialchars($activeShift['cashier_name']) ?>) *</label>
+                            <input type="password" maxlength="6" name="cashier_pin" class="form-input" placeholder="6-digit PIN" required style="font-family: var(--font-mono); letter-spacing: 4px;">
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label class="form-label">Closing Notes</label>
+                            <input type="text" name="notes" class="form-input" placeholder="Optional notes (e.g. Solo closing for the day)">
+                        </div>
+
+                        <button type="submit" class="btn btn-danger" style="width: 100%; font-weight: 700;">
+                            <i class="fa-solid fa-lock mr-1"></i> End Shift (Solo - Cashier PIN Only)
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Form 2: Handover to Next Cashier (Both PINs) -->
+                <div id="shiftCloseHandoverForm" style="display: none;">
+                    <form action="" method="POST" onsubmit="return confirm('Confirm shift handover? Both outgoing and incoming cashiers must sign off with their PIN.');">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="action" value="end_shift">
+                        <input type="hidden" name="shift_id" value="<?= (int)$activeShift['id'] ?>">
+
+                        <div class="grid grid-cols-2" style="gap: 12px; margin-bottom: 12px;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label">Blind Counted USD ($) *</label>
+                                <input type="number" step="0.01" min="0" name="counted_cash_usd" class="form-input" placeholder="0.00" required>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label">Blind Counted KHR (៛)</label>
+                                <input type="number" step="100" min="0" name="counted_cash_khr" class="form-input" value="0">
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label class="form-label">Outgoing Cashier PIN (<?= htmlspecialchars($activeShift['cashier_name']) ?>) *</label>
+                            <input type="password" maxlength="6" name="outgoing_pin" class="form-input" placeholder="6-digit PIN" required style="font-family: var(--font-mono); letter-spacing: 4px;">
+                        </div>
+
+                        <div class="grid grid-cols-2" style="gap: 12px; margin-bottom: 14px;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label">Incoming Cashier Username *</label>
+                                <input type="text" name="incoming_username" class="form-input" placeholder="e.g. cashier2" required>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label">Incoming Cashier PIN *</label>
+                                <input type="password" maxlength="6" name="incoming_pin" class="form-input" placeholder="6-digit PIN" required style="font-family: var(--font-mono); letter-spacing: 4px;">
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label class="form-label">Handover Notes</label>
+                            <input type="text" name="notes" class="form-input" placeholder="Optional notes for manager">
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" style="width: 100%; font-weight: 700;">
+                            <i class="fa-solid fa-signature mr-1"></i> Sign Off Shift Handover (Both PINs)
+                        </button>
+                    </form>
+                </div>
             </div>
 
         <?php else: ?>
@@ -467,12 +622,13 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <th>Shortage Owed</th>
                     <?php endif; ?>
                     <th>Status</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
                 <?php if (empty($allShifts)): ?>
                     <tr>
-                        <td colspan="<?= $isManagerOrOwner ? '10' : '5' ?>" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                        <td colspan="<?= $isManagerOrOwner ? '11' : '6' ?>" style="text-align: center; color: var(--text-muted); padding: 24px;">
                             No shift records found.
                         </td>
                     </tr>
@@ -509,6 +665,17 @@ include dirname(__DIR__) . '/layouts/header.php';
                                     <span class="badge badge-success">Open</span>
                                 <?php else: ?>
                                     <span class="badge badge-secondary">Ended</span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <?php if ($s['status'] === 'closed'): ?>
+                                    <a href="slip.php?type=end&id=<?= (int)$s['id'] ?>" target="_blank" class="btn btn-secondary btn-xs" style="font-weight: 600;">
+                                        <i class="fa-solid fa-print mr-1"></i> End Slip
+                                    </a>
+                                <?php else: ?>
+                                    <a href="slip.php?type=open&id=<?= (int)$s['id'] ?>" target="_blank" class="btn btn-secondary btn-xs" style="font-weight: 600;">
+                                        <i class="fa-solid fa-print mr-1"></i> Open Slip
+                                    </a>
                                 <?php endif; ?>
                             </td>
                         </tr>
@@ -577,6 +744,9 @@ include dirname(__DIR__) . '/layouts/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td>
+                                    <a href="slip.php?type=close_day&id=<?= (int)$dc['id'] ?>" target="_blank" class="btn btn-primary btn-sm" style="font-weight: 600;">
+                                        <i class="fa-solid fa-print mr-1"></i> Print Z-Report
+                                    </a>
                                     <?php if ($dc['status'] === 'closed'): ?>
                                         <button type="button" class="btn btn-secondary btn-sm" onclick="openReopenModal('<?= htmlspecialchars($dc['close_date']) ?>')">
                                             <i class="fa-solid fa-lock-open mr-1"></i> Reopen
@@ -786,9 +956,115 @@ include dirname(__DIR__) . '/layouts/header.php';
             </form>
         </div>
     </div>
+
+    <!-- Modal: Manager Review & Close Overnight Shift -->
+    <div class="modal-backdrop" id="managerReviewShiftModal">
+        <div class="modal" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3 class="modal-title" style="color: #dc2626;"><i class="fa-solid fa-user-shield mr-1"></i> Manager Review &amp; Close Shift</h3>
+                <button type="button" class="modal-close" onclick="closeModal('managerReviewShiftModal')">&times;</button>
+            </div>
+            <form action="" method="POST">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="manager_review_shift">
+                <input type="hidden" name="shift_id" id="review_modal_shift_id" value="">
+
+                <div class="modal-body">
+                    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: var(--radius-md); padding: 12px; margin-bottom: 14px; font-size: 13px; color: #991b1b;">
+                        <strong>Overnight Shift Left Open:</strong> System policy prohibits auto-closing. The manager must physically count drawer cash and record a written reason before closing this shift.
+                    </div>
+
+                    <div style="background: var(--bg-subtle); padding: 10px 14px; border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 13px;">
+                        <div>Shift: <strong id="review_modal_shift_uid">-</strong></div>
+                        <div>Cashier: <strong id="review_modal_cashier">-</strong></div>
+                        <div>Started: <span id="review_modal_started" class="text-muted">-</span></div>
+                        <div>Opening Float: <strong id="review_modal_opening" style="color: var(--primary);">-</strong></div>
+                    </div>
+
+                    <div class="grid grid-cols-2" style="gap: 12px; margin-bottom: 12px;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label">Manager Counted USD ($) *</label>
+                            <input type="number" step="0.01" min="0" name="counted_cash_usd" class="form-input" placeholder="0.00" required>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label">Manager Counted KHR (៛)</label>
+                            <input type="number" step="100" min="0" name="counted_cash_khr" class="form-input" value="0">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2" style="gap: 12px; margin-bottom: 12px;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label">Manager Username *</label>
+                            <input type="text" name="manager_username" class="form-input" value="<?= htmlspecialchars($currentUsername) ?>" required>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label">Manager PIN *</label>
+                            <input type="password" maxlength="6" name="manager_pin" class="form-input" placeholder="6-digit PIN" required style="font-family: var(--font-mono); letter-spacing: 4px;">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label">Written Reason for Closing Shift *</label>
+                        <input type="text" name="review_reason" class="form-input" placeholder="e.g. Left open after night closing, cash verified against drawer" required minlength="3">
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('managerReviewShiftModal')"><?= htmlspecialchars(__('cancel')) ?></button>
+                    <button type="submit" class="btn btn-danger"><i class="fa-solid fa-check mr-1"></i> Review &amp; Close Shift</button>
+                </div>
+            </form>
+        </div>
+    </div>
 <?php endif; ?>
 
 <script>
+function switchShiftCloseTab(mode) {
+    const soloTab = document.getElementById('shiftCloseSoloForm');
+    const handoverTab = document.getElementById('shiftCloseHandoverForm');
+    const btnSolo = document.getElementById('btnTabSolo');
+    const btnHandover = document.getElementById('btnTabHandover');
+    if (mode === 'solo') {
+        if (soloTab) soloTab.style.display = 'block';
+        if (handoverTab) handoverTab.style.display = 'none';
+        if (btnSolo) {
+            btnSolo.className = 'btn btn-sm btn-primary';
+            btnSolo.style.fontWeight = '700';
+        }
+        if (btnHandover) {
+            btnHandover.className = 'btn btn-sm btn-secondary';
+            btnHandover.style.fontWeight = '600';
+        }
+    } else {
+        if (soloTab) soloTab.style.display = 'none';
+        if (handoverTab) handoverTab.style.display = 'block';
+        if (btnSolo) {
+            btnSolo.className = 'btn btn-sm btn-secondary';
+            btnSolo.style.fontWeight = '600';
+        }
+        if (btnHandover) {
+            btnHandover.className = 'btn btn-sm btn-primary';
+            btnHandover.style.fontWeight = '700';
+        }
+    }
+}
+
+function openReviewModal(shiftId, shiftUid, cashierName, startedAt, openingFloat) {
+    const elId = document.getElementById('review_modal_shift_id');
+    const elUid = document.getElementById('review_modal_shift_uid');
+    const elCashier = document.getElementById('review_modal_cashier');
+    const elStarted = document.getElementById('review_modal_started');
+    const elOpening = document.getElementById('review_modal_opening');
+
+    if (elId) elId.value = shiftId;
+    if (elUid) elUid.textContent = shiftUid;
+    if (elCashier) elCashier.textContent = cashierName;
+    if (elStarted) elStarted.textContent = startedAt;
+    if (elOpening) elOpening.textContent = '$' + parseFloat(openingFloat || 0).toFixed(2);
+
+    openModal('managerReviewShiftModal');
+}
+
 function openReopenModal(dateStr) {
     let inp = document.getElementById('reopen_close_date');
     if (inp) {

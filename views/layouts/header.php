@@ -362,11 +362,18 @@ $pageHeaderTitle = isset($pageTitle) && trim((string)$pageTitle) !== '' ? ($page
                 <button type="button" class="btn btn-secondary btn-sm mobile-menu-btn" id="mobileMenuBtn" aria-label="Open navigation menu" title="Open navigation menu">
                     <i class="fa-solid fa-bars"></i>
                 </button>
-                <div class="topbar-title">
-                    <?= htmlspecialchars($pageTitle ?? __('app_name')) ?>
+                <div class="topbar-title" style="<?= !empty($pageSubtitle) ? 'display: flex; flex-direction: column; justify-content: center; line-height: 1.2;' : '' ?>">
+                    <span style="font-size: 19px; font-weight: 700; color: var(--text-main); letter-spacing: -0.01em;"><?= htmlspecialchars($pageTitle ?? __('app_name')) ?></span>
+                    <?php if (!empty($pageSubtitle)): ?>
+                        <span style="font-size: 12.5px; font-weight: 400; color: var(--text-muted); margin-top: 2px;"><?= htmlspecialchars($pageSubtitle) ?></span>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="topbar-actions">
+                <?php if (!empty($pageHeaderAction)): ?>
+                    <?= $pageHeaderAction ?>
+                <?php endif; ?>
+                <?php if (empty($hideTopbarTimeclock)): ?>
                 <!-- Staff Timeclock Button -->
                 <button type="button" class="btn btn-sm <?= $activeTimecard ? 'btn-success' : 'btn-secondary' ?>" id="timeclockBtn" onclick="toggleTimeclockModal()" title="<?= $activeTimecard ? 'Clocked in since ' . date('h:i A', strtotime($activeTimecard['clock_in'])) : 'Click to Clock In / Out' ?>" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 600;">
                     <i class="fa-solid fa-clock" id="timeclockIcon" style="<?= $activeTimecard ? 'color: #ffffff;' : 'color: var(--text-muted);' ?>"></i>
@@ -377,6 +384,7 @@ $pageHeaderTitle = isset($pageTitle) && trim((string)$pageTitle) !== '' ? ($page
                 <button type="button" class="btn btn-secondary btn-sm" id="soundToggleBtn" onclick="toggleNotificationSound()" title="<?= $soundMuted ? 'Unmute notification sounds' : 'Mute notification sounds' ?>" aria-label="Toggle notification sounds">
                     <i class="fa-solid <?= $soundMuted ? 'fa-volume-xmark text-danger' : 'fa-volume-high' ?>" id="soundToggleIcon"></i>
                 </button>
+                <?php endif; ?>
 
                 <!-- Notification Bell -->
                 <div class="notification-dropdown-wrap">

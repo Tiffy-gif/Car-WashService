@@ -479,7 +479,7 @@ class PosApi {
     }
 
     /**
-     * Cashier Control: End shift with blind count and next cashier handover sign-off PIN
+     * Cashier Control: End shift with blind count and next cashier handover sign-off PIN or solo
      */
     static async endShift(data) {
         return await this.request('shift_end', {
@@ -489,8 +489,30 @@ class PosApi {
             outgoing_pin: data.outgoingPin,
             incoming_username: data.incomingUsername,
             incoming_pin: data.incomingPin,
+            is_solo: !!data.isSolo,
             notes: data.notes || ''
         });
+    }
+
+    /**
+     * Cashier Control: Manager Review and Close Overnight Shift
+     */
+    static async managerReviewShift(data) {
+        return await this.request('manager_review_shift', {
+            shift_id: data.shiftId,
+            counted_cash_usd: data.countedCashUsd,
+            counted_cash_khr: data.countedCashKhr,
+            manager_username: data.managerUsername,
+            manager_pin: data.managerPin,
+            reason: data.reason
+        });
+    }
+
+    /**
+     * Cashier Control: Get all shifts needing manager review
+     */
+    static async getShiftsNeedingReview() {
+        return await this.request('get_shifts_needing_review', {});
     }
 
     /**
@@ -501,6 +523,36 @@ class PosApi {
             manager_username: managerUsername,
             manager_pin: managerPin
         });
+    }
+
+    /**
+     * Cashier Control: Record Drawer Cash Movement (Cash In / Cash Out)
+     */
+    static async recordCashMovement(data) {
+        return await this.request('record_cash_movement', {
+            type: data.type || 'cash_out',
+            amount_usd: data.amountUsd || 0,
+            amount_khr: data.amountKhr || 0,
+            reason: data.reason || '',
+            cashier_id: data.cashierId,
+            manager_username: data.managerUsername || '',
+            manager_pin: data.managerPin || ''
+        });
+    }
+
+    /**
+     * Slip Data Reprints
+     */
+    static async getOpenShiftSlip(shiftId) {
+        return await this.request('get_open_shift_slip', { shift_id: shiftId });
+    }
+
+    static async getEndShiftSlip(shiftId) {
+        return await this.request('get_end_shift_slip', { shift_id: shiftId });
+    }
+
+    static async getCloseDaySlip(closeIdOrDate) {
+        return await this.request('get_close_day_slip', { close_id: closeIdOrDate });
     }
 
     /**

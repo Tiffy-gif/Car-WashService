@@ -1,0 +1,553 @@
+/**
+ * UNIFIED THERMAL CUSTOMER RECEIPT STYLESHEET
+ * Used across:
+ * 1. Receipt Settings Live Preview (views/owner/settings.php)
+ * 2. Backoffice Order & Test Receipt (views/orders/receipt.php)
+ * 3. POS Modal Receipt & Browser Print (pos/index.html & pos/js/app.js)
+ * 
+ * Rules for Thermal Printing:
+ * - Pure Black (#000000) for all text and lines - NO GRAYS to prevent dithered/faint printhead output.
+ * - Slightly bold font-weight (600 base, 700-800 for headers/totals) for solid burn.
+ * - Consistent 576-dot (80mm) and 384-dot (58mm) widths.
+ */
+
+.unified-receipt {
+    width: 100%;
+    max-width: 310px;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: 'Kantumruy Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 11px;
+    line-height: 1.35;
+    font-weight: 600;
+    padding: 12px 10px;
+    box-sizing: border-box;
+    margin: 0 auto;
+    text-align: left;
+}
+
+/* 58mm Paper Variant */
+.unified-receipt.paper-58mm {
+    max-width: 230px !important;
+    font-size: 10px;
+    padding: 8px 6px;
+}
+
+/* Enforce pure black on all child elements */
+.unified-receipt,
+.unified-receipt * {
+    color: #000000 !important;
+    box-sizing: border-box;
+}
+
+/* Inverted Plate Badge overrides child white color */
+.unified-receipt .receipt-plate-badge,
+.unified-receipt .receipt-plate-badge * {
+    color: #ffffff !important;
+}
+
+/* Header & Branding */
+.unified-receipt .receipt-header {
+    text-align: center;
+    margin-bottom: 6px;
+}
+
+.unified-receipt .receipt-logo-wrap {
+    margin: 0 auto 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.unified-receipt .receipt-logo-img {
+    max-height: 54px;
+    max-width: 150px;
+    object-fit: contain;
+    filter: grayscale(100%) contrast(150%);
+    -webkit-filter: grayscale(100%) contrast(150%);
+}
+
+.unified-receipt .receipt-shop-name-km {
+    font-family: 'Kantumruy Pro', sans-serif;
+    font-size: 13.5px;
+    font-weight: 700;
+    line-height: 1.3;
+    margin-bottom: 2px;
+}
+
+.unified-receipt .receipt-shop-name-en {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    margin-bottom: 2px;
+}
+
+.unified-receipt .receipt-shop-address,
+.unified-receipt .receipt-shop-phone {
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+/* Dividers */
+.unified-receipt .receipt-divider-dashed {
+    border-top: 1px dashed #000000;
+    margin: 6px 0;
+}
+
+.unified-receipt .receipt-divider-solid {
+    border-top: 1.5px solid #000000;
+    margin: 6px 0;
+}
+
+.unified-receipt .receipt-divider-double {
+    border-top: 2px solid #000000;
+    margin: 6px 0;
+}
+
+/* Document Title (Hidden: POS Printout does not have document title) */
+.unified-receipt .receipt-doc-title {
+    display: none !important;
+}
+
+/* Status Banners (Reprint, Cancelled, Unpaid) */
+.unified-receipt .receipt-status-banner {
+    border: 1.5px solid #000000;
+    padding: 4px;
+    margin: 6px 0;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.unified-receipt .receipt-status-banner.cancelled {
+    background: #000000;
+    color: #ffffff !important;
+}
+.unified-receipt .receipt-status-banner.cancelled * {
+    color: #ffffff !important;
+}
+
+/* Metadata Rows (Invoice #, Date, Cashier, Customer) */
+.unified-receipt .receipt-meta-grid {
+    font-size: 10px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.unified-receipt .receipt-meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 2px;
+}
+
+/* Prominent Vehicle License Plate Badge (Inverted Solid Black Box) */
+.unified-receipt .receipt-plate-badge {
+    background: #000000 !important;
+    padding: 6px 8px;
+    border-radius: 3px;
+    margin: 6px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 800;
+}
+
+.unified-receipt .receipt-plate-label {
+    font-size: 10px;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.unified-receipt .receipt-plate-number {
+    font-size: 14.5px;
+    letter-spacing: 1px;
+    font-family: 'Segoe UI', sans-serif;
+    white-space: nowrap;
+}
+
+.unified-receipt .receipt-plate-sub {
+    font-size: 9px;
+    font-weight: 600;
+    opacity: 0.95;
+    margin-left: 2px;
+}
+
+/* 3-Column Items Table */
+.unified-receipt .receipt-items-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    margin: 4px 0;
+    font-size: 10.5px;
+}
+
+.unified-receipt .receipt-items-table th {
+    border-top: 1px dashed #000000;
+    border-bottom: 1px dashed #000000;
+    padding: 4px 0;
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+}
+
+.unified-receipt .receipt-items-table td {
+    padding: 4px 0;
+    vertical-align: top;
+    font-weight: 600;
+}
+
+.unified-receipt .receipt-items-table td.col-item {
+    text-align: left;
+    word-break: break-word;
+    line-height: 1.3;
+}
+
+.unified-receipt .receipt-items-table td.col-qty {
+    text-align: center;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', 'Segoe UI Mono', monospace;
+    width: 32px;
+}
+
+.unified-receipt .receipt-items-table td.col-price {
+    text-align: right;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', 'Segoe UI Mono', monospace;
+    width: 62px;
+}
+
+/* Financial Totals Breakdown */
+.unified-receipt .receipt-totals-block {
+    font-size: 10.5px;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+.unified-receipt .receipt-summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 2px;
+}
+
+.unified-receipt .receipt-total-usd-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 14.5px;
+    font-weight: 800;
+    margin-bottom: 2px;
+}
+
+.unified-receipt .receipt-total-usd-row .amount {
+    font-size: 16px;
+    font-family: 'JetBrains Mono', 'Segoe UI Mono', monospace;
+}
+
+.unified-receipt .receipt-total-khr-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 12.5px;
+    font-weight: 800;
+    margin-bottom: 4px;
+}
+
+.unified-receipt .receipt-exchange-rate {
+    text-align: right;
+    font-size: 9.5px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+/* Payment Info */
+.unified-receipt .receipt-payment-block {
+    font-size: 10.5px;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+/* Oil Care Reminder Box */
+.unified-receipt .receipt-oil-reminder-box {
+    border: 1px dashed #000000;
+    border-radius: 3px;
+    padding: 6px;
+    margin: 8px 0;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.unified-receipt .receipt-oil-reminder-title {
+    font-weight: 800;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+}
+
+/* Inspection / Repair Notes Box */
+.unified-receipt .receipt-notes-box {
+    border: 1px dashed #000000;
+    border-radius: 3px;
+    padding: 5px 6px;
+    margin: 6px 0;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+/* Footer Section */
+.unified-receipt .receipt-footer {
+    text-align: center;
+    margin-top: 8px;
+    padding-top: 4px;
+}
+
+.unified-receipt .receipt-footer-msg {
+    font-family: 'Kantumruy Pro', sans-serif;
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 1.4;
+    white-space: pre-line;
+}
+
+.unified-receipt .receipt-footer-sub {
+    font-size: 9px;
+    font-weight: 600;
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Extra Lines & Welcome Slogan */
+.unified-receipt .receipt-welcome-line {
+    font-size: 11px;
+    font-weight: 700;
+    margin: 4px 0 2px;
+}
+
+.unified-receipt .receipt-extra-lines {
+    font-size: 9.5px;
+    font-weight: 600;
+    line-height: 1.35;
+    margin: 4px 0;
+    white-space: pre-line;
+}
+
+/* Typography & Sizing Variants */
+.unified-receipt.font-small {
+    font-size: 9.5px !important;
+}
+.unified-receipt.font-small .receipt-items-table {
+    font-size: 9.5px !important;
+}
+.unified-receipt.font-small .receipt-total-usd-row {
+    font-size: 13.5px !important;
+}
+.unified-receipt.font-small .receipt-total-usd-row .amount {
+    font-size: 14.5px !important;
+}
+
+.unified-receipt.font-large {
+    font-size: 12.5px !important;
+}
+.unified-receipt.font-large .receipt-items-table {
+    font-size: 12px !important;
+}
+.unified-receipt.font-large .receipt-total-usd-row {
+    font-size: 16.5px !important;
+}
+.unified-receipt.font-large .receipt-total-usd-row .amount {
+    font-size: 18px !important;
+}
+
+/* Boldness Variants */
+.unified-receipt.bold-off,
+.unified-receipt.bold-off * {
+    font-weight: 500 !important;
+}
+.unified-receipt.bold-off .receipt-total-usd-row,
+.unified-receipt.bold-off .receipt-total-usd-row .amount,
+.unified-receipt.bold-off .receipt-plate-badge,
+.unified-receipt.bold-off strong {
+    font-weight: 700 !important;
+}
+
+/* Line Spacing Variants */
+.unified-receipt.spacing-compact {
+    line-height: 1.2 !important;
+    padding: 8px 6px !important;
+}
+.unified-receipt.spacing-compact .receipt-divider-dashed,
+.unified-receipt.spacing-compact .receipt-divider-solid {
+    margin: 3px 0 !important;
+}
+.unified-receipt.spacing-compact .receipt-meta-row,
+.unified-receipt.spacing-compact .receipt-summary-row {
+    margin-bottom: 1px !important;
+}
+
+.unified-receipt.spacing-relaxed {
+    line-height: 1.55 !important;
+    padding: 16px 12px !important;
+}
+.unified-receipt.spacing-relaxed .receipt-divider-dashed,
+.unified-receipt.spacing-relaxed .receipt-divider-solid {
+    margin: 8px 0 !important;
+}
+.unified-receipt.spacing-relaxed .receipt-meta-row,
+.unified-receipt.spacing-relaxed .receipt-summary-row {
+    margin-bottom: 4px !important;
+}
+
+/* Header Alignment Variants */
+.unified-receipt .receipt-header.align-left {
+    text-align: left !important;
+}
+.unified-receipt .receipt-header.align-left .receipt-logo-wrap {
+    justify-content: flex-start !important;
+}
+
+.unified-receipt .receipt-header.align-right {
+    text-align: right !important;
+}
+.unified-receipt .receipt-header.align-right .receipt-logo-wrap {
+    justify-content: flex-end !important;
+}
+
+.unified-receipt .receipt-header.align-center {
+    text-align: center !important;
+}
+.unified-receipt .receipt-header.align-center .receipt-logo-wrap {
+    justify-content: center !important;
+}
+
+/* Logo Sizes */
+.unified-receipt .receipt-logo-img.logo-small {
+    max-height: 36px !important;
+    max-width: 110px !important;
+}
+.unified-receipt .receipt-logo-img.logo-medium {
+    max-height: 52px !important;
+    max-width: 150px !important;
+}
+.unified-receipt .receipt-logo-img.logo-large {
+    max-height: 72px !important;
+    max-width: 190px !important;
+}
+
+/* Settings Page Toggle Switches and Section Cards */
+.receipt-settings-section {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+}
+.receipt-settings-section-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0 0 14px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.receipt-toggles-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+}
+.receipt-toggle-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 12px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.receipt-toggle-item:hover {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+}
+.receipt-toggle-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    user-select: none;
+}
+.receipt-toggle-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1e293b;
+}
+.receipt-toggle-desc {
+    font-size: 11px;
+    color: #64748b;
+}
+.receipt-switch {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 38px;
+    height: 22px;
+    border-radius: 11px;
+    background: #cbd5e1;
+    position: relative;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    margin: 0 0 0 10px;
+}
+.receipt-switch:checked {
+    background: #0284c7;
+}
+.receipt-switch::before {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #ffffff;
+    top: 3px;
+    left: 3px;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+.receipt-switch:checked::before {
+    transform: translateX(16px);
+}
+
+/* Print Media Styles */
+@media print {
+    body {
+        background: #ffffff !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    .screen-actions,
+    .no-print {
+        display: none !important;
+    }
+    .unified-receipt {
+        box-shadow: none !important;
+        border: none !important;
+        border-radius: 0 !important;
+        padding: 2mm 3mm !important;
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    @page {
+        size: 80mm auto;
+        margin: 0;
+    }
+}

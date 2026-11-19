@@ -293,6 +293,64 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $activeTab = 'supplies';
         }
     }
+
+    // 8. Receive Supplier Delivery (Inbound PO)
+    elseif ($action === 'receive_stock') {
+        $productId = (int)($_POST['product_id'] ?? 0);
+        $qty = max(1, (int)($_POST['qty_received'] ?? 0));
+        $supplierRef = trim($_POST['supplier_ref'] ?? '');
+        $notes = trim($_POST['notes'] ?? '');
+
+        $pStmt = $pdo->prepare("SELECT id, name_en, stock_qty FROM products WHERE id = ?");
+        $pStmt->execute([$productId]);
+        $prod = $pStmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($prod) {
+            $prevStock = (int)$prod['stock_qty'];
+            $newStock = $prevStock + $qty;
+            $fullNotes = "Received delivery: " . ($supplierRef ?: 'Restock') . ($notes ? " ({$notes})" : '');
+
+            $pdo->prepare("UPDATE products SET stock_qty = ? WHERE id = ?")->execute([$newStock, $productId]);
+            $uid = StockControl::addLedgerEntry(
+                $productId,
+                $prod['name_en'],
+                'received',
+                (float)$qty,
+                (float)$prevStock,
+                (float)$newStock,
+                $supplierRef ?: ('REC-' . date('Ymd')),
+                $fullNotes,
+                (int)Auth::getUserId()
+            );
+
+            AuditLogger::log('STOCK_RECEIVED', "Received {$qty} units of '{$prod['name_en']}'. New balance: {$newStock}. Ref: {$supplierRef}", 'product', (string)$productId);
+            $message = "Received {$qty} units of '{$prod['name_en']}'. New balance is {$newStock}. (Ledger UID: {$uid})";
+            $messageType = 'success';
+        } else {
+            $message = "Product not found.";
+            $messageType = 'danger';
+        }
+        $activeTab = 'products';
+    }
+
+    // 9. Add Stock Correction Line (Manager PIN Authorization)
+    elseif ($action === 'add_correction_line') {
+        $productId = (int)($_POST['product_id'] ?? 0);
+        $newBalance = (int)($_POST['new_balance'] ?? 0);
+        $reason = trim($_POST['reason'] ?? '');
+        $mgrUsername = trim($_POST['manager_username'] ?? '');
+        $mgrPin = (string)($_POST['manager_pin'] ?? '');
+
+        try {
+            $res = StockControl::addCorrectionLine($productId, $newBalance, $reason, $mgrUsername, $mgrPin, (int)Auth::getUserId());
+            $message = $res['message'];
+            $messageType = 'success';
+        } catch (Exception $e) {
+            $message = $e->getMessage();
+            $messageType = 'danger';
+        }
+        $activeTab = 'ledger';
+    }
 }
 
 // Fetch Oil Change Due Reminders (latest record per vehicle)
@@ -408,6 +466,25 @@ $partsRequests = $pdo->query("
     ORDER BY CASE pr.status WHEN 'pending' THEN 1 ELSE 2 END, pr.id DESC
     LIMIT 100
 ")->fetchAll(PDO::FETCH_ASSOC);
+
+// Fetch Stock Movements for Unified Movement History (Immutable Ledger)
+$filterProdId = (int)($_GET['product_id'] ?? 0);
+$filteredProductName = '';
+if ($filterProdId > 0) {
+    $totalMovementsCount = (int)$pdo->query("SELECT COUNT(*) FROM stock_movements WHERE product_id = " . $filterProdId)->fetchColumn();
+    $smStmt = $pdo->prepare("SELECT * FROM stock_movements WHERE product_id = ? ORDER BY created_at DESC LIMIT 100");
+    $smStmt->execute([$filterProdId]);
+    $stockMovements = $smStmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($allActiveProducts as $p) {
+        if ($p['id'] == $filterProdId) {
+            $filteredProductName = $p['name_en'];
+            break;
+        }
+    }
+} else {
+    $totalMovementsCount = (int)$pdo->query("SELECT COUNT(*) FROM stock_movements")->fetchColumn();
+    $stockMovements = $pdo->query("SELECT * FROM stock_movements ORDER BY created_at DESC LIMIT 100")->fetchAll(PDO::FETCH_ASSOC);
+}
 
 // Fetch Physical Inventory Discrepancies
 $discrepancies = $pdo->query("
@@ -924,18 +1001,16 @@ include dirname(__DIR__) . '/layouts/header.php';
     }
 }
 </style>
-<!-- Page Header (Picture Match) -->
+<!-- Page Header (Unified Products & Stock Hub) -->
 <div class="pw-header">
     <div>
-        <h1 class="pw-title"><?= htmlspecialchars(__('nav_products_warehouse', 'Products & Warehouse')) ?></h1>
-        <p class="pw-subtitle">Manage prices, stock levels and categories in one place.</p>
+        <h1 class="pw-title"><?= htmlspecialchars(__('nav_products_stock', 'Products & Stock')) ?></h1>
+        <p class="pw-subtitle">Manage catalog items, live stock levels, supplier receiving, and bay parts requests.</p>
     </div>
     <div class="pw-header-actions">
-        <?php if (Auth::can('pos.access')): ?>
-            <a href="<?= get_pos_url() ?>" class="btn btn-secondary">
-                <i class="fa-solid fa-cash-register mr-1"></i> New Order / POS
-            </a>
-        <?php endif; ?>
+        <button type="button" class="btn btn-secondary" onclick="openReceiveStockModal()">
+            <i class="fa-solid fa-truck-ramp-box mr-1"></i> Receive Delivery
+        </button>
         <?php if (Auth::can('oil_care.add')): ?>
             <button type="button" class="btn btn-primary" onclick="openNewProductModal()">
                 <i class="fa-solid fa-plus mr-1"></i> Add Product
@@ -947,19 +1022,19 @@ include dirname(__DIR__) . '/layouts/header.php';
 <!-- Tabs Navigation Bar (Matching Services & Prices Tab Style) -->
 <div class="pw-tabs-nav">
     <button type="button" data-tab-target="products" class="btn btn-sm <?= ($activeTab === 'products') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('products')">
-        <i class="fa-solid fa-boxes-stacked mr-1"></i> Products &amp; Parts (<?= $kpiCounts['all'] ?>)
+        <i class="fa-solid fa-boxes-stacked mr-1"></i> Products &amp; Stock (<?= $kpiCounts['all'] ?>)
+    </button>
+    <button type="button" data-tab-target="requests" class="btn btn-sm <?= ($activeTab === 'requests') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('requests')">
+        <i class="fa-solid fa-dolly mr-1" data-color="#ea580c" style="<?= $activeTab !== 'requests' ? 'color: #ea580c;' : '' ?>"></i> Technician Bay Requests (<?= $pendingReqCount ?>)
+    </button>
+    <button type="button" data-tab-target="ledger" class="btn btn-sm <?= ($activeTab === 'ledger') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('ledger')">
+        <i class="fa-solid fa-clipboard-list mr-1" data-color="#0284c7" style="<?= $activeTab !== 'ledger' ? 'color: #0284c7;' : '' ?>"></i> Stock Movement History (<?= $totalMovementsCount ?>)
     </button>
     <button type="button" data-tab-target="supplies" class="btn btn-sm <?= ($activeTab === 'supplies') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('supplies')">
         <i class="fa-solid fa-flask mr-1" data-color="#0284c7" style="<?= $activeTab !== 'supplies' ? 'color: #0284c7;' : '' ?>"></i> Chemicals &amp; Washing Supplies (<?= count($supplies) ?>)
     </button>
-    <button type="button" data-tab-target="requests" class="btn btn-sm <?= ($activeTab === 'requests') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('requests')">
-        <i class="fa-solid fa-dolly mr-1" data-color="#ea580c" style="<?= $activeTab !== 'requests' ? 'color: #ea580c;' : '' ?>"></i> Parts Requests (<?= $pendingReqCount ?>)
-    </button>
     <button type="button" data-tab-target="discrepancies" class="btn btn-sm <?= ($activeTab === 'discrepancies') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('discrepancies')">
-        <i class="fa-solid fa-scale-unbalanced mr-1" data-color="#8b5cf6" style="<?= $activeTab !== 'discrepancies' ? 'color: #8b5cf6;' : '' ?>"></i> Discrepancy Log (<?= count($discrepancies) ?>)
-    </button>
-    <button type="button" data-tab-target="reminders" class="btn btn-sm <?= ($activeTab === 'reminders') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('reminders')">
-        <i class="fa-solid fa-bell mr-1" data-color="#f59e0b" style="<?= $activeTab !== 'reminders' ? 'color: #f59e0b;' : '' ?>"></i> Oil Due Reminders (<?= count($allReminders) ?>)
+        <i class="fa-solid fa-scale-unbalanced mr-1" data-color="#8b5cf6" style="<?= $activeTab !== 'discrepancies' ? 'color: #8b5cf6;' : '' ?>"></i> Physical Count Audits (<?= count($discrepancies) ?>)
     </button>
 </div>
 
@@ -1087,6 +1162,101 @@ include dirname(__DIR__) . '/layouts/header.php';
                                     <?php endif; ?>
                                 </td>
                             </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ========================================== -->
+<!-- TAB: STOCK MOVEMENT HISTORY (IMMUTABLE LEDGER) -->
+<!-- ========================================== -->
+<div id="tab_ledger" class="tab-pane" style="display: <?= ($activeTab === 'ledger') ? 'block' : 'none' ?>;">
+    <div class="card" style="margin-bottom: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 12px;">
+            <div>
+                <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); margin: 0;">
+                    <i class="fa-solid fa-clipboard-list mr-1" style="color: var(--primary);"></i> Immutable Stock Movement Ledger
+                </h3>
+                <div class="text-xs text-muted">Chronological audit trail of every stock inflow, outflow, bay reservation, and correction.</div>
+                <?php if ($filterProdId > 0): ?>
+                    <div style="margin-top: 6px; display: inline-flex; align-items: center; gap: 8px; background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600;">
+                        <span>Filtered by: <strong><?= htmlspecialchars($filteredProductName ?: 'Product #' . $filterProdId) ?></strong></span>
+                        <a href="<?= APP_URL ?>/index.php?view=products&tab=ledger" style="color: #0284c7; text-decoration: underline; margin-left: 4px;">Clear Filter</a>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button type="button" class="btn btn-sm btn-secondary" onclick="openReceiveStockModal()">
+                    <i class="fa-solid fa-truck-ramp-box mr-1"></i> Receive Delivery
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary" style="border-color: #f59e0b; color: #b45309;" onclick="openCorrectionModal()">
+                    <i class="fa-solid fa-pen-to-square mr-1"></i> Add Correcting Line
+                </button>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table" style="font-size: 13px;">
+                <thead>
+                    <tr>
+                        <th>Movement UID</th>
+                        <th>Date &amp; Time</th>
+                        <th>Product</th>
+                        <th>Movement Type</th>
+                        <th style="text-align: right;">Quantity</th>
+                        <th style="text-align: right;">Previous</th>
+                        <th style="text-align: right;">New Balance</th>
+                        <th>Reference / PO</th>
+                        <th>Notes / Reason</th>
+                        <th>Staff</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($stockMovements)): ?>
+                        <tr>
+                            <td colspan="10" style="text-align: center; color: var(--text-muted); padding: 32px;">
+                                No stock movements recorded yet. Movements appear here automatically when deliveries arrive, orders are placed, or parts are dispatched.
+                            </td>
+                        </tr>
+                    <?php else: ?>
+                        <?php foreach ($stockMovements as $m): 
+                            $mType = $m['movement_type'] ?? 'adjusted';
+                            $badgeStyle = match($mType) {
+                                'received' => 'background: #dcfce7; color: #15803d;',
+                                'used'     => 'background: #e0f2fe; color: #0369a1;',
+                                'reserved' => 'background: #ffedd5; color: #c2410c;',
+                                'released' => 'background: #f3e8ff; color: #7e22ce;',
+                                'adjusted' => 'background: #fef3c7; color: #b45309;',
+                                'returned' => 'background: #ecfeff; color: #0e7490;',
+                                default    => 'background: var(--bg-subtle); color: var(--text-main);'
+                            };
+                            $qtySign = in_array($mType, ['received', 'released', 'returned'], true) ? '+' : (in_array($mType, ['used', 'reserved'], true) ? '-' : '±');
+                        ?>
+                        <tr>
+                            <td style="font-family: var(--font-mono); font-weight: 700; font-size: 12px;"><?= htmlspecialchars($m['movement_uid']) ?></td>
+                            <td class="text-xs text-muted"><?= htmlspecialchars($m['created_at']) ?></td>
+                            <td><strong><?= htmlspecialchars($m['product_name'] ?: ('Product #' . $m['product_id'])) ?></strong></td>
+                            <td>
+                                <span class="badge" style="<?= $badgeStyle ?> font-weight: 700; text-transform: uppercase; font-size: 11px;">
+                                    <?= htmlspecialchars($mType) ?>
+                                </span>
+                            </td>
+                            <td style="text-align: right; font-weight: 700;">
+                                <span style="color: <?= ($qtySign === '+' ? '#16a34a' : ($qtySign === '-' ? '#dc2626' : '#d97706')) ?>;">
+                                    <?= $qtySign ?><?= (int)$m['quantity'] ?>
+                                </span>
+                            </td>
+                            <td style="text-align: right;" class="text-muted"><?= (int)$m['previous_qty'] ?></td>
+                            <td style="text-align: right; font-weight: 800; font-size: 14px; color: var(--text-main);"><?= (int)$m['new_qty'] ?></td>
+                            <td style="font-family: var(--font-mono); font-size: 12px; color: #0284c7;"><?= htmlspecialchars((string)($m['reference_id'] ?? '-')) ?></td>
+                            <td style="font-size: 13px; color: var(--text-muted); max-width: 240px;"><?= htmlspecialchars((string)($m['notes'] ?? '-')) ?></td>
+                            <td style="font-size: 12px;">
+                                <span class="badge badge-secondary"><?= htmlspecialchars((string)($m['performer_name'] ?? 'System')) ?></span>
+                            </td>
+                        </tr>
                         <?php endforeach; ?>
                     <?php endif; ?>
                 </tbody>
@@ -1566,7 +1736,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                                         <a href="javascript:void(0)" onclick="openDiscrepancyModal(<?= $p['id'] ?>, '<?= htmlspecialchars($p['name_en'], ENT_QUOTES) ?>', <?= $physical ?>)">
                                             <i class="fa-solid fa-scale-unbalanced mr-2" style="color: #8b5cf6;"></i> Log Discrepancy
                                         </a>
-                                        <a href="<?= APP_URL ?>/index.php?view=stock_ledger&product_id=<?= $p['id'] ?>">
+                                        <a href="<?= APP_URL ?>/index.php?view=products&tab=ledger&product_id=<?= $p['id'] ?>">
                                             <i class="fa-solid fa-clipboard-list mr-2" style="color: #0284c7;"></i> Stock Ledger History
                                         </a>
                                         <div style="height: 1px; background: #e5e7eb; margin: 4px 0;"></div>
@@ -1738,6 +1908,123 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 </div>
 
+<!-- Modal: Receive Supplier Delivery -->
+<div class="modal-backdrop" id="receiveStockModal">
+    <div class="modal" style="max-width: 480px;">
+        <div class="modal-header">
+            <h3 class="modal-title" style="color: #16a34a;"><i class="fa-solid fa-truck-ramp-box mr-1"></i> Receive Supplier Delivery</h3>
+            <button type="button" class="modal-close" onclick="closeModal('receiveStockModal')">&times;</button>
+        </div>
+        <form action="" method="POST">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="receive_stock">
+
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Select Product *</label>
+                    <select name="product_id" id="rec_product_id" class="form-select" required>
+                        <option value="">-- Choose Product --</option>
+                        <?php foreach ($allActiveProducts as $p): ?>
+                            <option value="<?= $p['id'] ?>" data-stock="<?= (int)$p['stock_qty'] ?>">
+                                <?= htmlspecialchars($p['name_en']) ?> (Current on-hand: <?= (int)$p['stock_qty'] ?>)
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Quantity Received (+)</label>
+                    <input type="number" step="1" min="1" name="qty_received" id="rec_qty_received" class="form-input" value="12" required style="font-size: 16px; font-weight: 700;">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Supplier Invoice / PO Reference</label>
+                    <input type="text" name="supplier_ref" class="form-input" placeholder="e.g. INV-98214">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">Arrival Notes</label>
+                    <input type="text" name="notes" class="form-input" placeholder="e.g. Received delivery from TotalEnergies distributor">
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('receiveStockModal')">Cancel</button>
+                <button type="submit" class="btn btn-primary" style="background: #16a34a; border-color: #16a34a;">Confirm Delivery Received</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Add Correcting Line (Fix mistake without editing old lines) -->
+<div class="modal-backdrop" id="correctionModal">
+    <div class="modal" style="max-width: 480px;">
+        <div class="modal-header">
+            <h3 class="modal-title" style="color: #b45309;"><i class="fa-solid fa-pen-to-square mr-1"></i> Add Stock Correcting Line</h3>
+            <button type="button" class="modal-close" onclick="closeModal('correctionModal')">&times;</button>
+        </div>
+        <form action="" method="POST">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="add_correction_line">
+
+            <div class="modal-body">
+                <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-md); padding: 12px; margin-bottom: 14px; font-size: 13px; color: #92400e;">
+                    <i class="fa-solid fa-info-circle mr-1"></i>
+                    Past history lines cannot be edited or deleted. This action corrects discrepancies by recording a new <strong>adjusted</strong> line with the actual counted balance and reason.
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Select Product *</label>
+                    <select name="product_id" id="corr_product_id" class="form-select" required onchange="updateCorrPrevStock()">
+                        <option value="">-- Choose Product --</option>
+                        <?php foreach ($allActiveProducts as $p): ?>
+                            <option value="<?= $p['id'] ?>" data-stock="<?= (int)$p['stock_qty'] ?>">
+                                <?= htmlspecialchars($p['name_en']) ?> (Current on-hand: <?= (int)$p['stock_qty'] ?>)
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-2" style="gap: 12px; margin-bottom: 12px;">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label text-xs">Current System Stock</label>
+                        <input type="text" id="corr_prev_stock" class="form-input" value="0" disabled style="background: var(--bg-subtle);">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label text-xs">Actual Physical Count *</label>
+                        <input type="number" step="1" min="0" name="new_balance" id="corr_new_balance" class="form-input" placeholder="e.g. 15" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Reason / Explanation *</label>
+                    <input type="text" name="reason" class="form-input" placeholder="e.g. Physical inventory count variance, damaged bottle" required>
+                </div>
+
+                <!-- Manager PIN Authorization -->
+                <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: var(--radius-md); padding: 14px; margin-bottom: 0;">
+                    <div style="font-weight: 700; color: #ea580c; font-size: 13px; margin-bottom: 8px;">
+                        <i class="fa-solid fa-user-lock mr-1"></i> Manager PIN Authorization
+                    </div>
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label class="form-label text-xs">Manager Username *</label>
+                        <input type="text" name="manager_username" class="form-input" value="<?= htmlspecialchars(in_array($currentRole, ['owner', 'manager'], true) ? (Auth::getUsername() ?? '') : '') ?>" required>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label class="form-label text-xs">Manager 6-digit PIN *</label>
+                        <input type="password" maxlength="6" name="manager_pin" class="form-input" placeholder="6-digit PIN" required style="font-family: var(--font-mono); letter-spacing: 4px;">
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('correctionModal')">Cancel</button>
+                <button type="submit" class="btn btn-primary" style="background: #b45309; border-color: #b45309;">Record Correcting Line</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div class="modal-backdrop" id="productModal">
     <div class="modal" style="max-width: 600px;">
         <div class="modal-header">
@@ -1763,7 +2050,12 @@ include dirname(__DIR__) . '/layouts/header.php';
 
                 <div class="grid grid-cols-3" style="gap: 14px;">
                     <div class="form-group">
-                        <label class="form-label">Category *</label>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <label class="form-label" style="margin-bottom: 0;">Category *</label>
+                            <a href="?view=categories&tab=product" target="_blank" style="font-size: 11px; font-weight: 600; color: var(--primary); text-decoration: none;">
+                                <i class="fa-solid fa-plus-circle mr-1"></i> New
+                            </a>
+                        </div>
                         <input type="hidden" name="category_id" id="prod_category_id" value="">
                         <select name="category" id="prod_category" class="form-select" onchange="syncProdCategoryId(this)">
                             <?php foreach ($productCategories as $pc): 
@@ -2429,6 +2721,38 @@ function fallbackCopy(text) {
 </div>
 
 <script>
+function openReceiveStockModal(prodId, defaultQty) {
+    if (prodId) {
+        const select = document.getElementById('rec_product_id');
+        if (select) select.value = prodId;
+    }
+    if (defaultQty) {
+        const qtyInput = document.getElementById('rec_qty_received');
+        if (qtyInput) qtyInput.value = defaultQty;
+    }
+    openModal('receiveStockModal');
+}
+
+function openCorrectionModal(prodId) {
+    if (prodId) {
+        const select = document.getElementById('corr_product_id');
+        if (select) {
+            select.value = prodId;
+            updateCorrPrevStock();
+        }
+    }
+    openModal('correctionModal');
+}
+
+function updateCorrPrevStock() {
+    const select = document.getElementById('corr_product_id');
+    const prevInput = document.getElementById('corr_prev_stock');
+    if (!select || !prevInput) return;
+    const selectedOpt = select.options[select.selectedIndex];
+    const stock = selectedOpt ? selectedOpt.getAttribute('data-stock') : '0';
+    prevInput.value = stock || '0';
+}
+
 function openRejectPartsModal(reqId, productName) {
     document.getElementById('reject_parts_id').value = reqId;
     document.getElementById('reject_parts_product_name').textContent = productName;

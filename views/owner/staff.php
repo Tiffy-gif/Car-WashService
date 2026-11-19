@@ -41,7 +41,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         $fullName = trim($_POST['full_name'] ?? '');
         $phone = trim($_POST['phone'] ?? '');
         $username = strtolower(trim($_POST['username'] ?? ''));
-        $password = $_POST['password'] ?? '';
+        $pin = trim($_POST['pin'] ?? '');
+        $password = trim($_POST['password'] ?? '');
         $role = trim($_POST['role'] ?? 'washer');
         $commType = trim($_POST['commission_type'] ?? 'percentage');
         $commRate = max(0.00, (float)($_POST['commission_rate'] ?? 0.00));
@@ -54,11 +55,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $matchedRole = $rStmt->fetch();
         }
 
-        if ($fullName === '' || $username === '' || $password === '') {
-            $message = 'Full Name, Username, and 6-Digit PIN are required.';
+        if ($fullName === '' || $username === '') {
+            $message = 'Full Name and Username are required.';
             $messageType = 'danger';
-        } elseif (strlen($password) !== 6 || !ctype_digit($password)) {
-            $message = 'PIN must be exactly 6 digits (numbers 0-9).';
+        } elseif ($pin === '' && $password === '') {
+            $message = 'Please provide at least a 6-Digit PIN or a Password (or both).';
+            $messageType = 'danger';
+        } elseif ($pin !== '' && (strlen($pin) !== 6 || !ctype_digit($pin))) {
+            $message = 'PIN must be exactly 6 numeric digits (0-9).';
+            $messageType = 'danger';
+        } elseif ($password !== '' && strlen($password) < 4) {
+            $message = 'Password must be at least 4 characters long.';
             $messageType = 'danger';
         } elseif (!$matchedRole) {
             $message = 'Invalid role selected.';
@@ -71,14 +78,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                 $message = "Username '{$username}' is already taken. Please choose another username.";
                 $messageType = 'danger';
             } else {
-                $pwHash = password_hash($password, PASSWORD_DEFAULT);
+                $pinHash = ($pin !== '') ? password_hash($pin, PASSWORD_DEFAULT) : null;
+                $pwHash  = ($password !== '') ? password_hash($password, PASSWORD_DEFAULT) : null;
                 $insStmt = $pdo->prepare("
-                    INSERT INTO users (username, password_hash, full_name, phone, role, role_id, commission_type, commission_rate, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
+                    INSERT INTO users (username, password_hash, local_pin_hash, full_name, phone, role, role_id, commission_type, commission_rate, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
                 ");
-                $insStmt->execute([$username, $pwHash, $fullName, $phone, $matchedRole['code'], (int)$matchedRole['id'], $commType, $commRate]);
+                $insStmt->execute([$username, $pwHash, $pinHash, $fullName, $phone, $matchedRole['code'], (int)$matchedRole['id'], $commType, $commRate]);
                 audit_log('STAFF_CREATED', "Added staff '{$fullName}' ({$username}) as role '{$matchedRole['code']}'", 'user');
-                $message = "Staff member '{$fullName}' ({$username}) added successfully!";
+                $message = "Staff member '{$fullName}' (@{$username}) added successfully!";
             }
         }
     }
@@ -146,11 +154,37 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                     }
                 }
 
-                $updStmt = $pdo->prepare("
-                    UPDATE users SET full_name = ?, phone = ?, username = ?, role = ?, role_id = ?, commission_type = ?, commission_rate = ?, status = ?
-                    WHERE id = ?
-                ");
-                $updStmt->execute([$fullName, $phone, $username, $matchedRole['code'], (int)$matchedRole['id'], $commType, $commRate, $status, $userId]);
+                $newPin = trim($_POST['new_pin'] ?? '');
+                $newPassword = trim($_POST['new_password'] ?? '');
+
+                if ($newPin !== '' && (strlen($newPin) !== 6 || !ctype_digit($newPin))) {
+                    $message = 'PIN must be exactly 6 numeric digits (0-9).';
+                    $messageType = 'danger';
+                    goto endAction;
+                }
+                if ($newPassword !== '' && strlen($newPassword) < 4) {
+                    $message = 'Password must be at least 4 characters long.';
+                    $messageType = 'danger';
+                    goto endAction;
+                }
+
+                $updSql = "UPDATE users SET full_name = ?, phone = ?, username = ?, role = ?, role_id = ?, commission_type = ?, commission_rate = ?, status = ?";
+                $updParams = [$fullName, $phone, $username, $matchedRole['code'], (int)$matchedRole['id'], $commType, $commRate, $status];
+
+                if ($newPin !== '') {
+                    $updSql .= ", local_pin_hash = ?";
+                    $updParams[] = password_hash($newPin, PASSWORD_DEFAULT);
+                }
+                if ($newPassword !== '') {
+                    $updSql .= ", password_hash = ?";
+                    $updParams[] = password_hash($newPassword, PASSWORD_DEFAULT);
+                }
+
+                $updSql .= " WHERE id = ?";
+                $updParams[] = $userId;
+
+                $updStmt = $pdo->prepare($updSql);
+                $updStmt->execute($updParams);
 
                 if ($currentUser['role'] !== $matchedRole['code']) {
                     audit_log('ROLE_CHANGE', "Staff role for '{$username}' changed from '{$currentUser['role']}' to '{$matchedRole['code']}'", 'user', (string)$userId);
@@ -161,39 +195,62 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         }
     }
 
-    // 3. Reset Staff PIN (Requires changing PIN at next login)
+    // 3. Reset Staff Credentials (PIN and/or Password)
     elseif ($action === 'reset_password') {
         if (!Auth::can('staff.reset_password')) {
-            $message = 'Access denied: You do not have permission to reset PINs.';
+            $message = 'Access denied: You do not have permission to reset credentials.';
             $messageType = 'danger';
             goto endAction;
         }
 
         $userId = (int)($_POST['user_id'] ?? 0);
+        $newPin = trim($_POST['new_pin'] ?? '');
         $newPass = trim($_POST['new_password'] ?? '');
 
-        if ($userId <= 0 || strlen($newPass) !== 6 || !ctype_digit($newPass)) {
+        if ($userId <= 0) {
+            $message = 'Invalid user selected.';
+            $messageType = 'danger';
+            goto endAction;
+        }
+        if ($newPin === '' && $newPass === '') {
+            $message = 'Please provide at least a new 6-digit PIN or a new Password (or both).';
+            $messageType = 'danger';
+            goto endAction;
+        }
+        if ($newPin !== '' && (strlen($newPin) !== 6 || !ctype_digit($newPin))) {
             $message = 'PIN must be exactly 6 numeric digits (0-9).';
             $messageType = 'danger';
-        } else {
-            $curU = $pdo->prepare("SELECT username, full_name FROM users WHERE id = ?");
-            $curU->execute([$userId]);
-            $uRow = $curU->fetch();
-            $targetName = $uRow['username'] ?? (string)$userId;
-
-            $pwHash = password_hash($newPass, PASSWORD_DEFAULT);
-            $pdo->prepare("
-                UPDATE users SET
-                    password_hash = ?,
-                    must_change_pin = 1,
-                    failed_login_attempts = 0,
-                    locked_until = NULL
-                WHERE id = ?
-            ")->execute([$pwHash, $userId]);
-
-            audit_log('PIN_RESET', "Reset PIN for user '{$targetName}'. Forced PIN change required on next login.", 'user', (string)$userId);
-            $message = "PIN successfully reset for {$targetName}! Account unlocked. They must create a new PIN upon next login.";
+            goto endAction;
         }
+        if ($newPass !== '' && strlen($newPass) < 4) {
+            $message = 'Password must be at least 4 characters long.';
+            $messageType = 'danger';
+            goto endAction;
+        }
+
+        $curU = $pdo->prepare("SELECT username, full_name FROM users WHERE id = ?");
+        $curU->execute([$userId]);
+        $uRow = $curU->fetch();
+        $targetName = $uRow['username'] ?? (string)$userId;
+
+        $rstSql = "UPDATE users SET failed_login_attempts = 0, locked_until = NULL";
+        $rstParams = [];
+
+        if ($newPin !== '') {
+            $rstSql .= ", local_pin_hash = ?, must_change_pin = 1";
+            $rstParams[] = password_hash($newPin, PASSWORD_DEFAULT);
+        }
+        if ($newPass !== '') {
+            $rstSql .= ", password_hash = ?";
+            $rstParams[] = password_hash($newPass, PASSWORD_DEFAULT);
+        }
+
+        $rstSql .= " WHERE id = ?";
+        $rstParams[] = $userId;
+
+        $pdo->prepare($rstSql)->execute($rstParams);
+        audit_log('CREDENTIALS_RESET', "Reset login credentials for user '{$targetName}'", 'user', (string)$userId);
+        $message = "Login credentials successfully reset for {$targetName}! Account unlocked.";
     }
 
     // 4. Quick Toggle Status (Activate / Deactivate)
@@ -420,12 +477,13 @@ include dirname(__DIR__) . '/layouts/header.php';
         <table class="table searchable-table">
             <thead>
                 <tr>
-                    <th style="width: 200px;">Full Name</th>
-                    <th style="width: 140px;">Username</th>
-                    <th style="width: 140px;">Phone</th>
-                    <th style="width: 140px;">Role</th>
-                    <th style="width: 110px;">Status</th>
-                    <th style="text-align: right; width: 180px;">Actions</th>
+                    <th style="width: 180px;">Full Name</th>
+                    <th style="width: 130px;">Username</th>
+                    <th style="width: 120px;">Phone</th>
+                    <th style="width: 120px;">Role</th>
+                    <th style="width: 160px;">Login Access</th>
+                    <th style="width: 100px;">Status</th>
+                    <th style="text-align: right; width: 170px;">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -462,6 +520,25 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <span class="badge <?= $rBadge ?>">
                             <?= htmlspecialchars($roleTitle) ?>
                         </span>
+                    </td>
+                    <td>
+                        <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                            <?php if (!empty($st['local_pin_hash'])): ?>
+                                <span class="badge" style="background: #e0f2fe; color: #0369a1; font-size: 11px; font-weight: 700;">
+                                    <i class="fa-solid fa-key mr-1"></i> 6-Digit PIN
+                                </span>
+                            <?php endif; ?>
+                            <?php if (!empty($st['password_hash'])): ?>
+                                <span class="badge" style="background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 700;">
+                                    <i class="fa-solid fa-lock mr-1"></i> Password
+                                </span>
+                            <?php endif; ?>
+                            <?php if (empty($st['local_pin_hash']) && empty($st['password_hash'])): ?>
+                                <span class="badge badge-amber" style="font-size: 11px;">
+                                    <i class="fa-solid fa-triangle-exclamation mr-1"></i> None
+                                </span>
+                            <?php endif; ?>
+                        </div>
                     </td>
                     <td>
                         <?php 
@@ -573,24 +650,44 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <input type="text" name="username" class="form-input" placeholder="e.g. sopheak1" style="font-family: var(--font-mono);" required>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">6-Digit Staff PIN *</label>
-                        <input type="password" name="password" class="form-input" maxlength="6" inputmode="numeric" pattern="[0-9]{6}" placeholder="••••••" required>
-                        <div class="text-xs text-muted" style="margin-top: 4px;">Must be exactly 6 numeric digits (e.g. 123456).</div>
+                        <label class="form-label">System Role *</label>
+                        <select name="role" id="add_role" class="form-select">
+                            <?php foreach ($activeRoles as $ar): 
+                                $rLabel = (Language::current() === 'km') ? ($ar['name_km'] ?: $ar['name_en']) : $ar['name_en'];
+                            ?>
+                                <option value="<?= htmlspecialchars($ar['code']) ?>" 
+                                        <?= ($ar['code'] === 'washer') ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($rLabel) ?> (<?= htmlspecialchars($ar['code']) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label class="form-label">System Role *</label>
-                    <select name="role" id="add_role" class="form-select">
-                        <?php foreach ($activeRoles as $ar): 
-                            $rLabel = (Language::current() === 'km') ? ($ar['name_km'] ?: $ar['name_en']) : $ar['name_en'];
-                        ?>
-                            <option value="<?= htmlspecialchars($ar['code']) ?>" 
-                                    <?= ($ar['code'] === 'washer') ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($rLabel) ?> (<?= htmlspecialchars($ar['code']) ?>)
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+                <!-- Login Credentials (PIN and/or Password) -->
+                <div style="background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 16px;">
+                    <div style="font-weight: 700; font-size: 13.5px; color: var(--text-main); margin-bottom: 4px;">
+                        <i class="fa-solid fa-shield-halved mr-1" style="color: var(--primary);"></i> Login Credentials / ព័ត៌មានសម្ងាត់ចូលប្រើ
+                    </div>
+                    <div class="text-xs text-muted" style="margin-bottom: 12px;">
+                        Set a 6-digit PIN, an alphanumeric Password, or both. At least one is required.
+                    </div>
+                    <div class="grid grid-cols-2" style="gap: 16px;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label" style="font-size: 12px;">
+                                <i class="fa-solid fa-key mr-1" style="color: var(--primary);"></i> 6-Digit Staff PIN (Optional)
+                            </label>
+                            <input type="password" name="pin" id="add_pin" class="form-input" maxlength="6" inputmode="numeric" pattern="[0-9]{6}" placeholder="e.g. 123456" style="letter-spacing: 2px;">
+                            <div class="text-xs text-muted" style="margin-top: 4px;">Fast numpad login for bays.</div>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label" style="font-size: 12px;">
+                                <i class="fa-solid fa-lock mr-1" style="color: #64748b;"></i> Password (Optional)
+                            </label>
+                            <input type="password" name="password" id="add_password" class="form-input" placeholder="e.g. Pass#123">
+                            <div class="text-xs text-muted" style="margin-top: 4px;">For web portal login.</div>
+                        </div>
+                    </div>
                 </div>
 
                 <input type="hidden" name="commission_type" value="none">
@@ -607,7 +704,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 
 <!-- Modal 2: Edit Staff Member -->
 <div class="modal-backdrop" id="editStaffModal">
-    <div class="modal" style="max-width: 540px;">
+    <div class="modal" style="max-width: 560px;">
         <div class="modal-header">
             <h3 class="modal-title"><i class="fa-solid fa-user-pen mr-1" style="color: var(--primary);"></i> Edit Staff Profile</h3>
             <button type="button" class="modal-close" onclick="closeModal('editStaffModal')">&times;</button>
@@ -656,6 +753,27 @@ include dirname(__DIR__) . '/layouts/header.php';
                     </select>
                 </div>
 
+                <!-- Update Credentials Section -->
+                <div style="background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 16px;">
+                    <div style="font-weight: 700; font-size: 13.5px; color: var(--text-main); margin-bottom: 4px;">
+                        <i class="fa-solid fa-shield-halved mr-1" style="color: var(--primary);"></i> Update Credentials (Leave blank to keep unchanged)
+                    </div>
+                    <div class="grid grid-cols-2" style="gap: 16px; margin-top: 10px;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label" style="font-size: 12px;">
+                                <i class="fa-solid fa-key mr-1" style="color: var(--primary);"></i> New 6-Digit PIN
+                            </label>
+                            <input type="password" name="new_pin" id="edit_new_pin" class="form-input" maxlength="6" inputmode="numeric" pattern="[0-9]{6}" placeholder="Leave blank to keep" style="letter-spacing: 2px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label" style="font-size: 12px;">
+                                <i class="fa-solid fa-lock mr-1" style="color: #64748b;"></i> New Password
+                            </label>
+                            <input type="password" name="new_password" id="edit_new_password" class="form-input" placeholder="Leave blank to keep">
+                        </div>
+                    </div>
+                </div>
+
                 <input type="hidden" name="commission_type" id="edit_comm_type" value="none">
                 <input type="hidden" name="commission_rate" id="edit_comm_rate" value="0.00">
             </div>
@@ -668,11 +786,11 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 </div>
 
-<!-- Modal 3: Reset Password -->
+<!-- Modal 3: Reset Credentials -->
 <div class="modal-backdrop" id="resetPasswordModal">
-    <div class="modal" style="max-width: 440px;">
+    <div class="modal" style="max-width: 460px;">
         <div class="modal-header">
-            <h3 class="modal-title"><i class="fa-solid fa-key mr-1" style="color: var(--primary);"></i> Reset 6-Digit Staff PIN</h3>
+            <h3 class="modal-title"><i class="fa-solid fa-key mr-1" style="color: var(--primary);"></i> Reset Staff Credentials</h3>
             <button type="button" class="modal-close" onclick="closeModal('resetPasswordModal')">&times;</button>
         </div>
         <form action="" method="POST">
@@ -681,20 +799,25 @@ include dirname(__DIR__) . '/layouts/header.php';
             <input type="hidden" name="user_id" id="reset_user_id" value="">
 
             <div class="modal-body">
-                <p id="reset_user_label" style="font-weight: 700; color: var(--text-main); margin-bottom: 16px;"></p>
+                <p id="reset_user_label" style="font-weight: 700; color: var(--text-main); margin-bottom: 12px;"></p>
+                <div class="text-xs text-muted" style="margin-bottom: 16px;">
+                    Provide a new 6-digit PIN, an alphanumeric Password, or both. The account will be unlocked automatically.
+                </div>
+
+                <div class="form-group" style="margin-bottom: 14px;">
+                    <label class="form-label" style="font-size: 12px;"><i class="fa-solid fa-key mr-1" style="color: var(--primary);"></i> New 6-Digit Temporary PIN</label>
+                    <input type="password" name="new_pin" id="reset_new_pin" class="form-input" maxlength="6" inputmode="numeric" pattern="[0-9]{6}" placeholder="e.g. 123456" style="letter-spacing: 2px;">
+                </div>
 
                 <div class="form-group" style="margin-bottom: 0;">
-                    <label class="form-label">New 6-Digit Temporary PIN *</label>
-                    <input type="password" name="new_password" class="form-input" maxlength="6" inputmode="numeric" pattern="[0-9]{6}" placeholder="••••••" required autofocus>
-                    <div class="text-xs text-muted" style="margin-top: 6px;">
-                        <i class="fa-solid fa-circle-info mr-1"></i> The user will be required to change this PIN immediately upon their next login.
-                    </div>
+                    <label class="form-label" style="font-size: 12px;"><i class="fa-solid fa-lock mr-1" style="color: #64748b;"></i> New Password</label>
+                    <input type="password" name="new_password" id="reset_new_password" class="form-input" placeholder="e.g. Secret#123">
                 </div>
             </div>
 
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('resetPasswordModal')"><?= htmlspecialchars(__('cancel')) ?></button>
-                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-key mr-1"></i> Reset PIN &amp; Unlock</button>
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk mr-1"></i> Update Credentials &amp; Unlock</button>
             </div>
         </form>
     </div>

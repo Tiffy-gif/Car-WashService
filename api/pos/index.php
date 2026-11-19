@@ -552,9 +552,15 @@ $ACTION_PERMISSIONS = [
     'shift_start' => ['pos.access'],
     'shift_end' => ['pos.access'],
     'get_shift_status' => ['pos.access'],
+    'get_shifts_needing_review' => ['pos.access'],
+    'manager_review_shift' => ['pos.access'],
     'open_drawer_no_sale' => ['pos.access'],
     'spot_audit' => ['daily_close.view', 'reports.view'],
     'verify_manager_pin' => ['pos.access'],
+    'record_cash_movement' => ['pos.access'],
+    'get_open_shift_slip' => ['pos.access'],
+    'get_end_shift_slip' => ['pos.access'],
+    'get_close_day_slip' => ['pos.access', 'daily_close.view', 'reports.view'],
 
     // Workshop & Mechanics
     'save_repair_note' => ['mechanic_jobs.notes'],
@@ -776,7 +782,19 @@ if ($action === 'staff_login') {
         // Receipt settings
         'receipt_footer' => $settings['receipt_footer'] ?? 'Thank you for your visit! / សូមអរគុណ!',
         'receipt_show_logo' => ($settings['receipt_show_logo'] ?? '1') === '1',
-        'receipt_language' => $settings['receipt_language'] ?? 'both',
+        'receipt_show_oil_reminder' => ($settings['receipt_show_oil_reminder'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_notes' => ($settings['receipt_show_notes'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_discount' => ($settings['receipt_show_discount'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_payment' => ($settings['receipt_show_payment'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_plate' => ($settings['receipt_show_plate'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_address' => ($settings['receipt_show_address'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_phone' => ($settings['receipt_show_phone'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_invoice_no' => ($settings['receipt_show_invoice_no'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_date' => ($settings['receipt_show_date'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_cashier' => ($settings['receipt_show_cashier'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_customer' => ($settings['receipt_show_customer'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_paper_size' => $settings['receipt_paper_size'] ?? '80mm',
+        'receipt_language' => $settings['receipt_language'] ?? 'en',
         // Money & Payments
         'exchange_rate' => get_exchange_rate(),
         'aba_account_name' => $settings['aba_account_name'] ?? '',
@@ -1114,7 +1132,19 @@ if ($action === 'sync_catalog') {
         // Receipt settings
         'receipt_footer' => $settings['receipt_footer'] ?? 'Thank you for your visit! / សូមអរគុណ!',
         'receipt_show_logo' => ($settings['receipt_show_logo'] ?? '1') === '1',
-        'receipt_language' => $settings['receipt_language'] ?? 'both',
+        'receipt_show_oil_reminder' => ($settings['receipt_show_oil_reminder'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_notes' => ($settings['receipt_show_notes'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_discount' => ($settings['receipt_show_discount'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_payment' => ($settings['receipt_show_payment'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_plate' => ($settings['receipt_show_plate'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_address' => ($settings['receipt_show_address'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_phone' => ($settings['receipt_show_phone'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_invoice_no' => ($settings['receipt_show_invoice_no'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_date' => ($settings['receipt_show_date'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_cashier' => ($settings['receipt_show_cashier'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_show_customer' => ($settings['receipt_show_customer'] ?? '1') !== '0' ? '1' : '0',
+        'receipt_paper_size' => $settings['receipt_paper_size'] ?? '80mm',
+        'receipt_language' => $settings['receipt_language'] ?? 'en',
         // Money & Payments
         'exchange_rate' => get_exchange_rate(),
         'aba_account_name' => $settings['aba_account_name'] ?? '',
@@ -1603,6 +1633,20 @@ if ($action === 'create_order') {
         exit;
     }
 
+    // Enforce active shift for cashiers: cannot create orders without an active shift today
+    if ($stf['role'] === 'cashier') {
+        $activeShift = CashierControl::getActiveShiftForToday($staffUserId);
+        if (!$activeShift) {
+            http_response_code(400);
+            echo json_encode([
+                'success' => false,
+                'error' => 'NO_ACTIVE_SHIFT',
+                'message' => 'No active shift is open for today. You must open a shift and record your opening float before creating sales.'
+            ]);
+            exit;
+        }
+    }
+
         // Validate discount permission if discount is applied
         if ($manualDiscountUsd > 0.001) {
             if ($stf['role'] !== 'owner' && !Auth::userHasPermission($staffUserId, 'pos.discount')) {
@@ -2069,28 +2113,40 @@ if ($action === 'create_order') {
         $totalUsd = max(0.00, round($subtotalUsd - $totalDiscountUsd, 2));
         $totalKhr = (int)round($totalUsd * get_exchange_rate());
 
+        $exchangeRate = get_exchange_rate();
+        $tenderedKhr = isset($inputData['amount_tendered_khr']) ? (int)$inputData['amount_tendered_khr'] : (isset($_POST['amount_tendered_khr']) ? (int)$_POST['amount_tendered_khr'] : 0);
+        $changeKhr = isset($inputData['change_khr']) ? (int)$inputData['change_khr'] : (isset($_POST['change_khr']) ? (int)$_POST['change_khr'] : 0);
+        $activeShiftIdVal = !empty($activeShift['id']) ? (int)$activeShift['id'] : null;
+
         if ($isPaid) {
             if ($paymentMethod === 'cash') {
-                if ($tenderedUsd <= 0 && $totalUsd > 0) {
+                $totalTenderedInUsd = round($tenderedUsd + ($tenderedKhr / $exchangeRate), 2);
+                if ($totalTenderedInUsd <= 0 && $totalUsd > 0) {
                     http_response_code(400);
                     echo json_encode(['success' => false, 'error' => 'Cash amount cannot be empty or zero for cash payment']);
                     exit;
                 }
-                if ($tenderedUsd < $totalUsd) {
+                if ($totalTenderedInUsd < ($totalUsd - 0.01)) {
                     http_response_code(400);
-                    echo json_encode(['success' => false, 'error' => 'Cash tendered ($' . number_format($tenderedUsd, 2) . ') is less than total amount ($' . number_format($totalUsd, 2) . ')']);
+                    echo json_encode(['success' => false, 'error' => 'Cash tendered ($' . number_format($totalTenderedInUsd, 2) . ') is less than total amount ($' . number_format($totalUsd, 2) . ')']);
                     exit;
                 }
-                $changeUsd = round(max(0, $tenderedUsd - $totalUsd), 2);
+                if ($changeUsd === null && $changeKhr === 0) {
+                    $changeUsd = round(max(0, $totalTenderedInUsd - $totalUsd), 2);
+                } else {
+                    $changeUsd = max(0.00, (float)($changeUsd ?? 0.00));
+                }
             } else {
                 $tenderedUsd = $totalUsd;
                 $changeUsd = 0.00;
+                $changeKhr = 0;
                 if (in_array($paymentMethod, ['aba', 'khqr'], true) && empty($paymentRef)) {
                     $paymentRef = 'TRX-' . strtoupper(substr(md5(uniqid()), 0, 8));
                 }
             }
         } else {
             $changeUsd = 0.00;
+            $changeKhr = 0;
         }
 
         // Generate Order Number
@@ -2146,7 +2202,8 @@ if ($action === 'create_order') {
                 customer_id, vehicle_id, customer_name, customer_phone, plate_number, vehicle_type,
                 subtotal_usd, discount_usd, points_redeemed, points_discount_usd, total_usd, total_khr,
                 status, repair_status, repair_notes,
-                payment_method, payment_status, amount_tendered_usd, change_usd, payment_ref,
+                payment_method, payment_status, amount_tendered_usd, amount_tendered_khr, change_usd, change_khr,
+                shift_id, exchange_rate, payment_ref,
                 cashier_id, created_by, synced_by, is_synced, synced_at,
                 notes, started_at, finished_at, paid_at, created_at,
                 current_mileage, next_oil_mileage, next_oil_date,
@@ -2156,7 +2213,8 @@ if ($action === 'create_order') {
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?,
-                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?,
@@ -2171,7 +2229,8 @@ if ($action === 'create_order') {
             $customerId, $vehicleId, $customerName, ($customerPhone !== '' ? $customerPhone : null), $plateNumber, $vehicleType,
             $subtotalUsd, $totalDiscountUsd, $actualPointsRedeemed, $pointsDiscountUsd, $totalUsd, $totalKhr,
             $status, $repairStatus, $repairNotes,
-            $paymentMethod, $paymentStatus, $tenderedUsd, $changeUsd, $paymentRef,
+            $paymentMethod, $paymentStatus, $tenderedUsd, $tenderedKhr, $changeUsd, $changeKhr,
+            $activeShiftIdVal, $exchangeRate, $paymentRef,
             ($orderCreatedBy ?: $verifiedUserId), $orderCreatedBy, $orderSyncedBy, ($isOfflineSync ? 1 : 0), ($isOfflineSync ? date('Y-m-d H:i:s') : null),
             $notes, $startedAt, $finishedAt, $paidAt, $orderCreatedAt,
             $currentMileage, $nextOilMileage, $nextOilDate,
@@ -2620,6 +2679,20 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
                 ]);
                 exit;
             }
+
+            // Enforce active shift for cashiers: cannot take payment without an active shift today
+            if ($newStatus === 'paid' && $stf['role'] === 'cashier') {
+                $activeShift = CashierControl::getActiveShiftForToday($staffId);
+                if (!$activeShift) {
+                    http_response_code(400);
+                    echo json_encode([
+                        'success' => false,
+                        'error' => 'NO_ACTIVE_SHIFT',
+                        'message' => 'No active shift is open for today. You must open a shift and record your opening float before taking payments.'
+                    ]);
+                    exit;
+                }
+            }
             if ($newStatus === 'cancelled' && !Auth::userHasPermission($staffId, 'pos.cancel_order') && !Auth::userHasPermission($staffId, 'orders.cancel')) {
                 http_response_code(403);
                 echo json_encode([
@@ -2731,27 +2804,42 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
             ]);
             exit;
         }
+        $exchangeRate = get_exchange_rate();
         $totalUsd = max(0.00, round($subtotalUsd - $totalDiscountUsd, 2));
-        $totalKhr = (int)round($totalUsd * get_exchange_rate());
+        $totalKhr = (int)round($totalUsd * $exchangeRate);
+
+        $tenderedKhr = isset($inputData['amount_tendered_khr']) ? (int)$inputData['amount_tendered_khr'] : (isset($_POST['amount_tendered_khr']) ? (int)$_POST['amount_tendered_khr'] : 0);
+        $changeKhr = isset($inputData['change_khr']) ? (int)$inputData['change_khr'] : (isset($_POST['change_khr']) ? (int)$_POST['change_khr'] : 0);
+        $tenderedUsd = ($tenderedUsd !== null) ? max(0.00, (float)$tenderedUsd) : 0.00;
 
         if ($paymentMethod === 'cash') {
-            if ($tenderedUsd === null || $tenderedUsd <= 0) {
+            $totalTenderedInUsd = round($tenderedUsd + ($tenderedKhr / $exchangeRate), 2);
+            if ($totalTenderedInUsd <= 0.00 && $totalUsd > 0.00) {
                 http_response_code(400);
                 echo json_encode(['success' => false, 'error' => 'Cash tendered cannot be empty or zero.']);
                 exit;
             }
-            if ($tenderedUsd < $totalUsd) {
+            if ($totalTenderedInUsd < ($totalUsd - 0.01)) {
                 http_response_code(400);
-                echo json_encode(['success' => false, 'error' => 'Cash tendered ($' . number_format($tenderedUsd, 2) . ') is less than total amount ($' . number_format($totalUsd, 2) . ')']);
+                echo json_encode(['success' => false, 'error' => 'Cash tendered ($' . number_format($totalTenderedInUsd, 2) . ') is less than total amount ($' . number_format($totalUsd, 2) . ')']);
                 exit;
             }
-            $changeUsd = round(max(0.00, $tenderedUsd - $totalUsd), 2);
+            if ($changeUsd === null && $changeKhr === 0) {
+                $changeUsd = round(max(0.00, $totalTenderedInUsd - $totalUsd), 2);
+            } else {
+                $changeUsd = max(0.00, (float)($changeUsd ?? 0.00));
+            }
         } else {
             $changeUsd = 0.00;
+            $changeKhr = 0;
             if (in_array($paymentMethod, ['aba', 'khqr'], true) && empty($paymentRef)) {
                 $paymentRef = 'TRX-' . strtoupper(substr(md5(uniqid()), 0, 8));
             }
         }
+
+        // Active shift ID
+        $activeShift = CashierControl::getActiveShiftForToday($staffId);
+        $activeShiftIdVal = !empty($activeShift['id']) ? (int)$activeShift['id'] : null;
 
         $bankSlipImg = null;
         if (in_array($paymentMethod, ['aba', 'khqr'], true)) {
@@ -2785,8 +2873,6 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
             $paidAtVal = null;
         } else {
             $targetPaymentStatus = 'paid';
-            // If the vehicle has already completed service, mark as paid.
-            // If vehicle is waiting to enter a bay or actively washing (upfront payment), preserve its operational workflow status!
             if ($ord['status'] === 'finished') {
                 $targetOrderStatus = 'paid';
             } elseif ($ord['status'] === 'washing') {
@@ -2808,7 +2894,11 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
                 total_usd = ?,
                 total_khr = ?,
                 amount_tendered_usd = ?,
+                amount_tendered_khr = ?,
                 change_usd = ?,
+                change_khr = ?,
+                exchange_rate = ?,
+                shift_id = COALESCE(?, shift_id),
                 payment_ref = ?,
                 cashier_id = COALESCE(?, cashier_id),
                 pos_device_id = COALESCE(?, pos_device_id),
@@ -2823,7 +2913,9 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
             $targetOrderStatus,
             $targetPaymentStatus,
             $paymentMethod, $totalDiscountUsd, $actualPointsRedeemed, $pointsDiscountUsd, $totalUsd, $totalKhr,
-            $tenderedUsd, $changeUsd, $paymentRef,
+            $tenderedUsd, $tenderedKhr, $changeUsd, $changeKhr,
+            $exchangeRate, $activeShiftIdVal,
+            $paymentRef,
             ($staffId > 0 ? $staffId : null),
             ($device['id'] ?? null),
             ($device['device_name'] ?? null),
@@ -4273,6 +4365,13 @@ if ($action === 'get_daily_close_status' || $action === 'daily_close_status' || 
 // 19. ACTION: shift_start
 // ========================================================
 if ($action === 'shift_start') {
+    $dayLock = CashierControl::isDayLocked();
+    if (!empty($dayLock['locked'])) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'DAY_CLOSED', 'message' => $dayLock['message']]);
+        exit;
+    }
+
     $cashierId = (int)($inputData['cashier_id'] ?? $inputData['user_id'] ?? $_POST['cashier_id'] ?? 0);
     if ($cashierId <= 0) {
         http_response_code(401);
@@ -4295,19 +4394,24 @@ if ($action === 'shift_start') {
 }
 
 // ========================================================
-// 20. ACTION: shift_end (Handover)
+// 20. ACTION: shift_end (Handover or Solo)
 // ========================================================
 if ($action === 'shift_end') {
     $shiftId = (int)($inputData['shift_id'] ?? $_POST['shift_id'] ?? 0);
     $countedUsd = max(0.00, (float)($inputData['counted_cash_usd'] ?? $_POST['counted_cash_usd'] ?? 0.00));
     $countedKhr = max(0, (int)($inputData['counted_cash_khr'] ?? $_POST['counted_cash_khr'] ?? 0));
     $outPin = (string)($inputData['outgoing_pin'] ?? $_POST['outgoing_pin'] ?? '');
-    $inUser = trim($inputData['incoming_username'] ?? $_POST['incoming_username'] ?? '');
+    $inUser = trim((string)($inputData['incoming_username'] ?? $_POST['incoming_username'] ?? ''));
     $inPin = (string)($inputData['incoming_pin'] ?? $_POST['incoming_pin'] ?? '');
-    $notes = trim($inputData['notes'] ?? $_POST['notes'] ?? '');
+    $notes = trim((string)($inputData['notes'] ?? $_POST['notes'] ?? ''));
+    $isSolo = !empty($inputData['is_solo']) || !empty($_POST['is_solo']) || ($inUser === '' && $inPin === '');
 
     try {
-        $res = CashierControl::endShift($shiftId, $countedUsd, $countedKhr, $outPin, $inUser, $inPin, $notes);
+        if ($isSolo) {
+            $res = CashierControl::endShiftSolo($shiftId, $countedUsd, $countedKhr, $outPin, $notes);
+        } else {
+            $res = CashierControl::endShift($shiftId, $countedUsd, $countedKhr, $outPin, $inUser, $inPin, $notes);
+        }
         echo json_encode($res);
     } catch (Exception $e) {
         http_response_code(400);
@@ -4463,11 +4567,52 @@ if ($action === 'reopen_day') {
 if ($action === 'get_shift_status') {
     $cashierId = (int)($inputData['cashier_id'] ?? $inputData['user_id'] ?? $_POST['cashier_id'] ?? $_GET['cashier_id'] ?? 0);
     $shift = CashierControl::getActiveShift($cashierId);
+    $oldShift = CashierControl::getOldShiftNeedingReview($cashierId);
+    $shiftsNeedingReview = CashierControl::getAllShiftsNeedingReview();
     echo json_encode([
         'success' => true,
         'has_active_shift' => !empty($shift),
-        'shift' => $shift
+        'shift' => $shift,
+        'needs_manager_review' => !empty($oldShift),
+        'old_shift' => $oldShift,
+        'shifts_needing_review_count' => count($shiftsNeedingReview)
     ]);
+    exit;
+}
+
+// ========================================================
+// 26B. ACTION: get_shifts_needing_review
+// ========================================================
+if ($action === 'get_shifts_needing_review') {
+    $shifts = CashierControl::getAllShiftsNeedingReview();
+    echo json_encode([
+        'success' => true,
+        'shifts' => $shifts
+    ]);
+    exit;
+}
+
+// ========================================================
+// 26C. ACTION: manager_review_shift
+// ========================================================
+if ($action === 'manager_review_shift') {
+    $shiftId = (int)($inputData['shift_id'] ?? $_POST['shift_id'] ?? 0);
+    $countedUsd = max(0.00, (float)($inputData['counted_cash_usd'] ?? $_POST['counted_cash_usd'] ?? 0.00));
+    $countedKhr = max(0, (int)($inputData['counted_cash_khr'] ?? $_POST['counted_cash_khr'] ?? 0));
+    $mgrUser = trim($inputData['manager_username'] ?? $_POST['manager_username'] ?? '');
+    $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
+    $reason = trim($inputData['reason'] ?? $inputData['review_reason'] ?? $_POST['reason'] ?? $_POST['review_reason'] ?? '');
+
+    try {
+        $res = CashierControl::managerCloseReviewShift($shiftId, $countedUsd, $countedKhr, $mgrUser, $mgrPin, $reason);
+        echo json_encode($res);
+    } catch (ManagerPinThrottledException $e) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
+    } catch (Exception $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
     exit;
 }
 
@@ -4512,6 +4657,79 @@ if ($action === 'get_day_lock_status') {
         'lock_reason' => $lockStatus['reason'] ?? null,
         'message' => $lockStatus['message'] ?? 'Day is open'
     ]);
+    exit;
+}
+
+// ========================================================
+// 28B. ACTION: record_cash_movement (Cash In / Cash Out)
+// ========================================================
+if ($action === 'record_cash_movement') {
+    $type = trim($inputData['type'] ?? $_POST['type'] ?? 'cash_out');
+    $amountUsd = max(0.00, (float)($inputData['amount_usd'] ?? $_POST['amount_usd'] ?? 0.00));
+    $amountKhr = max(0, (int)($inputData['amount_khr'] ?? $_POST['amount_khr'] ?? 0));
+    $reason = trim($inputData['reason'] ?? $_POST['reason'] ?? '');
+    $cashierId = (int)($inputData['cashier_id'] ?? $inputData['user_id'] ?? $_POST['cashier_id'] ?? 0);
+    $mgrUser = trim($inputData['manager_username'] ?? $_POST['manager_username'] ?? '');
+    $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
+
+    if ($cashierId <= 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'STAFF_REQUIRED', 'message' => 'Cashier staff ID is required.']);
+        exit;
+    }
+
+    try {
+        $res = CashierControl::recordCashMovement($type, $amountUsd, $amountKhr, $reason, $cashierId, $authDeviceId, $mgrUser, $mgrPin);
+        echo json_encode($res);
+    } catch (Exception $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// ========================================================
+// 28C. ACTION: get_open_shift_slip (Reprint Open Float Slip)
+// ========================================================
+if ($action === 'get_open_shift_slip') {
+    $shiftId = (int)($inputData['shift_id'] ?? $_GET['shift_id'] ?? $_POST['shift_id'] ?? 0);
+    try {
+        $slip = CashierControl::getOpenShiftSlipData($shiftId);
+        echo json_encode(['success' => true, 'slip' => $slip]);
+    } catch (Exception $e) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// ========================================================
+// 28D. ACTION: get_end_shift_slip (Reprint End Shift Slip)
+// ========================================================
+if ($action === 'get_end_shift_slip') {
+    $shiftId = (int)($inputData['shift_id'] ?? $_GET['shift_id'] ?? $_POST['shift_id'] ?? 0);
+    try {
+        $slip = CashierControl::getEndShiftSlipData($shiftId);
+        echo json_encode(['success' => true, 'slip' => $slip]);
+    } catch (Exception $e) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// ========================================================
+// 28E. ACTION: get_close_day_slip (Reprint Close Day / Z-Report Slip)
+// ========================================================
+if ($action === 'get_close_day_slip') {
+    $ref = trim((string)($inputData['close_id'] ?? $_GET['close_id'] ?? $_GET['date'] ?? $_POST['close_id'] ?? date('Y-m-d')));
+    try {
+        $slip = CashierControl::getCloseDaySlipData($ref);
+        echo json_encode(['success' => true, 'slip' => $slip]);
+    } catch (Exception $e) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
     exit;
 }
 
@@ -4663,15 +4881,20 @@ if ($action === 'get_technical_jobs') {
     $isSqlite = (Database::getDriver() === 'sqlite');
     $svcConcat = $isSqlite ? "GROUP_CONCAT(DISTINCT oi.service_name)" : "GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ')";
 
-    // Also find cars waiting for handshake / tech receive (ready_for_tech)
+    // Find cars waiting for hoist / technical service (ready_for_tech OR direct arrival waiting)
     $waitingHandoverStmt = $pdo->query("
         SELECT o.*,
+               ot.status AS tech_task_status,
+               ot.title AS tech_task_title,
                (SELECT {$svcConcat} FROM order_items oi WHERE oi.order_id = o.id) as service_names
         FROM orders o
         JOIN order_tasks ot ON o.id = ot.order_id
-        WHERE ot.task_type = 'oil_change' AND ot.status = 'ready_for_tech' AND o.status != 'cancelled'
+        WHERE ot.task_type = 'oil_change' 
+          AND ot.status IN ('ready_for_tech', 'waiting') 
+          AND (o.bay_id IS NULL OR o.bay_id = 0)
+          AND o.status NOT IN ('cancelled', 'finished')
         GROUP BY o.id
-        ORDER BY o.id ASC
+        ORDER BY CASE ot.status WHEN 'ready_for_tech' THEN 1 ELSE 2 END, o.id ASC
     ");
     $waitingHandover = $waitingHandoverStmt->fetchAll(PDO::FETCH_ASSOC);
 

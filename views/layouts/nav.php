@@ -108,30 +108,24 @@ $rawMenuGroups = [
         'icon'  => 'fa-boxes-stacked',
         'items' => [
             [
+                'view'       => 'categories',
+                'label'      => __('nav_categories', 'Categories'),
+                'icon'       => 'fa-tags',
+                'permission' => 'categories.list',
+            ],
+            [
                 'view'       => 'services',
-                'label'      => __('nav_services'),
+                'label'      => __('nav_services', 'Services & Pricing'),
                 'icon'       => 'fa-list-check',
                 'permission' => 'services.list',
             ],
             [
                 'view'       => 'products',
-                'label'      => __('nav_products_warehouse', 'Products & Warehouse'),
+                'label'      => __('nav_products_stock', 'Products & Stock'),
                 'icon'       => 'fa-boxes-stacked',
                 'permission' => 'oil_care.list',
                 'badge'      => $navPendingParts > 0 ? (string)$navPendingParts : null,
                 'badge_class'=> 'badge-amber',
-            ],
-            [
-                'view'       => 'stock_ledger',
-                'label'      => __('nav_stock_ledger', 'Stock Ledger & Inbound'),
-                'icon'       => 'fa-clipboard-list',
-                'permission' => 'oil_care.list',
-            ],
-            [
-                'view'       => 'categories',
-                'label'      => __('nav_categories'),
-                'icon'       => 'fa-tags',
-                'permission' => 'categories.list',
             ],
         ],
     ],
