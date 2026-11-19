@@ -1000,6 +1000,8 @@ class CashierControl {
         if ($shortageOwedUsd > 0 || $totalDiffUsd < -0.01) {
             AuditLogger::log('SHIFT_SHORTAGE', "Cash shortage of $" . number_format($shortageOwedUsd, 2) . " recorded as owed by Cashier {$outUser['full_name']} (#{$outUser['id']})", 'shift', (string)$shiftId, (int)$outUser['id'], $outUser['username'], 'cashier');
             TelegramNotifier::notifyShiftShortage((string)$outUser['full_name'], $diffUsd, $diffKhr, (string)$shift['shift_uid'], $totalDiffUsd);
+        } elseif ($totalDiffUsd > 0.01) {
+            TelegramNotifier::notifyShiftOver((string)$outUser['full_name'], $diffUsd, $diffKhr, (string)$shift['shift_uid'], $totalDiffUsd);
         }
 
         $slip = self::getEndShiftSlipData($shiftId);
@@ -1156,6 +1158,8 @@ class CashierControl {
                 'cashier'
             );
             TelegramNotifier::notifyShiftShortage((string)$shift['cashier_name'], $diffUsd, $diffKhr, (string)$shift['shift_uid'], $totalDiffUsd);
+        } elseif ($totalDiffUsd > 0.01) {
+            TelegramNotifier::notifyShiftOver((string)$shift['cashier_name'], $diffUsd, $diffKhr, (string)$shift['shift_uid'], $totalDiffUsd);
         }
 
         $slip = self::getEndShiftSlipData($shiftId);
@@ -1993,6 +1997,14 @@ class CashierControl {
 
         $logMsg = "Day {$closeDate} (Z-Report: {$row['z_report_number']}) REOPENED by Manager/Owner {$mgr['manager_name']}. Reason: {$reason}";
         AuditLogger::log('DAY_REOPENED', $logMsg, 'z_report', (string)$row['z_report_number'], $mgr['manager_id'], $mgr['manager_name'], $mgr['manager_role']);
+
+        TelegramNotifier::notifyDayReopened(
+            $closeDate,
+            (string)($row['z_report_number'] ?? ''),
+            (string)$mgr['manager_name'],
+            (string)$mgr['manager_role'],
+            $reason
+        );
 
         return [
             'success'      => true,

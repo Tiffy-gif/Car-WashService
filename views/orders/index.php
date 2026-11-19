@@ -54,7 +54,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         $userId = Auth::getId() ? (int)Auth::getId() : null;
 
         // Fetch order details
-        $ordStmt = $pdo->prepare("SELECT id, order_number, customer_id, subtotal_usd, points_redeemed, points_discount_usd FROM orders WHERE id = ?");
+        $ordStmt = $pdo->prepare("SELECT id, order_number, customer_id, plate_number, subtotal_usd, points_redeemed, points_discount_usd FROM orders WHERE id = ?");
         $ordStmt->execute([$orderId]);
         $ordRow = $ordStmt->fetch();
 
@@ -204,6 +204,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
 
                 // Also update vehicle_repair_history total if entry exists
                 $pdo->prepare("UPDATE vehicle_repair_history SET total_cost_usd = ? WHERE order_id = ?")->execute([$totalUsd, $orderId]);
+
+                // Alert if order discount exceeds configured limits (both % and $)
+                if ($totalDiscountUsd > 0.0 && $subtotalUsd > 0.0) {
+                    TelegramNotifier::checkAndNotifyOrderDiscount(
+                        (string)$ordRow['order_number'],
+                        $subtotalUsd,
+                        $totalDiscountUsd,
+                        (string)(Auth::getUserName() ?: 'Cashier'),
+                        (string)($ordRow['plate_number'] ?? '')
+                    );
+                }
 
                 $paidOrderId = $orderId;
                 $loyaltyMsg = ($ptsAwarded > 0) ? " Customer earned +{$ptsAwarded} loyalty pts!" : "";

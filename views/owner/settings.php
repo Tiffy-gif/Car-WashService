@@ -545,10 +545,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
     elseif ($action === 'save_telegram') {
         $token = trim($_POST['telegram_bot_token'] ?? '');
         $chatId = trim($_POST['telegram_chat_id'] ?? '');
+        $discPct = (string)max(1, (float)($_POST['discount_alert_percent_threshold'] ?? 20));
+        $discUsd = (string)max(0.5, (float)($_POST['discount_alert_dollar_threshold'] ?? 5));
 
         $changed = 0;
         if (update_setting($pdo, 'telegram_bot_token', $token, $userId, $userName)) $changed++;
         if (update_setting($pdo, 'telegram_chat_id', $chatId, $userId, $userName)) $changed++;
+        if (update_setting($pdo, 'discount_alert_percent_threshold', $discPct, $userId, $userName)) $changed++;
+        if (update_setting($pdo, 'discount_alert_dollar_threshold', $discUsd, $userId, $userName)) $changed++;
 
         if (!empty($_POST['send_test'])) {
             if (empty($token) || empty($chatId)) {
@@ -569,7 +573,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                             'method' => 'POST',
                             'header' => "Content-Type: application/x-www-form-urlencoded\r\n",
                             'content' => http_build_query($testPayload),
-                            'timeout' => 5
+                            'timeout' => 5,
+                            'ignore_errors' => true
                         ]
                     ]);
                     $resp = @file_get_contents($testUrl, false, $ctx);
@@ -753,6 +758,8 @@ $keyLabels = [
     'default_oil_months'  => 'Default Oil Month Interval',
     'telegram_bot_token'  => 'Telegram Bot Token',
     'telegram_chat_id'    => 'Telegram Alert Chat ID',
+    'discount_alert_percent_threshold' => 'Telegram Discount Alert Threshold (%)',
+    'discount_alert_dollar_threshold'  => 'Telegram Discount Alert Threshold ($)',
     'default_language'    => 'Default System Language',
     'demo_mode'           => 'Quick Demo Login Switch',
     'app_timezone'        => 'Application Time Zone',
@@ -3365,6 +3372,38 @@ window.addEventListener('click', function(e) {
                 <label class="form-label">Alert Chat ID / Group ID / Channel</label>
                 <input type="text" name="telegram_chat_id" class="form-input" style="font-family: var(--font-mono);" placeholder="e.g. -100123456789 or @aquagleam_alerts" value="<?= htmlspecialchars($settings['telegram_chat_id'] ?? '') ?>">
                 <div class="text-xs text-muted" style="margin-top: 4px;">Channel username or numeric ID where notifications should be posted</div>
+            </div>
+
+            <!-- High Discount Alert Thresholds -->
+            <div style="border-top: 1px solid var(--border); padding-top: 20px; margin-top: 20px;">
+                <h3 style="font-size: 15px; font-weight: 700; color: var(--text-main); margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                    <i class="fa-solid fa-tags" style="color: #ea580c;"></i> High Discount Alert Limits
+                </h3>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+                    Send an alert to Telegram when an order discount is unusually high. The alert is triggered <strong>only when both limits are passed</strong>.
+                </p>
+                <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group">
+                        <label class="form-label">Discount Percentage Limit (%) <span style="color: var(--danger);">*</span></label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" name="discount_alert_percent_threshold" class="form-input" style="font-size: 15px; font-weight: 700;" value="<?= htmlspecialchars($settings['discount_alert_percent_threshold'] ?? '20') ?>" min="1" max="100" step="1" required>
+                            <span style="font-weight: 700; color: var(--text-muted);">%</span>
+                        </div>
+                        <div class="text-xs text-muted" style="margin-top: 4px;">Default: 20%. Order discount % must exceed this value.</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Discount Dollar Amount Limit ($) <span style="color: var(--danger);">*</span></label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" name="discount_alert_dollar_threshold" class="form-input" style="font-size: 15px; font-weight: 700;" value="<?= htmlspecialchars($settings['discount_alert_dollar_threshold'] ?? '5') ?>" min="0.5" step="0.5" required>
+                            <span style="font-weight: 700; color: var(--text-muted);">USD</span>
+                        </div>
+                        <div class="text-xs text-muted" style="margin-top: 4px;">Default: $5.00. Order discount $ amount must also exceed this value.</div>
+                    </div>
+                </div>
+                <div style="background: #fff7ed; border: 1px solid #ffedd5; border-radius: var(--radius-md); padding: 10px 14px; margin-top: 8px; color: #9a3412; font-size: 12px;">
+                    <i class="fa-solid fa-circle-info mr-1"></i>
+                    <strong>Rule:</strong> Both thresholds must be exceeded simultaneously. For example, a $3 discount on a $6 order (50%) will NOT alert because $3 &le; $5. A $6 discount on a $50 order (12%) will NOT alert because 12% &le; 20%. Only discounts that are both &gt; 20% AND &gt; $5.00 trigger the alert.
+                </div>
             </div>
 
             <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: var(--radius-md); padding: 14px 18px; margin: 16px 0; color: #0369a1; font-size: 13px;">

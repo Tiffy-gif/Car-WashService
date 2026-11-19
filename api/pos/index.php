@@ -2334,6 +2334,17 @@ if ($action === 'create_order') {
             );
         }
 
+        // Alert if order discount exceeds configured limits (both % and $)
+        if ($totalDiscountUsd > 0.0 && $subtotalUsd > 0.0) {
+            TelegramNotifier::checkAndNotifyOrderDiscount(
+                $orderNumber,
+                $subtotalUsd,
+                $totalDiscountUsd,
+                $sessionUser['username'] ?? $creatorName ?? 'POS Cashier',
+                $plateNumber
+            );
+        }
+
         // Record Loyalty Reward prompt action (Requirement 3: record whether the cashier gave it)
         $loyaltyRewardGiven = isset($inputData['loyalty_reward_given']) ? ($inputData['loyalty_reward_given'] ? 1 : 0) : (isset($_POST['loyalty_reward_given']) ? ($_POST['loyalty_reward_given'] ? 1 : 0) : null);
         $loyaltyRewardName = !empty($inputData['loyalty_reward_name']) ? trim($inputData['loyalty_reward_name']) : (!empty($_POST['loyalty_reward_name']) ? trim($_POST['loyalty_reward_name']) : null);
@@ -2994,6 +3005,17 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
 
         // Update vehicle_repair_history total if entry exists
         $pdo->prepare("UPDATE vehicle_repair_history SET total_cost_usd = ? WHERE order_id = ?")->execute([$totalUsd, $id]);
+
+        // Alert if order discount exceeds configured limits (both % and $)
+        if ($totalDiscountUsd > 0.0 && (float)($ord['subtotal_usd'] ?? 0) > 0.0) {
+            TelegramNotifier::checkAndNotifyOrderDiscount(
+                (string)$ord['order_number'],
+                (float)$ord['subtotal_usd'],
+                $totalDiscountUsd,
+                $stf['username'] ?? 'Cashier',
+                (string)($ord['plate_number'] ?? '')
+            );
+        }
 
     } elseif ($newStatus === 'finished') {
         $pdo->prepare("UPDATE orders SET status = 'finished', finished_at = CURRENT_TIMESTAMP, repair_status = CASE WHEN repair_status IS NOT NULL THEN 'finished' ELSE repair_status END WHERE id = ?")

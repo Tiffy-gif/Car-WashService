@@ -178,4 +178,130 @@ class TelegramNotifier {
             return false;
         }
     }
+
+    /**
+     * Event 4: Day Reopened
+     * Triggered when a Manager/Owner reopens a previously closed day.
+     * Includes who did it and the mandatory reason.
+     * Strictly omits customer phone numbers.
+     */
+    public static function notifyDayReopened(
+        string $closeDate,
+        string $zReportNumber,
+        string $reopenedBy,
+        string $role,
+        string $reason
+    ): bool {
+        try {
+            $date = htmlspecialchars($closeDate);
+            $zReport = htmlspecialchars($zReportNumber);
+            $who = htmlspecialchars($reopenedBy);
+            $roleLabel = htmlspecialchars(ucfirst($role));
+            $cleanReason = htmlspecialchars(mb_strimwidth(trim($reason), 0, 150, '...'));
+
+            $msg = "🔓 <b>[DAY REOPENED] {$date}</b>\n"
+                 . "Z-Report: <code>{$zReport}</code>\n"
+                 . "Reopened By: <b>{$who}</b> ({$roleLabel})\n"
+                 . "Reason: <i>{$cleanReason}</i>\n"
+                 . "Status: Day is unlocked. Cashier sales and shifts resumed.";
+
+            return self::send($msg);
+        } catch (Throwable $t) {
+            error_log("TelegramNotifier::notifyDayReopened error: " . $t->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Event 5: Shift Ended With Cash Over
+     * Triggered when shift drawer cash count exceeds expected amount.
+     * Includes cashier and over amount.
+     * Strictly omits customer phone numbers.
+     */
+    public static function notifyShiftOver(
+        string $cashierName,
+        float $diffUsd,
+        int $diffKhr,
+        string $shiftUid,
+        float $totalDiffUsd
+    ): bool {
+        try {
+            $cashier = htmlspecialchars($cashierName);
+            $uid = htmlspecialchars($shiftUid);
+            $absTotalDiff = number_format(abs($totalDiffUsd), 2);
+
+            $breakdown = [];
+            if ($diffUsd > 0.01) {
+                $breakdown[] = "+$" . number_format($diffUsd, 2);
+            }
+            if ($diffKhr > 100) {
+                $breakdown[] = "+" . number_format($diffKhr) . " KHR";
+            }
+            $details = !empty($breakdown) ? " (" . implode(' / ', $breakdown) . ")" : "";
+
+            $msg = "💵 <b>[SHIFT CASH OVER]</b>\n"
+                 . "Shift: <code>{$uid}</code>\n"
+                 . "Cashier: <b>{$cashier}</b>\n"
+                 . "Over Amount: <b>+\${$absTotalDiff}</b>{$details}\n"
+                 . "Status: Cash surplus recorded on shift closeout.";
+
+            return self::send($msg);
+        } catch (Throwable $t) {
+            error_log("TelegramNotifier::notifyShiftOver error: " . $t->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Event 6: Order Discount Above Limits
+     * Triggered when an order discount exceeds BOTH configured thresholds:
+     * - Percent threshold (default 20%)
+     * - Dollar threshold (default $5.00)
+     * Strictly omits customer phone numbers.
+     */
+    public static function checkAndNotifyOrderDiscount(
+        string $orderNumber,
+        float $subtotalUsd,
+        float $discountUsd,
+        string $appliedBy,
+        string $plateNumber = ''
+    ): bool {
+        try {
+            if ($subtotalUsd <= 0.0 || $discountUsd <= 0.0) {
+                return false;
+            }
+
+            $pctLimit = (float)get_setting('discount_alert_percent_threshold', '20');
+            $usdLimit = (float)get_setting('discount_alert_dollar_threshold', '5');
+
+            $actualPct = ($discountUsd / $subtotalUsd) * 100;
+
+            // Trigger ONLY when BOTH limits are passed
+            if ($actualPct <= $pctLimit || $discountUsd <= $usdLimit) {
+                return false;
+            }
+
+            $ordNum = htmlspecialchars($orderNumber);
+            $plate = htmlspecialchars($plateNumber !== '' ? $plateNumber : 'N/A');
+            $who = htmlspecialchars($appliedBy);
+            $subtotalFmt = number_format($subtotalUsd, 2);
+            $discFmt = number_format($discountUsd, 2);
+            $pctFmt = number_format($actualPct, 1);
+            $finalTotal = number_format(max(0.0, $subtotalUsd - $discountUsd), 2);
+
+            $msg = "🏷️ <b>[HIGH DISCOUNT ALERT]</b>\n"
+                 . "Order: <code>#{$ordNum}</code>\n"
+                 . "Vehicle: <b>{$plate}</b>\n"
+                 . "Subtotal: <b>\${$subtotalFmt}</b>\n"
+                 . "Discount: <b>-\${$discFmt} ({$pctFmt}%)</b>\n"
+                 . "Final Total: <b>\${$finalTotal}</b>\n"
+                 . "Given By: <b>{$who}</b>\n"
+                 . "Limits Passed: >" . number_format($pctLimit, 1) . "% and >\$" . number_format($usdLimit, 2);
+
+            return self::send($msg);
+        } catch (Throwable $t) {
+            error_log("TelegramNotifier::checkAndNotifyOrderDiscount error: " . $t->getMessage());
+            return false;
+        }
+    }
 }

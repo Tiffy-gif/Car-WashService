@@ -59,6 +59,10 @@ class Database {
         return self::$driver;
     }
 
+    public static function setInstance(?PDO $instance): void {
+        self::$instance = $instance;
+    }
+
     private function __construct() {}
     private function __clone() {}
 }
