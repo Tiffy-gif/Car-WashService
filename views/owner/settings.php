@@ -543,7 +543,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
 
     // 6. Save Telegram
     elseif ($action === 'save_telegram') {
-        $token = trim($_POST['telegram_bot_token'] ?? '');
+        $tokenInput = trim($_POST['telegram_bot_token'] ?? '');
+        $currentToken = (string)get_setting('telegram_bot_token', '');
+
+        // If the submitted token contains bullets (•), retain the existing saved token to avoid overwriting secret with mask
+        if (str_contains($tokenInput, '•')) {
+            $token = $currentToken;
+        } else {
+            $token = $tokenInput;
+        }
+
         $chatId = trim($_POST['telegram_chat_id'] ?? '');
         $discPct = (string)max(1, (float)($_POST['discount_alert_percent_threshold'] ?? 20));
         $discUsd = (string)max(0.5, (float)($_POST['discount_alert_dollar_threshold'] ?? 5));
@@ -560,7 +569,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                 $messageType = 'warning';
             } else {
                 // Attempt live test alert
-                $testUrl = "https://api.telegram.org/bot" . urlencode($token) . "/sendMessage";
+                $testUrl = "https://api.telegram.org/bot{$token}/sendMessage";
                 $testPayload = [
                     'chat_id' => $chatId,
                     'text' => "[AquaGleam] Test Alert\nSettings connection verified successfully at " . date('d/m/Y H:i:s') . " by " . $userName . "!"
@@ -568,25 +577,51 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                 $sentOk = false;
                 $errDetail = '';
                 try {
-                    $ctx = stream_context_create([
-                        'http' => [
-                            'method' => 'POST',
-                            'header' => "Content-Type: application/x-www-form-urlencoded\r\n",
-                            'content' => http_build_query($testPayload),
-                            'timeout' => 5,
-                            'ignore_errors' => true
-                        ]
-                    ]);
-                    $resp = @file_get_contents($testUrl, false, $ctx);
-                    if ($resp !== false) {
-                        $json = json_decode($resp, true);
-                        if (!empty($json['ok'])) {
-                            $sentOk = true;
+                    if (function_exists('curl_init')) {
+                        $ch = curl_init($testUrl);
+                        curl_setopt_array($ch, [
+                            CURLOPT_POST => true,
+                            CURLOPT_POSTFIELDS => http_build_query($testPayload),
+                            CURLOPT_RETURNTRANSFER => true,
+                            CURLOPT_TIMEOUT => 8,
+                            CURLOPT_SSL_VERIFYPEER => true,
+                            CURLOPT_SSL_VERIFYHOST => 2
+                        ]);
+                        $resp = curl_exec($ch);
+                        $curlErr = curl_error($ch);
+                        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                        curl_close($ch);
+                        if ($resp !== false) {
+                            $json = json_decode($resp, true);
+                            if (!empty($json['ok'])) {
+                                $sentOk = true;
+                            } else {
+                                $errDetail = $json['description'] ?? "HTTP {$httpCode} Telegram error";
+                            }
                         } else {
-                            $errDetail = $json['description'] ?? 'Telegram API returned an error';
+                            $errDetail = $curlErr ?: 'cURL request to api.telegram.org failed or timed out';
                         }
                     } else {
-                        $errDetail = 'Network request to api.telegram.org failed or timed out';
+                        $ctx = stream_context_create([
+                            'http' => [
+                                'method' => 'POST',
+                                'header' => "Content-Type: application/x-www-form-urlencoded\r\n",
+                                'content' => http_build_query($testPayload),
+                                'timeout' => 8,
+                                'ignore_errors' => true
+                            ]
+                        ]);
+                        $resp = @file_get_contents($testUrl, false, $ctx);
+                        if ($resp !== false) {
+                            $json = json_decode($resp, true);
+                            if (!empty($json['ok'])) {
+                                $sentOk = true;
+                            } else {
+                                $errDetail = $json['description'] ?? 'Telegram API returned an error';
+                            }
+                        } else {
+                            $errDetail = 'Network request to api.telegram.org failed or timed out';
+                        }
                     }
                 } catch (Throwable $t) {
                     $errDetail = $t->getMessage();
@@ -3346,14 +3381,26 @@ window.addEventListener('click', function(e) {
 <!-- ======================================================== -->
 <!-- GROUP 7: TELEGRAM SETTINGS -->
 <!-- ======================================================== -->
+<?php
+$rawBotToken = (string)($settings['telegram_bot_token'] ?? '');
+$maskedBotToken = '';
+if (!empty($rawBotToken)) {
+    $tokenLen = strlen($rawBotToken);
+    $last4 = substr($rawBotToken, -4);
+    $maskedBotToken = str_repeat('•', max(16, $tokenLen - 4)) . $last4;
+}
+?>
 <div id="tab_telegram" class="tab-pane" style="display: <?= ($activeTab === 'telegram') ? 'block' : 'none' ?>;">
     <div class="card">
         <div style="border-bottom: 1px solid var(--border); padding-bottom: 14px; margin-bottom: 20px;">
-            <h2 style="font-size: 18px; font-weight: 700; color: var(--text-main);">
-                <i class="fa-brands fa-telegram mr-2" style="color: #0284c7;"></i>Telegram Alerts &amp; Notifications
-            </h2>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <h2 style="font-size: 18px; font-weight: 700; color: var(--text-main); margin: 0; display: flex; align-items: center; gap: 8px;">
+                    <i class="fa-brands fa-telegram" style="color: #0284c7;"></i><?= htmlspecialchars(__('tg_info_title', 'Telegram Alerts & Notifications')) ?>
+                </h2>
+                <button type="button" onclick="openTelegramInfoModal()" title="<?= htmlspecialchars(__('tg_info_title', 'Telegram Alerts Info')) ?>" style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--bg-subtle); color: var(--primary); border: 1.5px solid var(--primary); font-size: 12px; font-weight: 800; cursor: pointer; padding: 0; line-height: 1; transition: all 0.15s ease;" onmouseover="this.style.background='var(--primary)';this.style.color='#fff';" onmouseout="this.style.background='var(--bg-subtle)';this.style.color='var(--primary)';">!</button>
+            </div>
             <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">
-                Send automatic alerts to your shop staff channel or customers when a vehicle wash or repair is finished.
+                <?= htmlspecialchars(__('tg_page_subtitle', 'Automated operational, financial, and security alerts sent directly to the shop owner and management.')) ?>
             </p>
         </div>
 
@@ -3364,14 +3411,14 @@ window.addEventListener('click', function(e) {
 
             <div class="form-group">
                 <label class="form-label">Telegram Bot API Token</label>
-                <input type="text" name="telegram_bot_token" class="form-input" style="font-family: var(--font-mono);" placeholder="e.g. 7123456789:AAH7Xy..." value="<?= htmlspecialchars($settings['telegram_bot_token'] ?? '') ?>">
-                <div class="text-xs text-muted" style="margin-top: 4px;">Obtained from @BotFather on Telegram</div>
+                <input type="text" name="telegram_bot_token" class="form-input" style="font-family: var(--font-mono);" placeholder="e.g. 7123456789:AAH7Xy..." value="<?= htmlspecialchars($maskedBotToken) ?>" autocomplete="off">
+                <div class="text-xs text-muted" style="margin-top: 4px;"><?= htmlspecialchars(__('tg_token_hint', 'Obtained from @BotFather on Telegram. For security, only the last 4 characters are shown.')) ?></div>
             </div>
 
             <div class="form-group">
                 <label class="form-label">Alert Chat ID / Group ID / Channel</label>
-                <input type="text" name="telegram_chat_id" class="form-input" style="font-family: var(--font-mono);" placeholder="e.g. -100123456789 or @aquagleam_alerts" value="<?= htmlspecialchars($settings['telegram_chat_id'] ?? '') ?>">
-                <div class="text-xs text-muted" style="margin-top: 4px;">Channel username or numeric ID where notifications should be posted</div>
+                <input type="text" name="telegram_chat_id" class="form-input" style="font-family: var(--font-mono);" placeholder="e.g. 838056124 or -100123456789" value="<?= htmlspecialchars($settings['telegram_chat_id'] ?? '') ?>">
+                <div class="text-xs text-muted" style="margin-top: 4px;">Numeric Chat ID (e.g. your personal ID 838056124 or group/channel ID) where notifications should be posted</div>
             </div>
 
             <!-- High Discount Alert Thresholds -->
@@ -3402,13 +3449,7 @@ window.addEventListener('click', function(e) {
                 </div>
                 <div style="background: #fff7ed; border: 1px solid #ffedd5; border-radius: var(--radius-md); padding: 10px 14px; margin-top: 8px; color: #9a3412; font-size: 12px;">
                     <i class="fa-solid fa-circle-info mr-1"></i>
-                    <strong>Rule:</strong> Both thresholds must be exceeded simultaneously. For example, a $3 discount on a $6 order (50%) will NOT alert because $3 &le; $5. A $6 discount on a $50 order (12%) will NOT alert because 12% &le; 20%. Only discounts that are both &gt; 20% AND &gt; $5.00 trigger the alert.
-                </div>
-            </div>
-
-            <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: var(--radius-md); padding: 14px 18px; margin: 16px 0; color: #0369a1; font-size: 13px;">
-                <div>
-                    <strong><i class="fa-solid fa-circle-info mr-1"></i> Telegram Ready Alerts:</strong> Automated alerts trigger in real time whenever a customer's vehicle is marked "Ready for Pickup" or at daily shift closeout.
+                    <?= htmlspecialchars(__('tg_discount_rule_short', 'An alert is sent only when the discount is above both limits, for example more than 20% and more than $5.')) ?>
                 </div>
             </div>
 
@@ -3421,6 +3462,109 @@ window.addEventListener('click', function(e) {
                 </button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- Telegram Alerts Info Modal -->
+<div id="telegramInfoModal" class="modal-backdrop" onclick="if(event.target === this) closeTelegramInfoModal();" style="z-index: 9999;">
+    <div class="modal" style="max-width: 620px; box-shadow: var(--shadow-xl); border: 1px solid var(--border);">
+        <div class="modal-header" style="background: var(--bg-surface); padding: 18px 22px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(2, 132, 199, 0.12); color: #0284c7; display: flex; align-items: center; justify-content: center; font-size: 16px;">
+                    <i class="fa-brands fa-telegram"></i>
+                </div>
+                <h3 class="modal-title" style="margin: 0; font-size: 17px; font-weight: 700; color: var(--text-main);">
+                    <?= htmlspecialchars(__('tg_info_modal_title', 'Telegram Automated Alerts')) ?>
+                </h3>
+            </div>
+            <button type="button" class="modal-close" onclick="closeTelegramInfoModal()" style="font-size: 22px; line-height: 1; cursor: pointer; padding: 4px 8px; border-radius: 6px; background: transparent; border: none; color: var(--text-muted);">&times;</button>
+        </div>
+        
+        <div class="modal-body" style="padding: 20px 22px; background: var(--bg-surface);">
+            <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5;">
+                <?= htmlspecialchars(__('tg_info_modal_subtitle', 'The system automatically sends 6 operational, financial, and security alerts to the shop owner/management channel:')) ?>
+            </p>
+
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <!-- 1. Day Closed -->
+                <div style="padding: 12px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #0284c7;"></span>
+                        1. <?= htmlspecialchars(__('tg_alert_day_closed', 'Day Closed (Z-Report)')) ?>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; padding-left: 14px;">
+                        <?= htmlspecialchars(__('tg_alert_day_closed_desc', 'Sent when daily closeout is completed. Shows close date, Z-Report ID, total sales (USD & KHR), total paid transactions, closing staff, and cash drawer status (balanced, short, or over).')) ?>
+                    </div>
+                </div>
+
+                <!-- 2. Shift Shortage -->
+                <div style="padding: 12px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <div style="font-weight: 700; font-size: 13px; color: var(--danger, #ef4444); margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--danger, #ef4444);"></span>
+                        2. <?= htmlspecialchars(__('tg_alert_shift_shortage', 'Shift Cash Shortage')) ?>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; padding-left: 14px;">
+                        <?= htmlspecialchars(__('tg_alert_shift_shortage_desc', 'Sent when a shift ends with actual cash less than expected. Shows shift UID, cashier name, and shortage amount.')) ?>
+                    </div>
+                </div>
+
+                <!-- 3. Shift Over -->
+                <div style="padding: 12px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <div style="font-weight: 700; font-size: 13px; color: #16a34a; margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #16a34a;"></span>
+                        3. <?= htmlspecialchars(__('tg_alert_shift_over', 'Shift Cash Over')) ?>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; padding-left: 14px;">
+                        <?= htmlspecialchars(__('tg_alert_shift_over_desc', 'Sent when a shift ends with actual cash greater than expected. Shows shift UID, cashier name, and surplus cash amount.')) ?>
+                    </div>
+                </div>
+
+                <!-- 4. Order Cancelled -->
+                <div style="padding: 12px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <div style="font-weight: 700; font-size: 13px; color: var(--danger, #ef4444); margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--danger, #ef4444);"></span>
+                        4. <?= htmlspecialchars(__('tg_alert_order_cancelled', 'Order Cancelled')) ?>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; padding-left: 14px;">
+                        <?= htmlspecialchars(__('tg_alert_order_cancelled_desc', 'Sent immediately when an active order is cancelled. Shows order number, vehicle plate, order total, cancellation reason, and authorizing staff.')) ?>
+                    </div>
+                </div>
+
+                <!-- 5. Closed Day Reopened -->
+                <div style="padding: 12px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <div style="font-weight: 700; font-size: 13px; color: #ca8a04; margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ca8a04;"></span>
+                        5. <?= htmlspecialchars(__('tg_alert_day_reopened', 'Closed Day Reopened')) ?>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; padding-left: 14px;">
+                        <?= htmlspecialchars(__('tg_alert_day_reopened_desc', 'Sent when an authorized manager reopens a previously closed business day. Shows date, Z-Report ID, manager name, role, and mandatory reason.')) ?>
+                    </div>
+                </div>
+
+                <!-- 6. High Discount -->
+                <div style="padding: 12px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <div style="font-weight: 700; font-size: 13px; color: #ea580c; margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ea580c;"></span>
+                        6. <?= htmlspecialchars(__('tg_alert_high_discount', 'High Discount Limit Exceeded')) ?>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; padding-left: 14px;">
+                        <?= htmlspecialchars(__('tg_alert_high_discount_desc', 'Sent when an applied discount passes both configured percentage (%) and dollar ($) limits. Shows order number, vehicle plate, subtotal, discount amount, final total, and cashier.')) ?>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Privacy Notice -->
+            <div style="margin-top: 16px; padding: 12px 14px; background: rgba(2, 132, 199, 0.08); border-left: 3px solid #0284c7; border-radius: 0 var(--radius-md) var(--radius-md) 0; font-size: 12px; color: var(--text-main); line-height: 1.5;">
+                <i class="fa-solid fa-shield-halved" style="color: #0284c7; margin-right: 6px;"></i>
+                <strong><?= htmlspecialchars(__('tg_privacy_notice', 'Customer phone numbers are strictly never included in Telegram alerts, and customers do not receive alerts.')) ?></strong>
+            </div>
+        </div>
+
+        <div class="modal-footer" style="padding: 14px 22px; border-top: 1px solid var(--border); background: var(--bg-surface); display: flex; justify-content: flex-end;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="closeTelegramInfoModal()">
+                <?= htmlspecialchars(__('close', 'Close')) ?>
+            </button>
+        </div>
     </div>
 </div>
 
@@ -4380,6 +4524,27 @@ function closeModal(id) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
 }
+function openTelegramInfoModal() {
+    const modal = document.getElementById('telegramInfoModal');
+    if (modal) {
+        modal.classList.add('active');
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+}
+function closeTelegramInfoModal() {
+    const modal = document.getElementById('telegramInfoModal');
+    if (modal) {
+        modal.classList.remove('active');
+        modal.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+}
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeTelegramInfoModal();
+    }
+});
 
 // Copy TV URL Helper
 function copyTvUrl() {

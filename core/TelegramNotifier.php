@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Helpers.php';
+require_once __DIR__ . '/AuditLogger.php';
 
 /**
  * TelegramNotifier
@@ -281,6 +282,17 @@ class TelegramNotifier {
                 return false;
             }
 
+            // Idempotency lock: check if alert was already sent for this order
+            $pdo = Database::getInstance();
+            $chk = $pdo->prepare("
+                SELECT COUNT(*) FROM audit_logs 
+                WHERE action = 'DISCOUNT_ALERT_SENT' AND entity_type = 'order' AND entity_id = ?
+            ");
+            $chk->execute([$orderNumber]);
+            if ((int)$chk->fetchColumn() > 0) {
+                return false; // Alert already sent for this order
+            }
+
             $ordNum = htmlspecialchars($orderNumber);
             $plate = htmlspecialchars($plateNumber !== '' ? $plateNumber : 'N/A');
             $who = htmlspecialchars($appliedBy);
@@ -298,7 +310,17 @@ class TelegramNotifier {
                  . "Given By: <b>{$who}</b>\n"
                  . "Limits Passed: >" . number_format($pctLimit, 1) . "% and >\$" . number_format($usdLimit, 2);
 
-            return self::send($msg);
+            $sent = self::send($msg);
+
+            // Record audit log to permanently prevent duplicate alerts for this order
+            AuditLogger::log(
+                'DISCOUNT_ALERT_SENT',
+                "High discount alert dispatched for order #{$orderNumber} (Discount: \${$discFmt} / {$pctFmt}%) given by {$who}",
+                'order',
+                $orderNumber
+            );
+
+            return $sent;
         } catch (Throwable $t) {
             error_log("TelegramNotifier::checkAndNotifyOrderDiscount error: " . $t->getMessage());
             return false;

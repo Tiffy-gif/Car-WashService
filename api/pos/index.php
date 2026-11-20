@@ -1342,19 +1342,27 @@ if ($action === 'add_customer_vehicle') {
         $custName = 'Guest (' . $plateNumber . ')';
     }
 
+    if ($custPhone === '') {
+        http_response_code(400);
+        echo json_encode([
+            'success' => false,
+            'error' => 'PHONE_REQUIRED',
+            'message' => 'Phone number is required to register a customer profile. (សូមបញ្ចូលលេខទូរស័ព្ទដើម្បីចុះឈ្មោះអតិថិជន។)'
+        ]);
+        exit;
+    }
+
     $smsConsentNote = "SMS Consent: " . ($msgPermission ? "Yes" : "No");
 
-    // 1. Check or insert customer (Phone is optional)
+    // 1. Check or insert customer (Phone is required)
     $customerId = null;
-    if ($custPhone !== '') {
-        $findCust = $pdo->prepare("SELECT id FROM customers WHERE phone = ?");
-        $findCust->execute([$custPhone]);
-        $customerId = $findCust->fetchColumn() ?: null;
-    }
+    $findCust = $pdo->prepare("SELECT id FROM customers WHERE phone = ?");
+    $findCust->execute([$custPhone]);
+    $customerId = $findCust->fetchColumn() ?: null;
 
     if (!$customerId) {
         $insCust = $pdo->prepare("INSERT INTO customers (name, phone, message_permission, notes) VALUES (?, ?, ?, ?)");
-        $insCust->execute([$custName, ($custPhone !== '' ? $custPhone : null), $msgPermission, $smsConsentNote]);
+        $insCust->execute([$custName, $custPhone, $msgPermission, $smsConsentNote]);
         $customerId = (int)$pdo->lastInsertId();
     } else {
         $pdo->prepare("UPDATE customers SET message_permission = ?, notes = CONCAT(COALESCE(notes, ''), '\n', ?) WHERE id = ?")
@@ -1583,16 +1591,17 @@ if ($action === 'create_order') {
         $status = 'waiting';
     }
 
-    // Auto find or create customer & vehicle (Phone is optional)
+    // Auto find or create customer & vehicle (Phone is strictly required to create a persistent customer profile)
     if (!$customerId && $customerPhone !== '') {
         $cStmt = $pdo->prepare("SELECT id FROM customers WHERE phone = ?");
         $cStmt->execute([$customerPhone]);
         $customerId = $cStmt->fetchColumn() ?: null;
-    }
-    if (!$customerId && $customerName !== '' && $customerName !== 'Walk-in Guest') {
-        $pdo->prepare("INSERT INTO customers (name, phone) VALUES (?, ?)")
-            ->execute([$customerName, ($customerPhone !== '' ? $customerPhone : null)]);
-        $customerId = (int)$pdo->lastInsertId();
+
+        if (!$customerId && $customerName !== '' && $customerName !== 'Walk-in Guest') {
+            $pdo->prepare("INSERT INTO customers (name, phone) VALUES (?, ?)")
+                ->execute([$customerName, $customerPhone]);
+            $customerId = (int)$pdo->lastInsertId();
+        }
     }
 
     if (!$vehicleId && $plateNumber !== '') {

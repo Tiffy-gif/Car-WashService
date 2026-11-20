@@ -46,10 +46,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         $color = trim($_POST['color'] ?? '');
 
         if ($name === '') {
-            $message = 'Customer name is required.';
+            $message = 'Customer name is required. (សូមបញ្ចូលឈ្មោះអតិថិជន។)';
+            $messageType = 'danger';
+        } elseif ($phone === '') {
+            $message = 'Phone number is required to register a customer profile. (សូមបញ្ចូលលេខទូរស័ព្ទដើម្បីចុះឈ្មោះអតិថិជន។)';
             $messageType = 'danger';
         } else {
             $phoneVal = normalize_phone($phone);
+            if ($phoneVal === null) {
+                $message = 'Please enter a valid phone number. (សូមបញ្ចូលលេខទូរស័ព្ទត្រឹមត្រូវ។)';
+                $messageType = 'danger';
+            } else {
             $notesVal = ($notes !== '') ? $notes : null;
             $tierCode = strtolower(trim($_POST['membership_tier_code'] ?? 'standard'));
             $expiresAt = !empty($_POST['membership_expires_at']) ? trim($_POST['membership_expires_at']) : null;
@@ -94,6 +101,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                 }
                 $message = 'Customer saved successfully!';
             }
+        }
         }
         }
     } elseif ($action === 'toggle_message_opt_in') {
@@ -395,8 +403,8 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <input type="text" name="name" id="cust_name" class="form-input" placeholder="e.g. Sokha Chan" required>
                     </div>
                     <div class="form-group">
-                        <label class="form-label"><?= htmlspecialchars(__('phone_number')) ?></label>
-                        <input type="text" name="phone" id="cust_phone" class="form-input" placeholder="e.g. 012 889 900">
+                        <label class="form-label"><?= htmlspecialchars(__('phone_number')) ?> *</label>
+                        <input type="text" name="phone" id="cust_phone" class="form-input" placeholder="e.g. 012 889 900" required>
                     </div>
                 </div>
 

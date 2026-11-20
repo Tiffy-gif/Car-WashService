@@ -40,6 +40,16 @@ function getRequiredImmutableTriggers(): array {
             'event' => 'UPDATE',
             'timing' => 'BEFORE',
         ],
+        'trg_loyalty_transactions_before_delete' => [
+            'table' => 'loyalty_transactions',
+            'event' => 'DELETE',
+            'timing' => 'BEFORE',
+        ],
+        'trg_loyalty_transactions_before_update' => [
+            'table' => 'loyalty_transactions',
+            'event' => 'UPDATE',
+            'timing' => 'BEFORE',
+        ],
     ];
 }
 
@@ -52,13 +62,17 @@ function verifyImmutableTriggers(PDO $pdo): array {
     $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
     $isSqlite = ($driver === 'sqlite');
     $required = getRequiredImmutableTriggers();
+    if ($isSqlite) {
+        unset($required['trg_loyalty_transactions_before_delete'], $required['trg_loyalty_transactions_before_update']);
+    }
 
     $missingOrInvalid = [];
     $errors = [];
     $details = [];
 
     // 1. Verify target tables exist first
-    foreach (['stock_movements', 'audit_logs', 'settings_history'] as $tbl) {
+    $targetTables = $isSqlite ? ['stock_movements', 'audit_logs', 'settings_history'] : ['stock_movements', 'audit_logs', 'settings_history', 'loyalty_transactions'];
+    foreach ($targetTables as $tbl) {
         $tblExists = false;
         try {
             if ($isSqlite) {
@@ -212,7 +226,7 @@ function verifyImmutableTriggers(PDO $pdo): array {
 function createImmutableTriggers(PDO $pdo): bool {
     $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
     $isSqlite = ($driver === 'sqlite');
-    $tables = ['stock_movements', 'audit_logs', 'settings_history'];
+    $tables = $isSqlite ? ['stock_movements', 'audit_logs', 'settings_history'] : ['stock_movements', 'audit_logs', 'settings_history', 'loyalty_transactions'];
 
     foreach ($tables as $table) {
         try {

@@ -67,12 +67,12 @@ Options -Indexes -MultiViews
     RewriteRule (^|/)\. - [F,L,NC]
 
     # Block internal folders and analysis artifacts
-    RewriteRule ^(config|core|database|storage|tests|docs|bin|scripts|graphify-out)/ - [F,L,NC]
+    RewriteRule ^(config|core|database|storage|tests|scratch|docs|bin|scripts|graphify-out)/ - [F,L,NC]
 </IfModule>
 
 # Fallback directory protection (when mod_rewrite is disabled)
 RedirectMatch 403 (^|/)\.
-RedirectMatch 403 ^/(config|core|database|storage|tests|docs|bin|scripts|graphify-out)(/.*)?$
+RedirectMatch 403 ^/(config|core|database|storage|tests|scratch|docs|bin|scripts|graphify-out)(/.*)?$
 
 
 # 6. Security Headers (Safe Cookies, Clickjacking, MIME, CSP)

@@ -7983,7 +7983,18 @@ class PosApp {
         const color = document.getElementById('newCustColor').value.trim();
 
         if (!plate) {
-            alert('Please enter a vehicle plate number');
+            const isKm = (I18nManager.getLang() === 'km');
+            alert(isKm ? 'សូមបញ្ចូលស្លាកលេខរថយន្ត (Plate number is required)' : 'Please enter a vehicle plate number (សូមបញ្ចូលស្លាកលេខរថយន្ត)');
+            document.getElementById('newCustPlate')?.focus();
+            return;
+        }
+
+        if (!phone) {
+            const isKm = (I18nManager.getLang() === 'km');
+            alert(isKm 
+                ? 'សូមបញ្ចូលលេខទូរស័ព្ទដើម្បីចុះឈ្មោះអតិថិជន។ (Phone number is required)' 
+                : 'Phone number is required to register a customer profile. (សូមបញ្ចូលលេខទូរស័ព្ទដើម្បីចុះឈ្មោះអតិថិជន។)');
+            document.getElementById('newCustPhone')?.focus();
             return;
         }
 
@@ -8007,6 +8018,10 @@ class PosApp {
             PosApi.syncCustomers().catch(() => { });
         } catch (e) {
             console.error('Save customer error:', e);
+            if (e && (e.error === 'PHONE_REQUIRED' || (e.message && e.message.includes('Phone')))) {
+                alert(e.message || 'Phone number is required to register a customer profile.');
+                return;
+            }
             // If offline, still select customer locally
             this.selectCustomer(plate, name, phone, vtype);
         }
