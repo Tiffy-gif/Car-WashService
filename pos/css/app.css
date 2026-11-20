@@ -8915,6 +8915,12 @@ body {
   border-color: #fde68a;
 }
 
+.saved-cust-avatar.avatar-platinum {
+  background: #ede9fe;
+  color: #7c3aed;
+  border-color: #ddd6fe;
+}
+
 .saved-cust-info {
   flex: 1;
   min-width: 0;
@@ -9210,6 +9216,12 @@ body {
   background: #451a03 !important;
   color: #fbbf24 !important;
   border-color: #78350f !important;
+}
+
+[data-theme="dark"] .saved-cust-avatar.avatar-platinum {
+  background: #3b0764 !important;
+  color: #c084fc !important;
+  border-color: #6b21a8 !important;
 }
 
 [data-theme="dark"] .saved-cust-name {
@@ -24190,5 +24202,154 @@ body.pos-vk-dragging * {
 .tile-orange .action-tile-icon-box { background: #fff7ed; color: #ea580c; }
 .tile-crimson .action-tile-icon-box { background: #fef2f2; color: #b91c1c; }
 .tile-crimson:hover { border-color: #dc2626; }
+
+/* ==========================================================================
+   POS Loyalty Points Display & Redemption
+   ========================================================================== */
+.gotpos-cust-loyalty-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 2px 8px;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+  border-radius: 9999px;
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.25;
+  white-space: normal !important;
+  word-break: break-word !important;
+  max-width: 100% !important;
+}
+
+[data-theme="dark"] .gotpos-cust-loyalty-row {
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #34d399 !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
+}
+
+.gotpos-cust-loyalty-val {
+  white-space: normal !important;
+  word-break: break-word !important;
+}
+
+.pay-modal-loyalty-section {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 0.85rem;
+}
+
+[data-theme="dark"] .pay-modal-loyalty-section {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.pay-modal-loyalty-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pay-modal-loyalty-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.pay-modal-loyalty-main {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+[data-theme="dark"] .pay-modal-loyalty-main {
+  color: #f8fafc;
+}
+
+.pay-modal-loyalty-usd {
+  color: #059669;
+  font-weight: 700;
+}
+
+[data-theme="dark"] .pay-modal-loyalty-usd {
+  color: #34d399;
+}
+
+.pay-modal-loyalty-hint {
+  font-size: 0.78rem;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+[data-theme="dark"] .pay-modal-loyalty-hint {
+  color: #94a3b8;
+}
+
+.btn-use-points {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+  background: #0284c7;
+  color: #ffffff;
+  border: none;
+  transition: all 0.15s ease;
+}
+
+.btn-use-points:hover {
+  background: #0369a1;
+}
+
+.pay-modal-points-applied-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: #065f46;
+  font-weight: 600;
+}
+
+[data-theme="dark"] .pay-modal-points-applied-banner {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+
+.btn-cancel-applied-points {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 14px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-cancel-applied-points:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
 
 

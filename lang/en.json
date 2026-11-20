@@ -72,6 +72,7 @@
     "edit_customer": "Edit Customer",
     "customer_name": "Customer Name",
     "phone_number": "Phone Number",
+    "card_payment_disabled": "Card payments are currently disabled on this terminal. Please select Cash or Bank Transfer (ABA / KHQR).",
     "vehicles": "Vehicles",
     "add_vehicle": "Add Vehicle",
     "plate_number": "Plate Number",

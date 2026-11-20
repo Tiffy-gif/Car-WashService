@@ -915,6 +915,9 @@ try {
     initDatabase();
 } catch (Throwable $e) {
     @file_put_contents(dirname(__DIR__) . '/storage/logs/migration_error.log', "[" . date('Y-m-d H:i:s') . "] initDatabase error: " . $e->getMessage() . PHP_EOL . $e->getTraceAsString() . PHP_EOL, FILE_APPEND | LOCK_EX);
+    if (php_sapi_name() === 'cli') {
+        throw $e;
+    }
 }
 if (php_sapi_name() === 'cli' && isset($argv[0]) && basename($argv[0]) === 'init.php') {
     echo "Database initialized, collations unified to utf8mb4_unicode_ci, and all migrations verified successfully!\n";

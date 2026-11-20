@@ -2495,10 +2495,21 @@ class PosApp {
         const btnExact = document.getElementById('btnExactCash');
         if (btnExact) {
             btnExact.addEventListener('click', () => {
-                const total = this.calculateTotals().totalUsd;
-                document.getElementById('cashTenderInput').value = total.toFixed(2);
+                const totals = this.calculateTotals();
+                const payable = Math.max(0, totals.totalUsd - (this.pointsDiscountUsd || 0));
+                document.getElementById('cashTenderInput').value = payable.toFixed(2);
                 this.calculateChange();
             });
+        }
+
+        // Loyalty Points Redemption Buttons
+        const btnUsePts = document.getElementById('btnUsePoints');
+        if (btnUsePts) {
+            btnUsePts.addEventListener('click', () => this.handleUseLoyaltyPoints());
+        }
+        const btnCancelPts = document.getElementById('btnCancelUsePoints');
+        if (btnCancelPts) {
+            btnCancelPts.addEventListener('click', () => this.handleCancelUseLoyaltyPoints());
         }
 
         // Confirm Payment & Print Button
@@ -2963,6 +2974,28 @@ class PosApp {
             document.getElementById('modalEndDay')?.classList.remove('open');
         });
         document.getElementById('btnConfirmEndDay')?.addEventListener('click', () => this.handleEndDaySubmit());
+        document.getElementById('btnEndDayGoToEndShift')?.addEventListener('click', () => {
+            document.getElementById('modalEndDay')?.classList.remove('open');
+            this.showEndShiftModal('solo');
+        });
+        document.getElementById('btnEndDayForceEnd')?.addEventListener('click', () => {
+            this.openForceEndShiftModal();
+        });
+
+        // Force-End Modal Listeners
+        document.getElementById('btnCloseForceEndModal')?.addEventListener('click', () => {
+            document.getElementById('modalForceEndShift')?.classList.remove('open');
+        });
+        document.getElementById('btnCancelForceEnd')?.addEventListener('click', () => {
+            document.getElementById('modalForceEndShift')?.classList.remove('open');
+        });
+        document.querySelectorAll('input[name="forceEndCountOption"]').forEach(r => {
+            r.addEventListener('change', (e) => {
+                const inputs = document.getElementById('forceEndCountInputs');
+                if (inputs) inputs.style.display = (e.target.value === 'counted') ? 'block' : 'none';
+            });
+        });
+        document.getElementById('btnSubmitForceEnd')?.addEventListener('click', () => this.handleForceEndShiftSubmit());
 
         // Cashier Actions Listeners
         this.initCashierActionsListeners();
@@ -5375,6 +5408,8 @@ class PosApp {
         this.cart = [];
         this.currentAppointmentId = null;
         this.currentDiscount = { type: 'none', value: 0 };
+        this.pointsToRedeem = 0;
+        this.pointsDiscountUsd = 0;
         this.loyaltyRewardGiven = null;
         this.loyaltyRewardActionChosen = false;
         this.activeLoyaltyReward = null;
@@ -6976,23 +7011,27 @@ class PosApp {
             const level = (m.membership_level || 'standard').toLowerCase();
             const visits = parseInt(m.total_visits || 0);
 
-            const isVip = (level === 'gold' || level === 'vip' || level === 'platinum' || plainName.toLowerCase().includes('vip'));
+            const isVip = (level === 'gold' || level === 'vip' || plainName.toLowerCase().includes('vip'));
+            const isPlatinum = (level === 'platinum');
+            let avatarClass = '';
+            if (isPlatinum) avatarClass = 'avatar-platinum';
+            else if (isVip) avatarClass = 'avatar-vip';
 
             let tierClass = 'tier-standard';
             let tierIcon = 'fa-shield-halved';
             let tierLabel = m.membership_level || 'Standard';
-            if (isVip || level === 'gold') {
-                tierClass = 'tier-gold';
-                tierIcon = 'fa-crown';
-                tierLabel = 'VIP';
-            } else if (level === 'silver') {
-                tierClass = 'tier-silver';
-                tierIcon = 'fa-medal';
-                tierLabel = 'Silver';
-            } else if (level === 'platinum') {
+            if (level === 'platinum') {
                 tierClass = 'tier-platinum';
                 tierIcon = 'fa-gem';
                 tierLabel = 'Platinum';
+            } else if (isVip) {
+                tierClass = 'tier-gold';
+                tierIcon = 'fa-crown';
+                tierLabel = 'VIP';
+            } else {
+                tierClass = 'tier-standard';
+                tierIcon = 'fa-shield-halved';
+                tierLabel = 'Standard';
             }
 
             const tierHtml = `<span class="tier-pill ${tierClass}"><i class="fa-solid ${tierIcon}"></i> ${this.escapeHtml(tierLabel)}</span>`;
@@ -7079,7 +7118,7 @@ class PosApp {
             html += `
                 <div class="saved-cust-card cust-search-row" data-cust-idx="${idx}">
                     <div class="saved-cust-row-main">
-                        <div class="saved-cust-avatar ${isVip ? 'avatar-vip' : ''}">${initials}</div>
+                        <div class="saved-cust-avatar ${avatarClass}">${initials}</div>
                         <div class="saved-cust-info">
                             <div class="saved-cust-name-row">
                                 <span class="saved-cust-name" title="${this.escapeHtml(plainName)}">${highlightedName}</span>
@@ -7545,6 +7584,8 @@ class PosApp {
     static updateGotposCustomerCard() {
         const nameDisplay = document.getElementById('gotposCustNameDisplay');
         const tierDisplay = document.getElementById('gotposCustTierDisplay');
+        const loyaltyRow = document.getElementById('gotposCustLoyaltyRow');
+        const loyaltyVal = document.getElementById('gotposCustLoyaltyVal');
         const avatarEl = document.getElementById('gotposCustAvatar');
         const btnReset = document.getElementById('btnGotposResetCustomer');
         const isKm = (I18nManager.getLang() === 'km');
@@ -7555,6 +7596,7 @@ class PosApp {
                 const plateStr = this.currentCustomer?.plate ? ` • ${this.currentCustomer.plate}` : '';
                 tierDisplay.textContent = (isKm ? 'អតិថិជនធម្មតា' : 'Standard Guest') + plateStr;
             }
+            if (loyaltyRow) loyaltyRow.style.display = 'none';
             if (avatarEl) {
                 avatarEl.innerHTML = '<i class="fa-solid fa-user"></i>';
                 avatarEl.style.backgroundColor = '';
@@ -7575,15 +7617,29 @@ class PosApp {
             if (found) {
                 tier = found.membership_level || 'Standard';
                 points = parseInt(found.loyalty_points || 0);
+            } else if (cust.loyalty_points !== undefined) {
+                points = parseInt(cust.loyalty_points || 0);
             }
+        } else if (cust.loyalty_points !== undefined) {
+            points = parseInt(cust.loyalty_points || 0);
         }
 
         const tierUpper = tier.charAt(0).toUpperCase() + tier.slice(1).toLowerCase();
         const plateStr = cust.plate ? ` • ${cust.plate}` : '';
-        const ptsStr = points > 0 ? ` • ${points} Pts` : '';
 
         if (tierDisplay) {
-            tierDisplay.textContent = `${tierUpper} Member${plateStr}${ptsStr}`;
+            tierDisplay.textContent = `${tierUpper} Member${plateStr}`;
+        }
+
+        if (loyaltyRow && loyaltyVal) {
+            if (cust.customer_id || points > 0) {
+                loyaltyRow.style.display = 'inline-flex';
+                const ptsEquivUsd = (points / 10).toFixed(2);
+                const ptsLabel = isKm ? 'ពិន្ទុ' : 'pts';
+                loyaltyVal.textContent = `${points} ${ptsLabel} = $${ptsEquivUsd}`;
+            } else {
+                loyaltyRow.style.display = 'none';
+            }
         }
 
         if (avatarEl) {
@@ -7722,10 +7778,10 @@ class PosApp {
         if (tab === 'vip') {
             enriched = enriched.filter(c => {
                 const lvl = (c.membership_level || '').toLowerCase();
-                return lvl === 'vip' || lvl === 'gold' || lvl === 'platinum' || (c.name || '').toLowerCase().includes('vip');
+                return lvl === 'vip' || lvl === 'gold' || (c.name || '').toLowerCase().includes('vip');
             });
-        } else if (tab === 'silver') {
-            enriched = enriched.filter(c => (c.membership_level || '').toLowerCase() === 'silver');
+        } else if (tab === 'platinum') {
+            enriched = enriched.filter(c => (c.membership_level || '').toLowerCase() === 'platinum');
         } else if (tab === 'standard') {
             enriched = enriched.filter(c => (c.membership_level || '').toLowerCase() === 'standard');
         } else if (tab === 'vehicles') {
@@ -7777,12 +7833,12 @@ class PosApp {
         if (countVipEl) {
             countVipEl.textContent = allCusts.filter(c => {
                 const lvl = (c.membership_level || '').toLowerCase();
-                return lvl === 'vip' || lvl === 'gold' || lvl === 'platinum' || (c.name || '').toLowerCase().includes('vip');
+                return lvl === 'vip' || lvl === 'gold' || (c.name || '').toLowerCase().includes('vip');
             }).length;
         }
-        const countSilverEl = document.getElementById('countCustSilver');
-        if (countSilverEl) {
-            countSilverEl.textContent = allCusts.filter(c => (c.membership_level || '').toLowerCase() === 'silver').length;
+        const countPlatinumEl = document.getElementById('countCustPlatinum');
+        if (countPlatinumEl) {
+            countPlatinumEl.textContent = allCusts.filter(c => (c.membership_level || '').toLowerCase() === 'platinum').length;
         }
 
         const filtered = this.filterAndSortCustomers();
@@ -7843,23 +7899,27 @@ class PosApp {
             const vehCount = c.vehicles ? c.vehicles.length : 0;
             const isExpanded = this.savedCustExpandedVehicles.has(custId);
 
-            const isVip = (level === 'gold' || level === 'vip' || level === 'platinum' || plainName.toLowerCase().includes('vip'));
+            const isVip = (level === 'gold' || level === 'vip' || plainName.toLowerCase().includes('vip'));
+            const isPlatinum = (level === 'platinum');
+            let avatarClass = '';
+            if (isPlatinum) avatarClass = 'avatar-platinum';
+            else if (isVip) avatarClass = 'avatar-vip';
 
             let tierClass = 'tier-standard';
             let tierIcon = 'fa-shield-halved';
             let tierLabel = c.membership_level || 'Standard';
-            if (isVip || level === 'gold') {
-                tierClass = 'tier-gold';
-                tierIcon = 'fa-crown';
-                tierLabel = 'VIP';
-            } else if (level === 'silver') {
-                tierClass = 'tier-silver';
-                tierIcon = 'fa-medal';
-                tierLabel = 'Silver';
-            } else if (level === 'platinum') {
+            if (level === 'platinum') {
                 tierClass = 'tier-platinum';
                 tierIcon = 'fa-gem';
                 tierLabel = 'Platinum';
+            } else if (isVip) {
+                tierClass = 'tier-gold';
+                tierIcon = 'fa-crown';
+                tierLabel = 'VIP';
+            } else {
+                tierClass = 'tier-standard';
+                tierIcon = 'fa-shield-halved';
+                tierLabel = 'Standard';
             }
 
             const tierHtml = `<span class="tier-pill ${tierClass}"><i class="fa-solid ${tierIcon}"></i> ${this.escapeHtml(tierLabel)}</span>`;
@@ -7941,7 +8001,7 @@ class PosApp {
             html += `
                 <div class="saved-cust-card" data-cust-id="${custId}">
                     <div class="saved-cust-row-main">
-                        <div class="saved-cust-avatar ${isVip ? 'avatar-vip' : ''}">${initials}</div>
+                        <div class="saved-cust-avatar ${avatarClass}">${initials}</div>
                         <div class="saved-cust-info">
                             <div class="saved-cust-name-row">
                                 <span class="saved-cust-name" title="${name}">${name}</span>
@@ -8073,6 +8133,12 @@ class PosApp {
     }
 
     static openPaymentWithMethod(method) {
+        if (method === 'card') {
+            const msg = (typeof I18nManager !== 'undefined' ? I18nManager.t('cardPaymentDisabled') : null) || 'Card payments are currently disabled on this terminal. Please select Cash or Bank Transfer (ABA / KHQR).';
+            this.showCartToast(msg);
+            alert(msg);
+            return;
+        }
         if (!this.cart || this.cart.length === 0) {
             this.showCartToast("Cart is empty. Add services or products first.");
             return;
@@ -8198,6 +8264,46 @@ class PosApp {
         if (tabKhqr) tabKhqr.style.display = hasBank ? '' : 'none';
         if (noBankNotice) noBankNotice.style.display = hasBank ? 'none' : 'flex';
 
+        // Reset loyalty redemption
+        this.pointsToRedeem = 0;
+        this.pointsDiscountUsd = 0;
+
+        let custPoints = 0;
+        const cust = this.currentCustomer;
+        if (cust && cust.customer_id) {
+            const allCusts = PosStorage.getCustomers()?.customers || [];
+            const found = allCusts.find(c => c.id === cust.customer_id);
+            if (found) {
+                custPoints = parseInt(found.loyalty_points || 0);
+            } else if (cust.loyalty_points !== undefined) {
+                custPoints = parseInt(cust.loyalty_points || 0);
+            }
+        } else if (cust && cust.loyalty_points !== undefined && cust.name !== 'Walk-in Guest') {
+            custPoints = parseInt(cust.loyalty_points || 0);
+        }
+        this.currentCustomerPoints = custPoints;
+
+        const isKm = (I18nManager.getLang() === 'km');
+        const loyaltySection = document.getElementById('payModalLoyaltySection');
+        const pointsBalEl = document.getElementById('payModalPointsBalance');
+        const pointsUsdEl = document.getElementById('payModalPointsUsd');
+        const pointsHintEl = document.getElementById('payModalPointsHint');
+        const appliedBanner = document.getElementById('payModalPointsAppliedBanner');
+        const btnUse = document.getElementById('btnUsePoints');
+
+        if (cust && cust.customer_id && custPoints > 0) {
+            if (loyaltySection) loyaltySection.style.display = 'block';
+            if (pointsBalEl) pointsBalEl.textContent = `${custPoints} ${isKm ? 'ពិន្ទុ' : 'pts'}`;
+            if (pointsUsdEl) pointsUsdEl.textContent = `($${(custPoints / 10).toFixed(2)})`;
+            if (pointsHintEl) {
+                pointsHintEl.textContent = isKm ? '10 ពិន្ទុ = $1.00 (អាចប្រើបានគ្រប់ចំនួនពិន្ទុ)' : '10 pts = $1.00 (Any amount can be used)';
+            }
+            if (appliedBanner) appliedBanner.style.display = 'none';
+            if (btnUse) btnUse.style.display = 'inline-flex';
+        } else {
+            if (loyaltySection) loyaltySection.style.display = 'none';
+        }
+
         // Reset payment method to cash
         this.switchPaymentMethod('cash');
         document.getElementById('cashTenderInput').value = totals.totalUsd.toFixed(2);
@@ -8207,6 +8313,11 @@ class PosApp {
     }
 
     static switchPaymentMethod(method) {
+        if (method === 'card') {
+            const msg = (typeof I18nManager !== 'undefined' ? I18nManager.t('cardPaymentDisabled') : null) || 'Card payments are currently disabled on this terminal. Please select Cash or Bank Transfer (ABA / KHQR).';
+            this.showPaymentModalError(msg);
+            method = 'cash';
+        }
         const settings = this.getSettings();
         const hasBank = !!((settings.aba_account_num && settings.aba_account_num.trim()) || (settings.aba_account_name && settings.aba_account_name.trim()));
 
@@ -8266,12 +8377,92 @@ class PosApp {
 
     static calculateChange() {
         const totals = this.calculateTotals();
+        const payableUsd = Math.max(0, totals.totalUsd - (this.pointsDiscountUsd || 0));
         const tendered = parseFloat(document.getElementById('cashTenderInput').value) || 0;
-        const changeUsd = Math.max(0, tendered - totals.totalUsd);
+        const changeUsd = Math.max(0, tendered - payableUsd);
         const changeKhr = Math.round(changeUsd * totals.exchangeRate);
 
         document.getElementById('payChangeUsd').textContent = `$${changeUsd.toFixed(2)}`;
         document.getElementById('payChangeKhr').textContent = `${changeKhr.toLocaleString()} ៛`;
+    }
+
+    static handleUseLoyaltyPoints() {
+        const totals = this.calculateTotals();
+        const baseUsd = totals.totalUsd;
+        if (baseUsd <= 0 || !this.currentCustomerPoints || this.currentCustomerPoints <= 0) return;
+
+        // Largest allowed points: min(customer points, points to cover total)
+        // 10 points = $1.00 => points needed = ceil(baseUsd * 10)
+        const pointsNeeded = Math.ceil(baseUsd * 10);
+        const pointsToUse = Math.min(this.currentCustomerPoints, pointsNeeded);
+        const discountUsd = Math.min(baseUsd, Math.round((pointsToUse / 10) * 100) / 100);
+
+        this.pointsToRedeem = pointsToUse;
+        this.pointsDiscountUsd = discountUsd;
+        this.updatePaymentModalTotals();
+    }
+
+    static handleCancelUseLoyaltyPoints() {
+        this.pointsToRedeem = 0;
+        this.pointsDiscountUsd = 0;
+        this.updatePaymentModalTotals();
+    }
+
+    static updatePaymentModalTotals() {
+        const totals = this.calculateTotals();
+        const baseUsd = totals.totalUsd;
+        const discountUsd = this.pointsDiscountUsd || 0;
+        const payableUsd = Math.max(0, baseUsd - discountUsd);
+        const exchangeRate = this.getExchangeRate();
+        const payableKhr = Math.round(payableUsd * exchangeRate);
+
+        const usdEl = document.getElementById('payModalTotalUsd');
+        const khrEl = document.getElementById('payModalTotalKhr');
+        if (usdEl) usdEl.textContent = `$${payableUsd.toFixed(2)}`;
+        if (khrEl) khrEl.textContent = `${payableKhr.toLocaleString()} ៛`;
+
+        const isKm = (I18nManager.getLang() === 'km');
+        const appliedBanner = document.getElementById('payModalPointsAppliedBanner');
+        const appliedText = document.getElementById('payModalPointsAppliedText');
+        const btnUse = document.getElementById('btnUsePoints');
+        const pointsBalEl = document.getElementById('payModalPointsBalance');
+        const pointsHintEl = document.getElementById('payModalPointsHint');
+
+        const cust = this.currentCustomer;
+        let custPoints = 0;
+        if (cust && cust.customer_id) {
+            const allCusts = PosStorage.getCustomers()?.customers || [];
+            const found = allCusts.find(c => c.id === cust.customer_id);
+            if (found) custPoints = parseInt(found.loyalty_points || 0);
+            else if (cust.loyalty_points !== undefined) custPoints = parseInt(cust.loyalty_points || 0);
+        }
+        if (pointsBalEl && custPoints > 0) {
+            pointsBalEl.textContent = `${custPoints} ${isKm ? 'ពិន្ទុ' : 'pts'}`;
+        }
+        if (pointsHintEl) {
+            pointsHintEl.textContent = isKm ? '10 ពិន្ទុ = $1.00 (អាចប្រើបានគ្រប់ចំនួនពិន្ទុ)' : '10 pts = $1.00 (Any amount can be used)';
+        }
+
+        if (this.pointsToRedeem > 0) {
+            if (appliedBanner) appliedBanner.style.display = 'flex';
+            if (appliedText) {
+                appliedText.textContent = isKm
+                    ? `បានកាត់បន្ថយ ${this.pointsToRedeem} ពិន្ទុ (-$${discountUsd.toFixed(2)})`
+                    : `Applied ${this.pointsToRedeem} pts discount (-$${discountUsd.toFixed(2)})`;
+            }
+            if (btnUse) btnUse.style.display = 'none';
+        } else {
+            if (appliedBanner) appliedBanner.style.display = 'none';
+            if (btnUse) btnUse.style.display = 'inline-flex';
+        }
+
+        if (this.paymentMethod === 'cash') {
+            const cashTender = document.getElementById('cashTenderInput');
+            if (cashTender) {
+                cashTender.value = payableUsd.toFixed(2);
+                this.calculateChange();
+            }
+        }
     }
 
     static populateCrewDropdowns() {
@@ -8333,6 +8524,15 @@ class PosApp {
             btn.disabled = false;
             btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
             this.showStartShiftModal();
+            return;
+        }
+
+        // Reject card payment if attempted
+        if (this.paymentMethod === 'card') {
+            this.isSubmittingPayment = false;
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
+            this.showPaymentModalError((typeof I18nManager !== 'undefined' ? I18nManager.t('cardPaymentDisabled') : null) || 'Card payments are currently disabled on this terminal. Please select Cash or Bank Transfer (ABA / KHQR).');
             return;
         }
 
@@ -8406,7 +8606,8 @@ class PosApp {
         const nextOilDate = document.getElementById('cartNextOilDateInput')?.value || null;
 
         // Requirement 4: Empty cash must not count as paid in full; block payment when cash is less than total
-        let tendered = totals.totalUsd;
+        const payableUsd = Math.max(0, totals.totalUsd - (this.pointsDiscountUsd || 0));
+        let tendered = payableUsd;
         let change = 0;
         if (this.paymentMethod === 'cash') {
             const rawTendered = document.getElementById('cashTenderInput').value.trim();
@@ -8419,7 +8620,7 @@ class PosApp {
                 return;
             }
             tendered = parseFloat(rawTendered);
-            if (tendered < (totals.totalUsd - 0.009)) {
+            if (tendered < (payableUsd - 0.009)) {
                 this.isSubmittingPayment = false;
                 btn.disabled = false;
                 btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Complete & Print Receipt`;
@@ -8427,7 +8628,7 @@ class PosApp {
                 document.getElementById('cashTenderInput').focus();
                 return;
             }
-            change = Math.max(0, tendered - totals.totalUsd);
+            change = Math.max(0, tendered - payableUsd);
         }
 
         // Requirement 1 & 3: Washers, Mechanics, and Repair Notes
@@ -8462,6 +8663,8 @@ class PosApp {
             loyalty_reward_given: this.loyaltyRewardGiven,
             loyalty_reward_name: this.activeLoyaltyReward ? this.activeLoyaltyReward.reward_name : null,
             discount_usd: totals.discountUsd,
+            points_redeemed: this.pointsToRedeem || 0,
+            points_discount_usd: this.pointsDiscountUsd || 0.00,
             status: 'waiting',
             is_paid: 1,
             payment_status: 'paid',
@@ -8812,6 +9015,18 @@ class PosApp {
             `;
         }
 
+        const ptsRedeemed = parseInt(order.points_redeemed || 0);
+        const ptsDiscountUsd = parseFloat(order.points_discount_usd || 0);
+        let ptsDiscHtml = '';
+        if (ptsRedeemed > 0 && ptsDiscountUsd > 0) {
+            ptsDiscHtml = `
+                <div class="receipt-summary-row">
+                    <span>${getLbl('pointsRedeemed', `ពិន្ទុ (${ptsRedeemed} pts)៖`, `Points (${ptsRedeemed} pts):`, `ពិន្ទុ / Points (${ptsRedeemed} pts):`)}</span>
+                    <span style="font-family: monospace; font-weight: 700;">-$${ptsDiscountUsd.toFixed(2)}</span>
+                </div>
+            `;
+        }
+
         const showTax = isSettingOn(settings.receipt_show_tax, false);
         let taxHtml = '';
         if (showTax) {
@@ -8972,6 +9187,7 @@ class PosApp {
                         <span style="font-family: monospace; font-weight: 700;">$${subtotal.toFixed(2)}</span>
                     </div>
                     ${discHtml}
+                    ${ptsDiscHtml}
                     ${taxHtml}
 
                     <div class="receipt-divider-dashed"></div>
@@ -14795,7 +15011,7 @@ class PosApp {
         }
     }
 
-    static showEndDayModal() {
+    static async showEndDayModal() {
         document.getElementById('modalCashierActions')?.classList.remove('open');
         const modal = document.getElementById('modalEndDay');
         if (!modal) return;
@@ -14806,22 +15022,142 @@ class PosApp {
             const d = new Date();
             curDate.textContent = d.toISOString().substring(0, 10);
         }
-        const countUsd = document.getElementById('endDayCountUsd');
-        const countKhr = document.getElementById('endDayCountKhr');
         const pin = document.getElementById('endDayPin');
         const notes = document.getElementById('endDayNotes');
 
-        if (countUsd) countUsd.value = '';
-        if (countKhr) countKhr.value = '';
         if (pin) pin.value = '';
         if (notes) notes.value = '';
 
+        // UI sections
+        const openNotice = document.getElementById('endDayOpenShiftsNotice');
+        const openList = document.getElementById('endDayOpenShiftsList');
+        const btnGoShift = document.getElementById('btnEndDayGoToEndShift');
+        const btnForceEnd = document.getElementById('btnEndDayForceEnd');
+        const summarySec = document.getElementById('endDayShiftSummarySection');
+        const fastCloseSec = document.getElementById('endDayFastCloseSection');
+        const confirmBtn = document.getElementById('btnConfirmEndDay');
+        const signoffSec = document.getElementById('endDaySignoffSection');
+        const notesGroup = document.getElementById('endDayNotesGroup');
+        const isKm = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km');
+
+        if (confirmBtn) {
+            confirmBtn.disabled = true;
+            confirmBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1"></i> Checking shifts...`;
+        }
+
         modal.classList.add('open');
+
+        // Check active open shifts
+        try {
+            const todayStr = (new Date()).toISOString().substring(0, 10);
+            const res = await PosApi.call('get_open_shifts', { date: todayStr });
+            const curRole = (this.currentUser?.role || '').toLowerCase();
+            const isManagerOrOwner = ['owner', 'admin', 'manager', 'system_admin'].includes(curRole);
+            const curUserId = this.currentUser?.id;
+
+            const shifts = res?.shifts || [];
+            const openCount = res?.count || shifts.length;
+            const isOnlyMyShiftOpen = (openCount === 1 && parseInt(shifts[0]?.cashier_id) === parseInt(curUserId));
+
+            if (isOnlyMyShiftOpen) {
+                // Shortcut Mode: Current cashier's shift is the ONLY active open shift!
+                this.isFastCloseMode = true;
+                this.fastCloseShiftId = shifts[0].id;
+
+                const modalTitle = document.getElementById('endDayModalTitle');
+                if (modalTitle) modalTitle.textContent = isKm ? 'បិទវេន និងបិទបញ្ជីថ្ងៃ (End Shift & Close Day)' : 'End Shift & Close Day';
+
+                if (openNotice) openNotice.style.display = 'none';
+                if (summarySec) summarySec.style.display = 'none';
+                if (fastCloseSec) fastCloseSec.style.display = 'block';
+                if (signoffSec) signoffSec.style.display = 'block';
+                if (notesGroup) notesGroup.style.display = 'block';
+
+                const usdInp = document.getElementById('fastCloseCountUsd');
+                const khrInp = document.getElementById('fastCloseCountKhr');
+                if (usdInp) usdInp.value = '';
+                if (khrInp) khrInp.value = '';
+
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = `<i class="fa-solid fa-lock mr-1"></i> <span id="btnConfirmEndDayText">${isKm ? 'បិទវេន & បិទបញ្ជីថ្ងៃ (End Shift & Close Day)' : 'End Shift & Close Day'}</span>`;
+                }
+            } else if (openCount > 0) {
+                // Blocked Mode: Other cashiers' shifts are still open (or multiple open shifts)
+                this.isFastCloseMode = false;
+                this.cachedOpenShifts = shifts;
+
+                const modalTitle = document.getElementById('endDayModalTitle');
+                if (modalTitle) modalTitle.textContent = isKm ? 'បិទបញ្ជីប្រចាំថ្ងៃ (End Day)' : 'End Day (Daily Z-Report)';
+
+                if (openNotice) openNotice.style.display = 'block';
+                if (fastCloseSec) fastCloseSec.style.display = 'none';
+                if (summarySec) summarySec.style.display = 'none';
+                if (signoffSec) signoffSec.style.display = 'none';
+                if (notesGroup) notesGroup.style.display = 'none';
+
+                if (openList) {
+                    const shiftListHtml = shifts.map(s => {
+                        const start = s.started_at ? (new Date(s.started_at.replace(' ', 'T'))).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                        const isMine = (parseInt(s.cashier_id) === parseInt(curUserId));
+                        return `<div style="margin-bottom: 4px;">• <strong>Shift #${s.id}</strong> (Cashier: <strong>${PosUtils.escapeHtml(s.cashier_name)}</strong>${start ? ', started at ' + start : ''})${isMine ? ' <span class="badge badge-primary" style="font-size: 0.7rem;">Your Shift</span>' : ''}</div>`;
+                    }).join('');
+                    openList.innerHTML = `<div>${isKm ? 'វេនការងារខាងក្រោមត្រូវតែបិទមុនពេលបិទបញ្ជីថ្ងៃ (មិនអាចប្រើផ្លូវកាត់បានទេ ប្រសិនបើមានវេនអ្នកផ្សេងកំពុងបើក)៖' : 'The following active shift(s) must be ended before closing the business day (fast close shortcut refused while other shifts are open):'}</div><div style="margin-top: 6px; padding: 6px 10px; background: rgba(255,255,255,0.7); border-radius: 4px; border: 1px solid #fecdd3;">${shiftListHtml}</div>`;
+                }
+
+                // Check if current user owns any of these open shifts
+                const userHasOpenShift = shifts.some(s => parseInt(s.cashier_id) === parseInt(curUserId));
+                if (btnGoShift) btnGoShift.style.display = userHasOpenShift ? 'inline-flex' : 'none';
+                if (btnForceEnd) btnForceEnd.style.display = isManagerOrOwner ? 'inline-flex' : 'none';
+
+                if (confirmBtn) {
+                    confirmBtn.disabled = true;
+                    confirmBtn.innerHTML = `<i class="fa-solid fa-ban mr-1"></i> <span>${isKm ? 'មិនអាចបិទបញ្ជី៖ មានវេនផ្សេងបើក' : 'Cannot Close: Other Shifts Open'}</span>`;
+                }
+            } else {
+                // Standard Close Day: No active open shifts (all shifts already completed or 0 shifts)
+                this.isFastCloseMode = false;
+                this.cachedOpenShifts = [];
+
+                const modalTitle = document.getElementById('endDayModalTitle');
+                if (modalTitle) modalTitle.textContent = isKm ? 'បិទបញ្ជីប្រចាំថ្ងៃ (End Day)' : 'End Day (Daily Z-Report)';
+
+                if (openNotice) openNotice.style.display = 'none';
+                if (fastCloseSec) fastCloseSec.style.display = 'none';
+                if (summarySec) summarySec.style.display = 'block';
+                if (signoffSec) signoffSec.style.display = 'block';
+                if (notesGroup) notesGroup.style.display = 'block';
+
+                const closedCount = res?.closed_count || 0;
+                const shiftUsd = parseFloat(res?.shift_counted_usd || 0).toFixed(2);
+                const shiftKhr = parseInt(res?.shift_counted_khr || 0).toLocaleString();
+
+                const badge = document.getElementById('endDayShiftCountBadge');
+                const usdEl = document.getElementById('endDayShiftCountedUsd');
+                const khrEl = document.getElementById('endDayShiftCountedKhr');
+                if (badge) badge.textContent = `${closedCount} Shift${closedCount === 1 ? '' : 's'}`;
+                if (usdEl) usdEl.textContent = `$${shiftUsd}`;
+                if (khrEl) khrEl.textContent = `${shiftKhr} ៛`;
+
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = `<i class="fa-solid fa-lock mr-1"></i> <span id="btnConfirmEndDayText">${isKm ? 'បិទបញ្ជីថ្ងៃ (Close Day)' : 'Close Day (Z-Report)'}</span>`;
+                }
+            }
+        } catch (err) {
+            console.error('Failed to get open shifts:', err);
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.innerHTML = `<i class="fa-solid fa-lock mr-1"></i> <span>បិទបញ្ជីថ្ងៃ (Close Day)</span>`;
+            }
+        }
     }
 
     static async handleEndDaySubmit() {
-        const countUsd = parseFloat(document.getElementById('endDayCountUsd')?.value || 0);
-        const countKhr = parseInt(document.getElementById('endDayCountKhr')?.value || 0);
+        if (this.isFastCloseMode) {
+            return await this.handleFastCloseDaySubmit();
+        }
+
         const pin = document.getElementById('endDayPin')?.value.trim() || '';
         const notes = document.getElementById('endDayNotes')?.value.trim() || '';
         const username = this.currentUser?.username || '';
@@ -14834,11 +15170,12 @@ class PosApp {
 
         if (btn) {
             btn.disabled = true;
-            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Closing Day...`;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1"></i> Closing Day...`;
         }
 
         try {
-            const res = await PosApi.closeDayZReport(username, pin, countUsd, countKhr, notes);
+            // Counted cash is 0, backend uses sum of completed shift counts automatically!
+            const res = await PosApi.closeDayZReport(username, pin, 0, 0, notes);
             if (res && res.success) {
                 document.getElementById('modalEndDay')?.classList.remove('open');
                 this.isDayClosed = true;
@@ -14854,7 +15191,7 @@ class PosApp {
                     document.getElementById('modalReceipt')?.classList.add('open');
                 }
 
-                const diffMsg = (res.total_difference_usd !== undefined) ? ` Expected: $${parseFloat(res.expected_cash_usd || 0).toFixed(2)}, Counted: $${countUsd.toFixed(2)}, Diff: $${parseFloat(res.total_difference_usd || 0).toFixed(2)}.` : '';
+                const diffMsg = (res.total_difference_usd !== undefined) ? ` Expected: $${parseFloat(res.expected_cash_usd || 0).toFixed(2)}, Shift Counted: $${parseFloat(res.counted_cash_usd || 0).toFixed(2)}, Diff: $${parseFloat(res.total_difference_usd || 0).toFixed(2)}.` : '';
                 this.showAppAlert(`Daily Z-Report closed successfully! Register locked.${diffMsg} Printing report...`, 'success', 'Day Closed');
             } else {
                 alert(res?.error || res?.message || 'Failed to close day');
@@ -14865,6 +15202,166 @@ class PosApp {
             if (btn) {
                 btn.disabled = false;
                 btn.innerHTML = `<i class="fa-solid fa-lock mr-1"></i> <span id="btnConfirmEndDayText">បិទបញ្ជីថ្ងៃ (Close Day)</span>`;
+            }
+        }
+    }
+
+    static async handleFastCloseDaySubmit() {
+        const shiftId = this.fastCloseShiftId || (this.activeShift?.id) || 0;
+        const countUsd = parseFloat(document.getElementById('fastCloseCountUsd')?.value || 0);
+        const countKhr = parseInt(document.getElementById('fastCloseCountKhr')?.value || 0);
+        const pin = document.getElementById('endDayPin')?.value.trim() || '';
+        const notes = document.getElementById('endDayNotes')?.value.trim() || '';
+        const username = this.currentUser?.username || '';
+        const btn = document.getElementById('btnConfirmEndDay');
+
+        if (!shiftId) {
+            alert('Cannot determine shift ID to close.');
+            return;
+        }
+
+        if (!pin || pin.length < 4) {
+            alert('Please enter your 6-digit security PIN');
+            return;
+        }
+
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1"></i> Closing Shift & Day...`;
+        }
+
+        try {
+            const res = await PosApi.fastCloseDay(shiftId, username, pin, countUsd, countKhr, notes);
+            if (res && res.success) {
+                document.getElementById('modalEndDay')?.classList.remove('open');
+                this.isDayClosed = true;
+                this.isDayLocked = true;
+                this.activeShift = null;
+                if (typeof PosStorage !== 'undefined') {
+                    PosStorage.clearShift();
+                }
+
+                const closerName = res.closed_by_name || this.currentUser?.full_name || username;
+                this.updateDayLockUI(true, `Sales are locked. Day closed by ${closerName}.`);
+
+                // 1. Print End Shift Slip
+                if (res.shift_slip && window.PosThermalPrinter && typeof PosThermalPrinter.printEndShiftSlip === 'function') {
+                    PosThermalPrinter.printEndShiftSlip(res.shift_slip);
+                }
+
+                // 2. Print Close Day Z-Report Slip
+                if (res.close_slip && window.PosThermalPrinter && typeof PosThermalPrinter.printCloseDaySlip === 'function') {
+                    setTimeout(() => {
+                        PosThermalPrinter.printCloseDaySlip(res.close_slip);
+                    }, 400);
+                } else if (res.close_slip && typeof this.renderDailyCloseZReport === 'function') {
+                    this.renderDailyCloseZReport(res.close_slip);
+                    document.getElementById('modalReceipt')?.classList.add('open');
+                }
+
+                const diffMsg = (res.total_difference_usd !== undefined) ? ` Expected: $${parseFloat(res.expected_cash_usd || 0).toFixed(2)}, Counted: $${countUsd.toFixed(2)}, Diff: $${parseFloat(res.total_difference_usd || 0).toFixed(2)}.` : '';
+                this.showAppAlert(`Shift ended and Daily Z-Report closed successfully! Register locked.${diffMsg} Printing slips...`, 'success', 'Shift & Day Closed');
+
+                // Shift ended and day closed: automatically logout cashier after slips trigger
+                setTimeout(() => this.handleLogout(), 3000);
+            } else {
+                alert(res?.error || res?.message || 'Failed to close shift and day');
+            }
+        } catch (err) {
+            alert(err.data?.message || err.message || 'Failed to close shift and day');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                const isKm = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km');
+                btn.innerHTML = `<i class="fa-solid fa-lock mr-1"></i> <span id="btnConfirmEndDayText">${isKm ? 'បិទវេន & បិទបញ្ជីថ្ងៃ (End Shift & Close Day)' : 'End Shift & Close Day'}</span>`;
+            }
+        }
+    }
+
+    static openForceEndShiftModal() {
+        const shifts = this.cachedOpenShifts || [];
+        if (!shifts.length) {
+            this.showAppAlert('No open shifts to force-end.', 'info', 'No Shifts');
+            return;
+        }
+        const select = document.getElementById('forceEndShiftSelect');
+        if (select) {
+            select.innerHTML = shifts.map(s => `<option value="${s.id}">Shift #${s.id} - ${PosUtils.escapeHtml(s.cashier_name)} (Started: ${s.started_at})</option>`).join('');
+        }
+        const radioUncounted = document.querySelector('input[name="forceEndCountOption"][value="uncounted"]');
+        if (radioUncounted) radioUncounted.checked = true;
+        const countInputs = document.getElementById('forceEndCountInputs');
+        if (countInputs) countInputs.style.display = 'none';
+
+        const usd = document.getElementById('forceEndCountUsd');
+        const khr = document.getElementById('forceEndCountKhr');
+        const reason = document.getElementById('forceEndReason');
+        const mgrUser = document.getElementById('forceEndMgrUsername');
+        const mgrPin = document.getElementById('forceEndMgrPin');
+
+        if (usd) usd.value = '';
+        if (khr) khr.value = '';
+        if (reason) reason.value = '';
+        if (mgrUser) mgrUser.value = this.currentUser?.username || '';
+        if (mgrPin) mgrPin.value = '';
+
+        document.getElementById('modalForceEndShift')?.classList.add('open');
+    }
+
+    static async handleForceEndShiftSubmit() {
+        const shiftId = parseInt(document.getElementById('forceEndShiftSelect')?.value || 0);
+        const countOpt = document.querySelector('input[name="forceEndCountOption"]:checked')?.value || 'uncounted';
+        const isUncounted = (countOpt === 'uncounted');
+        const countedUsd = isUncounted ? 0 : parseFloat(document.getElementById('forceEndCountUsd')?.value || 0);
+        const countedKhr = isUncounted ? 0 : parseInt(document.getElementById('forceEndCountKhr')?.value || 0);
+        const reason = document.getElementById('forceEndReason')?.value.trim() || '';
+        const mgrUser = document.getElementById('forceEndMgrUsername')?.value.trim() || this.currentUser?.username || '';
+        const mgrPin = document.getElementById('forceEndMgrPin')?.value.trim() || '';
+        const btn = document.getElementById('btnSubmitForceEnd');
+
+        if (!shiftId) {
+            alert('Please select a shift to force-end.');
+            return;
+        }
+        if (!reason) {
+            alert('Please provide a written reason for force-ending this shift.');
+            return;
+        }
+        if (!mgrPin || mgrPin.length < 4) {
+            alert('Please enter manager PIN.');
+            return;
+        }
+
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1"></i> Force-Ending...`;
+        }
+
+        try {
+            const res = await PosApi.call('force_end_shift', {
+                shift_id: shiftId,
+                manager_username: mgrUser,
+                manager_pin: mgrPin,
+                reason: reason,
+                is_uncounted: isUncounted ? 1 : 0,
+                counted_cash_usd: countedUsd,
+                counted_cash_khr: countedKhr
+            });
+
+            if (res && res.success) {
+                document.getElementById('modalForceEndShift')?.classList.remove('open');
+                this.showAppAlert(`Shift #${shiftId} successfully force-ended by manager.`, 'success', 'Shift Ended');
+                // Refresh End Day modal
+                this.showEndDayModal();
+            } else {
+                alert(res?.error || res?.message || 'Failed to force-end shift');
+            }
+        } catch (err) {
+            alert(err.data?.message || err.message || 'Failed to force-end shift');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = `<i class="fa-solid fa-lock mr-1"></i> <span>Force-End Shift</span>`;
             }
         }
     }
@@ -17131,7 +17628,10 @@ class PosApp {
 
     // 10. End Day
     static handleActionEndDay() {
-        if (!this.checkCashierActionAllowed()) return;
+        if (this.shiftBadgeState === 'day_closed' || this.isDayClosed) {
+            this.showAppAlert('Business day is already closed.', 'info', 'Day Closed');
+            return;
+        }
         document.getElementById('modalCashierActions')?.classList.remove('open');
         this.showEndDayModal();
     }

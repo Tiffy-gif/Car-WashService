@@ -49,6 +49,15 @@ $dbConfig = require dirname(__DIR__) . '/config/database.php';
 $pdo = Database::getInstance();
 $dbname = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
 
+// Strict Production Safeguard: Refuse to run on any database not ending in '_test'
+if (!str_ends_with($dbname, '_test')) {
+    fwrite(STDERR, "\n=======================================================\n");
+    fwrite(STDERR, "❌ ERROR: REFUSING TO RUN: Database '{$dbname}' does not end with '_test'.\n");
+    fwrite(STDERR, "This tool is strictly restricted to test databases (*_test) to protect production data.\n");
+    fwrite(STDERR, "=======================================================\n\n");
+    exit(1);
+}
+
 // -------------------------------------------------------------
 // Constants & Definitions
 // -------------------------------------------------------------

@@ -404,6 +404,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                             error_log("Loyalty reversal error on cancel order {$orderId}: " . $e->getMessage());
                         }
 
+                        // Reverse oil change log and restore vehicle mileage/date if applicable
+                        try {
+                            require_once dirname(__DIR__, 2) . '/core/OilCare.php';
+                            OilCare::reverseOilChangeForOrder($pdo, $orderId, $fullReason);
+                        } catch (Exception $e) {
+                            error_log("OilCare reversal error on cancel order {$orderId}: " . $e->getMessage());
+                        }
+
                         // Update order to cancelled
                         $cancelStmt = $pdo->prepare("
                             UPDATE orders 

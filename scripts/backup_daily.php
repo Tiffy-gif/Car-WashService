@@ -10,6 +10,7 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
+define('ALLOW_MAIN_DB_CLI', true);
 require_once dirname(__DIR__) . '/core/Database.php';
 require_once dirname(__DIR__) . '/core/Backup.php';
 

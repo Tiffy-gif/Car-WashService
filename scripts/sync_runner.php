@@ -19,6 +19,7 @@ if (PHP_SAPI !== 'cli') {
 
 // 2. Load core environment and dependencies
 require_once dirname(__DIR__) . '/config/app.php';
+define('ALLOW_MAIN_DB_CLI', true);
 require_once dirname(__DIR__) . '/core/Database.php';
 require_once dirname(__DIR__) . '/core/CloudSyncManager.php';
 

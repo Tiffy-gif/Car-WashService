@@ -550,6 +550,9 @@ $ACTION_PERMISSIONS = [
     'daily_close_status' => ['daily_close.view'],
     'get_day_status' => ['daily_close.view'],
     'close_day_zreport' => ['daily_close.close'],
+    'fast_close_day' => ['daily_close.close'],
+    'force_end_shift' => ['daily_close.close', 'discrepancy.manage', 'daily_close.view'],
+    'get_open_shifts' => ['pos.access'],
     'shift_start' => ['pos.access'],
     'shift_end' => ['pos.access'],
     'get_shift_status' => ['pos.access'],
@@ -1651,6 +1654,18 @@ if ($action === 'create_order') {
     $nextOilDate = ($currentMileage && $currentMileage > 0) ? date('Y-m-d', strtotime("+{$monthInterval} months")) : null;
 
     $paymentMethod = trim($inputData['payment_method'] ?? $_POST['payment_method'] ?? ($isPaid ? 'cash' : 'unpaid'));
+    if ($paymentMethod === 'card') {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        http_response_code(400);
+        echo json_encode([
+            'success' => false,
+            'error' => 'CARD_PAYMENT_DISABLED',
+            'message' => 'Card payments are currently disabled on this POS terminal. Please select Cash or Bank Transfer (ABA / KHQR).'
+        ]);
+        exit;
+    }
     $tenderedUsd = (float)($inputData['amount_tendered_usd'] ?? $_POST['amount_tendered_usd'] ?? 0);
     $paymentRef = trim($inputData['payment_ref'] ?? $_POST['payment_ref'] ?? '');
     $staffUserId = !empty($inputData['staff_id']) ? (int)$inputData['staff_id'] : (!empty($_POST['staff_id']) ? (int)$_POST['staff_id'] : null);
@@ -2663,6 +2678,15 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
     $orderId = (int)($inputData['order_id'] ?? $_POST['order_id'] ?? 0);
     $newStatus = trim($inputData['status'] ?? $_POST['status'] ?? ($action === 'pay_order' ? 'paid' : ''));
     $paymentMethod = trim($inputData['payment_method'] ?? $_POST['payment_method'] ?? 'cash');
+    if ($paymentMethod === 'card') {
+        http_response_code(400);
+        echo json_encode([
+            'success' => false,
+            'error' => 'CARD_PAYMENT_DISABLED',
+            'message' => 'Card payments are currently disabled on this POS terminal. Please select Cash or Bank Transfer (ABA / KHQR).'
+        ]);
+        exit;
+    }
     $tenderedUsd = isset($inputData['amount_tendered_usd']) ? (float)$inputData['amount_tendered_usd'] : (isset($_POST['amount_tendered_usd']) ? (float)$_POST['amount_tendered_usd'] : null);
     $changeUsd = isset($inputData['change_usd']) ? (float)$inputData['change_usd'] : (isset($_POST['change_usd']) ? (float)$_POST['change_usd'] : null);
     $paymentRef = trim($inputData['payment_ref'] ?? $_POST['payment_ref'] ?? '');
@@ -3062,6 +3086,12 @@ if ($action === 'sync_order_status' || $action === 'pay_order') {
             Loyalty::reversePointsForOrder($pdo, $id, $staffId ?: null, "Cancelled via status update");
         } catch (Exception $e) {
             error_log("Loyalty reversal error in status update: " . $e->getMessage());
+        }
+        try {
+            require_once dirname(__DIR__) . '/core/OilCare.php';
+            OilCare::reverseOilChangeForOrder($pdo, $id, "Status changed to cancelled");
+        } catch (Exception $e) {
+            error_log("OilCare reversal error in status update: " . $e->getMessage());
         }
         TelegramNotifier::notifyOrderCancelled(
             (string)($ord['order_number'] ?? ''),
@@ -3737,6 +3767,14 @@ if ($action === 'cancel_order') {
             Loyalty::reversePointsForOrder($pdo, $id, $staffId ?: null, $fullReason);
         } catch (Exception $e) {
             error_log("Loyalty reverse error on cancel_order in POS API: " . $e->getMessage());
+        }
+
+        // 5b. Reverse oil change log and restore vehicle mileage/date if applicable
+        try {
+            require_once dirname(__DIR__) . '/core/OilCare.php';
+            OilCare::reverseOilChangeForOrder($pdo, $id, $fullReason);
+        } catch (Exception $e) {
+            error_log("OilCare reversal error on cancel_order in POS API: " . $e->getMessage());
         }
 
         // 6. Notify owner via Telegram
@@ -4499,6 +4537,23 @@ if ($action === 'shift_end') {
     $notes = trim((string)($inputData['notes'] ?? $_POST['notes'] ?? ''));
     $isSolo = !empty($inputData['is_solo']) || !empty($_POST['is_solo']) || ($inUser === '' && $inPin === '');
 
+    // Server-side guard: A cashier can end only their own shift
+    $callerRole = strtolower($sessionUser['role'] ?? '');
+    if (!empty($sessionUser['id']) && $callerRole === 'cashier') {
+        $checkStmt = $pdo->prepare("SELECT cashier_id, cashier_name FROM cashier_shifts WHERE id = ?");
+        $checkStmt->execute([$shiftId]);
+        $sRow = $checkStmt->fetch(PDO::FETCH_ASSOC);
+        if ($sRow && (int)$sRow['cashier_id'] !== (int)$sessionUser['id']) {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'error' => 'PERMISSION_DENIED',
+                'message' => 'A cashier can end only their own shift.'
+            ]);
+            exit;
+        }
+    }
+
     try {
         if ($isSolo) {
             $res = CashierControl::endShiftSolo($shiftId, $countedUsd, $countedKhr, $outPin, $notes);
@@ -4637,6 +4692,34 @@ if ($action === 'close_day_zreport') {
 }
 
 // ========================================================
+// 24B. ACTION: fast_close_day (Last cashier end shift & close day together)
+// ========================================================
+if ($action === 'fast_close_day') {
+    $shiftId = (int)($inputData['shift_id'] ?? $_POST['shift_id'] ?? 0);
+    $countedUsd = max(0.00, (float)($inputData['counted_cash_usd'] ?? $_POST['counted_cash_usd'] ?? 0.00));
+    $countedKhr = max(0, (int)($inputData['counted_cash_khr'] ?? $_POST['counted_cash_khr'] ?? 0));
+    $username = trim((string)($inputData['username'] ?? $inputData['manager_username'] ?? $_POST['username'] ?? $_POST['manager_username'] ?? ''));
+    $pin = (string)($inputData['pin'] ?? $inputData['manager_pin'] ?? $_POST['pin'] ?? $_POST['manager_pin'] ?? '');
+    $notes = trim((string)($inputData['notes'] ?? $_POST['notes'] ?? ''));
+
+    if ($username === '' && !empty($sessionUser['username'])) {
+        $username = $sessionUser['username'];
+    }
+
+    try {
+        $res = CashierControl::endShiftAndCloseDay($shiftId, $username, $pin, $countedUsd, $countedKhr, $notes);
+        echo json_encode($res);
+    } catch (ManagerPinThrottledException $e) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
+    } catch (Exception $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// ========================================================
 // 25. ACTION: reopen_day
 // ========================================================
 if ($action === 'reopen_day') {
@@ -4724,6 +4807,87 @@ if ($action === 'manager_review_shift') {
         http_response_code(400);
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
     }
+    exit;
+}
+
+// ========================================================
+// 26D. ACTION: force_end_shift (Force End Forgotten Shift by Manager/Owner)
+// ========================================================
+if ($action === 'force_end_shift') {
+    $shiftId = (int)($inputData['shift_id'] ?? $_POST['shift_id'] ?? 0);
+    $mgrUser = trim((string)($inputData['manager_username'] ?? $_POST['manager_username'] ?? ''));
+    $mgrPin = (string)($inputData['manager_pin'] ?? $_POST['manager_pin'] ?? '');
+    $reason = trim((string)($inputData['reason'] ?? $_POST['reason'] ?? ''));
+    $isUncounted = !isset($inputData['is_uncounted']) && !isset($_POST['is_uncounted']) 
+        ? true 
+        : (!empty($inputData['is_uncounted']) || !empty($_POST['is_uncounted']));
+    $countedUsd = max(0.00, (float)($inputData['counted_cash_usd'] ?? $_POST['counted_cash_usd'] ?? 0.00));
+    $countedKhr = max(0, (int)($inputData['counted_cash_khr'] ?? $_POST['counted_cash_khr'] ?? 0));
+
+    if ($mgrUser === '' && !empty($sessionUser['username'])) {
+        $mgrUser = $sessionUser['username'];
+    }
+
+    // Role check: Only manager or owner can force end shift
+    $callerRole = strtolower($sessionUser['role'] ?? '');
+    if (!empty($sessionUser) && in_array($callerRole, ['cashier', 'washer', 'mechanic', 'technical'], true)) {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'error' => 'PERMISSION_DENIED',
+            'message' => 'Only a Manager or Owner can force-end a forgotten shift.'
+        ]);
+        exit;
+    }
+
+    try {
+        $res = CashierControl::forceEndForgottenShift(
+            $shiftId,
+            $mgrUser,
+            $mgrPin,
+            $reason,
+            $isUncounted,
+            $countedUsd,
+            $countedKhr
+        );
+        echo json_encode($res);
+    } catch (ManagerPinThrottledException $e) {
+        http_response_code(429);
+        echo json_encode(['success' => false, 'error' => 'TOO_MANY_ATTEMPTS', 'message' => $e->getMessage()]);
+    } catch (Exception $e) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// ========================================================
+// 26E. ACTION: get_open_shifts (List active open shifts today)
+// ========================================================
+if ($action === 'get_open_shifts') {
+    $date = trim((string)($inputData['date'] ?? $_GET['date'] ?? date('Y-m-d')));
+    $shifts = CashierControl::getOpenShiftsForDate($date);
+
+    // Also get today's closed shifts totals
+    $sumStmt = $pdo->prepare("
+        SELECT 
+            COUNT(*) as closed_count,
+            COALESCE(SUM(counted_cash_usd), 0) as total_counted_usd,
+            COALESCE(SUM(counted_cash_khr), 0) as total_counted_khr
+        FROM cashier_shifts 
+        WHERE DATE(started_at) = ? AND status != 'open'
+    ");
+    $sumStmt->execute([$date]);
+    $closedSummary = $sumStmt->fetch(PDO::FETCH_ASSOC);
+
+    echo json_encode([
+        'success' => true,
+        'count' => count($shifts),
+        'shifts' => $shifts,
+        'closed_count' => (int)($closedSummary['closed_count'] ?? 0),
+        'shift_counted_usd' => (float)($closedSummary['total_counted_usd'] ?? 0.00),
+        'shift_counted_khr' => (int)($closedSummary['total_counted_khr'] ?? 0)
+    ]);
     exit;
 }
 

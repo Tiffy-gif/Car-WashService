@@ -358,18 +358,48 @@ $reminderFilter = $_GET['filter'] ?? 'all';
 $today = date('Y-m-d');
 $soonDate = date('Y-m-d', strtotime('+30 days'));
 
-$remSql = "SELECT o.* 
-           FROM oil_change_logs o
-           INNER JOIN (
-               SELECT plate_number, MAX(id) as max_id
-               FROM oil_change_logs
-               GROUP BY plate_number
-           ) latest ON o.id = latest.max_id
-           ORDER BY o.next_due_date ASC";
+// Check if status column exists in oil_change_logs
+$hasStatusCol = false;
+try {
+    $colCheck = $pdo->query("SHOW COLUMNS FROM oil_change_logs LIKE 'status'")->fetch(PDO::FETCH_ASSOC);
+    $hasStatusCol = !empty($colCheck);
+} catch (Throwable $e) {
+    $hasStatusCol = false;
+}
+
+if ($hasStatusCol) {
+    $remSql = "SELECT o.* 
+               FROM oil_change_logs o
+               INNER JOIN (
+                   SELECT plate_number, MAX(id) as max_id
+                   FROM oil_change_logs
+                   WHERE status != 'cancelled'
+                   GROUP BY plate_number
+               ) latest ON o.id = latest.max_id
+               WHERE o.status != 'cancelled'
+               ORDER BY o.next_due_date ASC";
+} else {
+    $remSql = "SELECT o.* 
+               FROM oil_change_logs o
+               INNER JOIN (
+                   SELECT plate_number, MAX(id) as max_id
+                   FROM oil_change_logs
+                   GROUP BY plate_number
+               ) latest ON o.id = latest.max_id
+               ORDER BY o.next_due_date ASC";
+}
+
 try {
     $allReminders = $pdo->query($remSql)->fetchAll();
 } catch (Throwable $e) {
-    $allReminders = $pdo->query("SELECT * FROM oil_change_logs ORDER BY next_due_date ASC")->fetchAll();
+    try {
+        $fallbackSql = $hasStatusCol
+            ? "SELECT * FROM oil_change_logs WHERE status != 'cancelled' ORDER BY next_due_date ASC"
+            : "SELECT * FROM oil_change_logs ORDER BY next_due_date ASC";
+        $allReminders = $pdo->query($fallbackSql)->fetchAll();
+    } catch (Throwable $e2) {
+        $allReminders = [];
+    }
 }
 
 $dueSoonCount = 0;

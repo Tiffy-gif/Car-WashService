@@ -254,6 +254,44 @@ class TelegramNotifier {
     }
 
     /**
+     * Event 7: Forgotten Shift Force-Ended by Manager
+     * Notifies owner when a forgotten shift is force-ended by management with reason and review status.
+     * Strictly omits customer phone numbers.
+     */
+    public static function notifyForgottenShiftClosed(
+        string $shiftUid,
+        string $cashierName,
+        string $managerName,
+        string $managerRole,
+        string $reason,
+        bool $isUncounted = false,
+        float $countedUsd = 0.00,
+        float $diffUsd = 0.00
+    ): bool {
+        try {
+            $shift = htmlspecialchars($shiftUid);
+            $cashier = htmlspecialchars($cashierName !== '' ? $cashierName : 'N/A');
+            $mgr = htmlspecialchars($managerName);
+            $role = htmlspecialchars(ucfirst($managerRole));
+            $cleanReason = htmlspecialchars(mb_strimwidth(trim($reason), 0, 150, '...'));
+            $statusText = $isUncounted ? "Uncounted (No cashier shortage charged)" : "Counted (\$" . number_format($countedUsd, 2) . ", Diff: \$" . number_format($diffUsd, 2) . ")";
+
+            $msg = "⚠️ <b>[FORGOTTEN SHIFT FORCE-ENDED]</b>\n"
+                 . "Shift: <code>{$shift}</code>\n"
+                 . "Cashier: <b>{$cashier}</b>\n"
+                 . "Closed By: <b>{$mgr}</b> ({$role})\n"
+                 . "Cash Status: <b>{$statusText}</b>\n"
+                 . "Reason: <i>{$cleanReason}</i>\n"
+                 . "Review: <b>Flagged for Manager Review</b>";
+
+            return self::send($msg);
+        } catch (Throwable $t) {
+            error_log("TelegramNotifier::notifyForgottenShiftClosed error: " . $t->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Event 6: Order Discount Above Limits
      * Triggered when an order discount exceeds BOTH configured thresholds:
      * - Percent threshold (default 20%)

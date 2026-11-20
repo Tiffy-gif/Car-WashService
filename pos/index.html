@@ -605,6 +605,10 @@
                         <div class="gotpos-cust-details">
                             <h6 class="gotpos-cust-name" id="gotposCustNameDisplay">Walk-in Guest</h6>
                             <p class="gotpos-cust-tier" id="gotposCustTierDisplay">Standard Guest</p>
+                            <div class="gotpos-cust-loyalty-row" id="gotposCustLoyaltyRow" style="display: none;">
+                                <i class="fa-solid fa-coins text-amber"></i>
+                                <span class="gotpos-cust-loyalty-val" id="gotposCustLoyaltyVal">0 pts = $0.00</span>
+                            </div>
                         </div>
                         <div class="gotpos-cust-card-actions">
                             <button type="button" class="btn-gotpos-cust-edit" id="btnGotposEditCustomer"
@@ -828,9 +832,12 @@
                                     onclick="PosApp.openPaymentWithMethod('cash')">
                                     <i class="fa-solid fa-coins"></i> Cash
                                 </button>
-                                <button type="button" class="btn-gotpos-method" data-method="card"
-                                    onclick="PosApp.openPaymentWithMethod('card')">
+                                <button type="button" class="btn-gotpos-method is-disabled" data-method="card"
+                                    onclick="PosApp.openPaymentWithMethod('card')"
+                                    title="Card payment disabled / មិនទាន់បើកដំណើរការ"
+                                    style="opacity: 0.55; cursor: not-allowed;">
                                     <i class="fa-solid fa-credit-card"></i> Card
+                                    <span style="font-size: 0.65rem; display: block; opacity: 0.85; font-weight: 600;">(Disabled)</span>
                                 </button>
                                 <button type="button" class="btn-gotpos-method" data-method="khqr"
                                     onclick="PosApp.openPaymentWithMethod('khqr')">
@@ -1459,9 +1466,9 @@
                         <i class="fa-solid fa-crown text-amber"></i> <span>VIP / Gold</span> <span
                             class="cust-tab-count" id="countCustVip">0</span>
                     </button>
-                    <button type="button" class="cust-tab-btn" data-cust-tab="silver">
-                        <i class="fa-solid fa-medal text-slate"></i> <span>Silver</span> <span class="cust-tab-count"
-                            id="countCustSilver">0</span>
+                    <button type="button" class="cust-tab-btn" data-cust-tab="platinum">
+                        <i class="fa-solid fa-gem text-purple" style="color: #8b5cf6;"></i> <span>Platinum</span> <span class="cust-tab-count"
+                            id="countCustPlatinum">0</span>
                     </button>
                     <button type="button" class="cust-tab-btn" data-cust-tab="standard">
                         <i class="fa-solid fa-shield-halved"></i> <span>Standard</span>
@@ -1596,6 +1603,36 @@
                     <div class="payment-sum-label" data-i18n="totalPayable">ទឹកប្រាក់ត្រូវទូទាត់</div>
                     <div class="payment-sum-usd" id="payModalTotalUsd">$0.00</div>
                     <div class="payment-sum-khr" id="payModalTotalKhr">0 ៛</div>
+                </div>
+
+                <!-- Loyalty Points Redemption Section -->
+                <div id="payModalLoyaltySection" class="pay-modal-loyalty-section" style="display: none;">
+                    <div class="pay-modal-loyalty-row">
+                        <div class="pay-modal-loyalty-details">
+                            <div class="pay-modal-loyalty-main">
+                                <i class="fa-solid fa-coins" style="color: #f59e0b;"></i>
+                                <span class="pay-modal-loyalty-label" data-i18n="loyaltyPoints">Loyalty Points</span>:
+                                <strong id="payModalPointsBalance">0 pts</strong>
+                                <span class="pay-modal-loyalty-usd" id="payModalPointsUsd">($0.00)</span>
+                            </div>
+                            <div class="pay-modal-loyalty-hint" id="payModalPointsHint" data-i18n="pointsRateHint">
+                                10 pts = $1.00 (Any amount can be used)
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-primary btn-use-points" id="btnUsePoints">
+                            <i class="fa-solid fa-tag mr-1"></i>
+                            <span data-i18n="usePoints">Use points</span>
+                        </button>
+                    </div>
+                    <div id="payModalPointsAppliedBanner" class="pay-modal-points-applied-banner" style="display: none;">
+                        <div class="applied-badge-wrap">
+                            <i class="fa-solid fa-circle-check text-success mr-1"></i>
+                            <span id="payModalPointsAppliedText">Applied 25 pts discount (-$2.50)</span>
+                        </div>
+                        <button type="button" class="btn-cancel-applied-points" id="btnCancelUsePoints" title="Cancel points">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- 3 Payment Method Tabs -->
@@ -3551,25 +3588,80 @@
                     </div>
                 </div>
 
-                <!-- Blind Cash Drawer Count (Expected cash NOT shown) -->
-                <div style="margin-bottom: 1.25rem;">
-                    <label style="font-weight: 800; font-size: 0.9rem; color: var(--primary); margin-bottom: 0.5rem; display: block;" data-i18n="endDayBlindCount">
-                        <i class="fa-solid fa-calculator mr-1"></i> រាប់សាច់ប្រាក់ជាក់ស្តែងក្នុងថត (Drawer Cash Count) *
-                    </label>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-                        <div>
-                            <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted);">USD ($)</label>
-                            <input type="number" id="endDayCountUsd" class="form-control" placeholder="0.00" step="0.5" style="font-size: 1.25rem; font-weight: 800; text-align: center;">
+                <!-- Warning Banner: Active Open Shifts Found -->
+                <div id="endDayOpenShiftsNotice" style="display: none; background: #fff1f2; border: 1px solid #fecdd3; border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1rem;">
+                    <div style="font-weight: 800; color: #b91c1c; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        <span>វេនការងារកំពុងដំណើរការ (Active Open Shifts)</span>
+                    </div>
+                    <div id="endDayOpenShiftsList" style="font-size: 0.85rem; color: #9f1239; margin-bottom: 0.75rem; line-height: 1.4;">
+                        <!-- e.g. Shift #1 (visal) is still open. -->
+                    </div>
+                    <div id="endDayOpenShiftsActions" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-sm btn-primary" id="btnEndDayGoToEndShift" style="display: none;">
+                            <i class="fa-solid fa-arrow-right-to-bracket mr-1"></i> <span data-i18n="endMyShift">បិទវេនរបស់ខ្ញុំ (End My Shift)</span>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="btnEndDayForceEnd" style="display: none;">
+                            <i class="fa-solid fa-user-shield mr-1"></i> <span>Force-End Forgotten Shift</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Shift Summary Card (Based on completed shift drawer counts) -->
+                <div id="endDayShiftSummarySection" style="margin-bottom: 1rem; background: var(--bg-hover); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 0.85rem;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+                        <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-main);">
+                            <i class="fa-solid fa-clipboard-check text-success mr-1"></i> សរុបប្រាក់វេនដែលបានរាប់ (Shift Counts)
+                        </span>
+                        <span id="endDayShiftCountBadge" class="badge badge-subtle" style="font-size: 0.75rem;">0 Shifts</span>
+                    </div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+                        Z-Report ត្រូវបានគណនាដោយស្វ័យប្រវត្តិតាមការរាប់ប្រាក់ក្នុងវេននីមួយៗ (Z-Report is based directly on completed shift counts. No second drawer count required).
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                        <div style="background: var(--bg-card); padding: 0.5rem; border-radius: var(--radius-sm); border: 1px solid var(--border); text-align: center;">
+                            <div style="font-size: 0.72rem; color: var(--text-muted);">USD ($)</div>
+                            <div id="endDayShiftCountedUsd" style="font-weight: 800; font-size: 1.1rem; color: var(--text-main);">$0.00</div>
                         </div>
-                        <div>
-                            <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted);">KHR (៛)</label>
-                            <input type="number" id="endDayCountKhr" class="form-control" placeholder="0" step="100" style="font-size: 1.25rem; font-weight: 800; text-align: center;">
+                        <div style="background: var(--bg-card); padding: 0.5rem; border-radius: var(--radius-sm); border: 1px solid var(--border); text-align: center;">
+                            <div style="font-size: 0.72rem; color: var(--text-muted);">KHR (៛)</div>
+                            <div id="endDayShiftCountedKhr" style="font-weight: 800; font-size: 1.1rem; color: var(--text-main);">0 ៛</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Fast Close Shortcut: Only Cashier's Own Shift is Open -->
+                <div id="endDayFastCloseSection" style="display: none; margin-bottom: 1rem;">
+                    <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius-md); padding: 0.85rem; margin-bottom: 1rem;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; color: #1d4ed8; font-weight: 800; font-size: 0.9rem; margin-bottom: 0.25rem;">
+                            <i class="fa-solid fa-bolt"></i>
+                            <span id="fastCloseBadgeText" data-i18n="fastCloseDayTitle">បិទវេន និងបិទបញ្ជីថ្ងៃ (End Shift & Close Day)</span>
+                        </div>
+                        <div style="font-size: 0.78rem; color: #1e40af; line-height: 1.4;" data-i18n="fastCloseDaySubtitle">
+                            អ្នកគឺជាបេឡាករចុងក្រោយក្នុងថ្ងៃនេះ។ សូមរាប់សាច់ប្រាក់ជាក់ស្តែងក្នុងថត ដើម្បីបិទវេន និងបិទបញ្ជីថ្ងៃក្នុងពេលតែមួយ។ (You are the last active cashier. Count the drawer cash to end your shift and close the business day together.)
+                        </div>
+                    </div>
+
+                    <!-- Blind Cash Drawer Count (Expected cash NOT shown) -->
+                    <div style="margin-bottom: 0.5rem;">
+                        <label style="font-weight: 800; font-size: 0.88rem; color: var(--primary); margin-bottom: 0.4rem; display: block;" data-i18n="endDayBlindCount">
+                            <i class="fa-solid fa-calculator mr-1"></i> រាប់សាច់ប្រាក់ជាក់ស្តែងក្នុងថត (Drawer Cash Count) *
+                        </label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                            <div>
+                                <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">USD ($)</label>
+                                <input type="number" id="fastCloseCountUsd" class="form-control" placeholder="0.00" step="0.5" style="font-size: 1.25rem; font-weight: 800; text-align: center;">
+                            </div>
+                            <div>
+                                <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">KHR (៛)</label>
+                                <input type="number" id="fastCloseCountKhr" class="form-control" placeholder="0" step="100" style="font-size: 1.25rem; font-weight: 800; text-align: center;">
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <!-- Authorization Sign-off -->
-                <div style="border-top: 1px solid var(--border); padding-top: 1rem; margin-bottom: 1rem;">
+                <div id="endDaySignoffSection" style="border-top: 1px solid var(--border); padding-top: 1rem; margin-bottom: 1rem;">
                     <div style="font-weight: 800; font-size: 0.88rem; color: var(--text-main); margin-bottom: 0.75rem;">
                         <i class="fa-solid fa-key mr-1"></i> <span data-i18n="endDaySignoff">Security PIN Sign-off *</span>
                     </div>
@@ -3579,7 +3671,7 @@
                 </div>
 
                 <!-- Closing Notes -->
-                <div class="form-group" style="margin-bottom: 1rem;">
+                <div class="form-group" id="endDayNotesGroup" style="margin-bottom: 1rem;">
                     <label style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.3rem; display: block;" data-i18n="endDayNotes">កំណត់ចំណាំ (Closing Notes):</label>
                     <input type="text" id="endDayNotes" class="form-control" placeholder="Day closing notes (optional)...">
                 </div>
@@ -3594,6 +3686,95 @@
                 <button type="button" class="btn btn-outline" id="btnCancelEndDay" style="flex: 1;" data-i18n="cancel">បោះបង់</button>
                 <button type="button" class="btn btn-danger" id="btnConfirmEndDay" style="flex: 1.5; font-weight: 800;">
                     <i class="fa-solid fa-lock mr-1"></i> <span id="btnConfirmEndDayText" data-i18n="endDayBtnConfirm">បិទបញ្ជីថ្ងៃ (Close Day)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Force-End Forgotten Shift (Manager / Owner) -->
+    <div class="modal-backdrop" id="modalForceEndShift" style="z-index: 9996;">
+        <div class="modal-content" style="max-width: 480px; text-align: left;">
+            <div class="modal-header" style="background: #fff1f2; border-bottom: 1px solid #fecdd3; display: flex; align-items: center; justify-content: space-between;">
+                <h3 style="display: flex; align-items: center; gap: 0.5rem; color: #b91c1c; margin: 0; font-size: 1.05rem;">
+                    <i class="fa-solid fa-user-shield"></i>
+                    <span>Force-End Forgotten Shift</span>
+                </h3>
+                <button type="button" class="btn btn-outline btn-sm btn-icon" id="btnCloseForceEndModal">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem;">
+                <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: var(--radius-md); padding: 0.75rem; margin-bottom: 1rem; font-size: 0.82rem; color: #9a3412;">
+                    <i class="fa-solid fa-circle-info mr-1"></i>
+                    <span>Use this when a cashier forgot to end their shift or left without closing.</span>
+                </div>
+                
+                <!-- Shift Selector / Info -->
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="font-weight: 700; font-size: 0.85rem; color: var(--text-main); margin-bottom: 0.35rem; display: block;">Select Shift to Force-End *</label>
+                    <select id="forceEndShiftSelect" class="form-control" style="font-weight: 600;"></select>
+                </div>
+
+                <!-- Drawer Count Options -->
+                <div style="margin-bottom: 1rem; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 0.75rem;">
+                    <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-main); margin-bottom: 0.5rem;">Drawer Cash Count Option:</div>
+                    <div style="margin-bottom: 0.5rem;">
+                        <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; font-size: 0.85rem;">
+                            <input type="radio" name="forceEndCountOption" value="uncounted" checked style="margin-top: 0.2rem;">
+                            <div>
+                                <div style="font-weight: 700; color: var(--text-main);">Not Counted (Drawer not counted / forgotten)</div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted);">No shortage recorded as owed by cashier. Shift and Day Z-Report marked for review.</div>
+                            </div>
+                        </label>
+                    </div>
+                    <div>
+                        <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; font-size: 0.85rem;">
+                            <input type="radio" name="forceEndCountOption" value="counted" style="margin-top: 0.2rem;">
+                            <div>
+                                <div style="font-weight: 700; color: var(--text-main);">Counted by Manager</div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted);">Manager counts the physical cash in drawer now.</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Manager Cash Count Inputs (only shown when 'counted' is selected) -->
+                <div id="forceEndCountInputs" style="display: none; margin-bottom: 1rem; padding: 0.75rem; background: var(--bg-hover); border-radius: var(--radius-md);">
+                    <label style="font-weight: 700; font-size: 0.82rem; color: var(--text-main); margin-bottom: 0.4rem; display: block;">Manager Physical Count</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                        <div>
+                            <label style="font-size: 0.75rem; color: var(--text-muted);">USD ($)</label>
+                            <input type="number" id="forceEndCountUsd" class="form-control" placeholder="0.00" step="0.5" style="text-align: center; font-weight: 700;">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.75rem; color: var(--text-muted);">KHR (៛)</label>
+                            <input type="number" id="forceEndCountKhr" class="form-control" placeholder="0" step="100" style="text-align: center; font-weight: 700;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Written Reason * -->
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="font-weight: 700; font-size: 0.85rem; color: var(--text-main); margin-bottom: 0.35rem; display: block;">Written Reason for Force-End *</label>
+                    <textarea id="forceEndReason" class="form-control" rows="2" placeholder="e.g. Cashier left without closing shift..."></textarea>
+                </div>
+
+                <!-- Manager Username & PIN -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.5rem;">
+                    <div>
+                        <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted);">Manager Username</label>
+                        <input type="text" id="forceEndMgrUsername" class="form-control" style="font-weight: 700;">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted);">Manager PIN *</label>
+                        <input type="password" id="forceEndMgrPin" maxlength="6" class="form-control" placeholder="6-digit PIN" style="text-align: center; letter-spacing: 3px; font-weight: 700;">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 1rem 1.25rem; gap: 0.75rem;">
+                <button type="button" class="btn btn-outline" id="btnCancelForceEnd" style="flex: 1;">Cancel</button>
+                <button type="button" class="btn btn-danger" id="btnSubmitForceEnd" style="flex: 1.5; font-weight: 800;">
+                    <i class="fa-solid fa-lock mr-1"></i> <span>Force-End Shift</span>
                 </button>
             </div>
         </div>

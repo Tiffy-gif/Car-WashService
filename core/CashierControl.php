@@ -304,11 +304,11 @@ class CashierControl {
             throw new Exception("Invalid credentials");
         }
 
-        // Role / Permission check: Owner, Admin, Manager, or Cashier with daily_close.close permission
-        $isAllowedRole = in_array($u['role'], ['owner', 'manager', 'admin', 'system_admin', 'cashier'], true);
+        // Role / Permission check: Owner has full access shortcut. Others must have daily_close.close (or pos.close_day).
+        $isOwner = in_array(strtolower($u['role']), ['owner'], true);
         $hasPermission = (class_exists('Auth') && (Auth::userHasPermission((int)$u['id'], 'daily_close.close') || Auth::userHasPermission((int)$u['id'], 'pos.close_day')));
-        if (!$isAllowedRole && !$hasPermission) {
-            AuditLogger::log('CLOSE_DAY_PIN_FAILED', "User '{$username}' has role '{$u['role']}' and cannot close day.", 'auth');
+        if (!$isOwner && !$hasPermission) {
+            AuditLogger::log('CLOSE_DAY_PIN_FAILED', "User '{$username}' has role '{$u['role']}' but lacks daily_close.close permission.", 'auth');
             if ($devId !== null && (int)$devId > 0) {
                 self::recordFailedPinAttempt((int)$devId);
             }
@@ -563,6 +563,17 @@ class CashierControl {
     /**
      * Get active shift for a cashier for TODAY.
      */
+    /**
+     * Get all currently active open shifts for a date (or earlier).
+     */
+    public static function getOpenShiftsForDate(?string $date = null, ?PDO $pdo = null): array {
+        $pdo = $pdo ?? Database::getInstance();
+        $date = $date ?? date('Y-m-d');
+        $stmt = $pdo->prepare("SELECT id, shift_uid, cashier_id, cashier_name, started_at, opening_cash_usd, opening_cash_khr FROM cashier_shifts WHERE status = 'open' AND (DATE(started_at) = ? OR DATE(started_at) <= ?) ORDER BY id ASC");
+        $stmt->execute([$date, $date]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public static function getActiveShift(int $cashierId, ?PDO $pdo = null): ?array {
         $pdo = $pdo ?? Database::getInstance();
         self::markOvernightShiftsForReview($pdo);
@@ -1205,6 +1216,119 @@ class CashierControl {
     }
 
     /**
+     * Fast Close Day Shortcut:
+     * When the current cashier's shift is the ONLY active open shift,
+     * they can count the drawer cash once with their own PIN to end their shift
+     * and close the business day together in one action.
+     *
+     * Rules:
+     * - Refused if another cashier's shift is also open (names other open shifts).
+     * - Refused if cashier lacks daily_close.close permission or provides invalid PIN.
+     * - Strictly prohibits handover (solo end shift only).
+     * - Does NOT require opening a new shift or entering opening float.
+     * - If short or over, marks the day report as needing review.
+     * - Generates both End Shift slip and Daily Close (Z-Report) slip.
+     * - Sends Telegram alert for shortage (if any) and day closing.
+     * - Works with or without the needs_review column.
+     */
+    public static function endShiftAndCloseDay(
+        int $shiftId,
+        string $username,
+        string $pin,
+        float $countedUsd,
+        int $countedKhr = 0,
+        ?string $notes = null,
+        ?string $closeDate = null
+    ): array {
+        $pdo = Database::getInstance();
+        self::ensureShiftColumns($pdo);
+        $date = $closeDate ?? date('Y-m-d');
+
+        // 1. Verify shift exists and is currently open
+        $sStmt = $pdo->prepare("SELECT * FROM cashier_shifts WHERE id = ?");
+        $sStmt->execute([$shiftId]);
+        $shift = $sStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$shift || $shift['status'] !== 'open') {
+            throw new Exception("Shift not found or already closed.");
+        }
+
+        // 2. Verify user credentials and close day permissions
+        // Throws if invalid PIN, inactive user, or lacks daily_close.close permission
+        $user = self::verifyCloseDayUser($username, $pin);
+
+        // 3. Shift ownership check: Cashier can end only their own shift
+        $userRole = strtolower($user['role'] ?? '');
+        if ($userRole === 'cashier' && (int)$shift['cashier_id'] !== (int)$user['id']) {
+            throw new Exception("A cashier can end only their own shift.");
+        }
+
+        // 4. Verify that this shift is the ONLY active open shift on $date or earlier
+        $openShiftsStmt = $pdo->prepare("
+            SELECT id, shift_uid, cashier_id, cashier_name, started_at 
+            FROM cashier_shifts 
+            WHERE status = 'open' AND (DATE(started_at) = ? OR DATE(started_at) <= ?) 
+            ORDER BY id ASC
+        ");
+        $openShiftsStmt->execute([$date, $date]);
+        $openShifts = $openShiftsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $otherOpen = [];
+        foreach ($openShifts as $os) {
+            if ((int)$os['id'] !== (int)$shiftId) {
+                $otherOpen[] = "Shift #{$os['id']} ({$os['cashier_name']})";
+            }
+        }
+
+        if (!empty($otherOpen)) {
+            $otherNames = implode(', ', $otherOpen);
+            throw new Exception("Cannot use fast close shortcut: Another cashier's shift is still open [{$otherNames}]. All other shifts must be ended first.");
+        }
+
+        // 5. End the shift solo (calculates shift metrics, checks shortage, sends shift shortage alert if applicable)
+        $shiftResult = self::endShiftSolo($shiftId, $countedUsd, $countedKhr, $pin, $notes);
+
+        // If shift has discrepancy, flag needs_review on cashier_shifts if column exists
+        $totalShiftDiff = (float)($shiftResult['total_difference_usd'] ?? 0.00);
+        if ($totalShiftDiff != 0.00) {
+            try {
+                $c = $pdo->query("SHOW COLUMNS FROM cashier_shifts LIKE 'needs_review'")->fetch();
+                if (!empty($c)) {
+                    $pdo->prepare("UPDATE cashier_shifts SET needs_review = 1 WHERE id = ?")->execute([$shiftId]);
+                }
+            } catch (Throwable $t) {}
+        }
+
+        // 6. Close the day with Z-Report using the same counted cash numbers
+        // Since the last shift is now closed, 0 open shifts remain.
+        $dayCloseResult = self::closeDayZReport($username, $pin, $countedUsd, $countedKhr, $notes, $date);
+
+        return [
+            'success'              => true,
+            'fast_close'           => true,
+            'shift_id'             => $shiftId,
+            'shift_uid'            => $shift['shift_uid'],
+            'cashier_name'         => $shift['cashier_name'],
+            'closed_by_name'       => $dayCloseResult['closed_by_name'] ?? ($user['full_name'] ?? $username),
+            'shift_result'         => $shiftResult,
+            'day_result'           => $dayCloseResult,
+            'shift_slip'           => $shiftResult['slip'] ?? null,
+            'close_slip'           => $dayCloseResult['slip'] ?? null,
+            'slip'                 => $dayCloseResult['slip'] ?? null,
+            'z_report_number'      => $dayCloseResult['z_report_number'] ?? null,
+            'expected_cash_usd'    => $dayCloseResult['expected_cash_usd'],
+            'expected_cash_khr'    => $dayCloseResult['expected_cash_khr'],
+            'counted_cash_usd'     => $countedUsd,
+            'counted_cash_khr'     => $countedKhr,
+            'difference_usd'       => $shiftResult['difference_usd'],
+            'difference_khr'       => $shiftResult['difference_khr'],
+            'total_difference_usd' => $shiftResult['total_difference_usd'],
+            'needs_review'         => $dayCloseResult['needs_review'] ?? 0,
+            'message'              => "Shift #{$shiftId} ended and Day closed successfully (Z-Report {$dayCloseResult['z_report_number']})."
+        ];
+    }
+
+    /**
      * Manager Review & Close of Old Shift Left Open from Previous Day:
      * Rule: Never auto-closed. Manager must count the cash and close it with a written reason.
      */
@@ -1305,6 +1429,175 @@ class CashierControl {
             'difference_khr'    => $diffKhr,
             'shortage_owed_usd' => $shortageOwed,
             'message'           => "Shift #{$shift['shift_uid']} successfully reviewed and closed by {$mgr['manager_name']}."
+        ];
+    }
+
+    /**
+     * Force-end a forgotten shift by Manager or Owner.
+     * Strictly requires Manager or Owner PIN and a written justification reason.
+     * Cashiers are strictly blocked from force-ending another staff member's shift.
+     * Option:
+     * - If $isUncounted is true: no physical count performed. Shortage owed = 0.00.
+     *   Shift marked status='needs_review' and flagged needs_review=1.
+     * - If $isUncounted is false: records manager's counted cash and computes variance.
+     * Sends Telegram alert and logs audit trail.
+     */
+    public static function forceEndForgottenShift(
+        int $shiftId,
+        string $managerUsername,
+        string $managerPin,
+        string $reason,
+        bool $isUncounted = true,
+        float $countedUsd = 0.00,
+        int $countedKhr = 0
+    ): array {
+        $pdo = Database::getInstance();
+        self::ensureShiftColumns($pdo);
+
+        $reason = trim($reason);
+        if ($reason === '' || mb_strlen($reason) < 3) {
+            throw new Exception("A written justification reason (at least 3 characters) is required to force-end a shift.");
+        }
+
+        // Verify manager/owner credentials
+        $mgr = self::verifyManagerPin($managerUsername, $managerPin);
+        $role = strtolower($mgr['manager_role'] ?? '');
+        if (in_array($role, ['cashier', 'washer', 'mechanic', 'technical'], true)) {
+            throw new Exception("Permission denied: Only a Manager or Owner can force-end a forgotten shift.");
+        }
+
+        $sStmt = $pdo->prepare("SELECT * FROM cashier_shifts WHERE id = ?");
+        $sStmt->execute([$shiftId]);
+        $shift = $sStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$shift || in_array($shift['status'], ['closed', 'ended'], true)) {
+            throw new Exception("Shift not found or already closed.");
+        }
+
+        $calc = self::calculateShiftExpectedCash($shiftId);
+        $expectedUsd = (float)$calc['expected_cash_usd'];
+        $expectedKhr = (int)$calc['expected_cash_khr'];
+        $rate = (int)($shift['exchange_rate'] ?: get_exchange_rate());
+
+        if ($isUncounted) {
+            $countedUsd = 0.00;
+            $countedKhr = 0;
+            $diffUsd = 0.00;
+            $diffKhr = 0;
+            $totalDiffUsd = 0.00;
+            $shortageOwedUsd = 0.00; // Condition 3: "If not counted, do not record any shortage owed by the cashier"
+            $shiftStatus = 'closed';
+            $needsReview = 1;
+            $countLabel = "UNCOUNTED - Drawer not counted by cashier. No shortage charged.";
+        } else {
+            $diffUsd = round($countedUsd - $expectedUsd, 2);
+            $diffKhr = $countedKhr - $expectedKhr;
+            $totalDiffUsd = round($diffUsd + ($diffKhr / $rate), 2);
+            $shortageOwedUsd = ($totalDiffUsd < 0) ? abs($totalDiffUsd) : 0.00;
+            $shiftStatus = 'closed';
+            $needsReview = ($totalDiffUsd != 0.00 || $diffUsd != 0.00 || $diffKhr != 0) ? 1 : 0;
+            $countLabel = "COUNTED by Manager ({$mgr['manager_name']}): \${$countedUsd} / {$countedKhr} KHR. Diff: \${$diffUsd}.";
+        }
+
+        $revNotes = trim(($shift['notes'] ? $shift['notes'] . " | " : "") . "[FORCE-ENDED BY MANAGER: {$mgr['manager_name']} ({$countLabel})]: {$reason}");
+
+        $hasNeedsReviewCol = false;
+        try {
+            $c = $pdo->query("SHOW COLUMNS FROM cashier_shifts LIKE 'needs_review'")->fetch();
+            $hasNeedsReviewCol = !empty($c);
+        } catch (Throwable $t) {}
+
+        if ($hasNeedsReviewCol) {
+            $upd = $pdo->prepare("
+                UPDATE cashier_shifts SET
+                    ended_at = CURRENT_TIMESTAMP,
+                    exchange_rate = ?,
+                    expected_cash_usd = ?,
+                    expected_cash_khr = ?,
+                    counted_cash_usd = ?,
+                    counted_cash_khr = ?,
+                    difference_usd = ?,
+                    difference_khr = ?,
+                    total_difference_usd = ?,
+                    shortage_owed_usd = ?,
+                    status = ?,
+                    needs_review = ?,
+                    notes = ?,
+                    review_reason = ?,
+                    reviewed_by_manager_id = ?,
+                    reviewed_by_manager_name = ?,
+                    reviewed_at = CURRENT_TIMESTAMP,
+                    is_active = 0
+                WHERE id = ?
+            ");
+            $upd->execute([
+                $rate, $expectedUsd, $expectedKhr,
+                $countedUsd, $countedKhr,
+                $diffUsd, $diffKhr, $totalDiffUsd,
+                $shortageOwedUsd, $shiftStatus, $needsReview,
+                $revNotes, $reason,
+                $mgr['manager_id'], $mgr['manager_name'],
+                $shiftId
+            ]);
+        } else {
+            $upd = $pdo->prepare("
+                UPDATE cashier_shifts SET
+                    ended_at = CURRENT_TIMESTAMP,
+                    exchange_rate = ?,
+                    expected_cash_usd = ?,
+                    expected_cash_khr = ?,
+                    counted_cash_usd = ?,
+                    counted_cash_khr = ?,
+                    difference_usd = ?,
+                    difference_khr = ?,
+                    total_difference_usd = ?,
+                    shortage_owed_usd = ?,
+                    status = ?,
+                    notes = ?,
+                    review_reason = ?,
+                    reviewed_by_manager_id = ?,
+                    reviewed_by_manager_name = ?,
+                    reviewed_at = CURRENT_TIMESTAMP,
+                    is_active = 0
+                WHERE id = ?
+            ");
+            $upd->execute([
+                $rate, $expectedUsd, $expectedKhr,
+                $countedUsd, $countedKhr,
+                $diffUsd, $diffKhr, $totalDiffUsd,
+                $shortageOwedUsd, $shiftStatus,
+                $revNotes, $reason,
+                $mgr['manager_id'], $mgr['manager_name'],
+                $shiftId
+            ]);
+        }
+
+        $logMsg = "Shift #{$shiftId} ({$shift['cashier_name']}) FORCE-ENDED by Manager {$mgr['manager_name']}. Reason: {$reason}. Status: {$shiftStatus}. Uncounted: " . ($isUncounted ? 'Yes' : 'No');
+        AuditLogger::log('SHIFT_FORCE_ENDED', $logMsg, 'shift', (string)$shiftId, $mgr['manager_id'], $mgr['manager_name'], $mgr['manager_role']);
+
+        // Send non-blocking Telegram alert
+        TelegramNotifier::notifyForgottenShiftClosed(
+            (string)$shift['shift_uid'],
+            (string)$shift['cashier_name'],
+            (string)$mgr['manager_name'],
+            (string)$mgr['manager_role'],
+            $reason,
+            $isUncounted,
+            $countedUsd,
+            $diffUsd
+        );
+
+        return [
+            'success'          => true,
+            'shift_id'         => $shiftId,
+            'shift_uid'        => $shift['shift_uid'],
+            'cashier_name'     => $shift['cashier_name'],
+            'is_uncounted'     => $isUncounted,
+            'status'           => $shiftStatus,
+            'needs_review'     => $needsReview,
+            'shortage_owed_usd'=> $shortageOwedUsd,
+            'manager_name'     => $mgr['manager_name'],
+            'message'          => "Shift #{$shiftId} ({$shift['cashier_name']}) has been force-ended and flagged for manager review."
         ];
     }
 
@@ -1661,11 +1954,17 @@ class CashierControl {
         $rate = get_exchange_rate();
 
         // 1. Check for active open shifts on this date or earlier
-        $openShiftsStmt = $pdo->prepare("SELECT COUNT(*) FROM cashier_shifts WHERE status = 'open' AND (DATE(started_at) = ? OR DATE(started_at) <= ?)");
+        $openShiftsStmt = $pdo->prepare("SELECT id, shift_uid, cashier_name, started_at FROM cashier_shifts WHERE status = 'open' AND (DATE(started_at) = ? OR DATE(started_at) <= ?) ORDER BY id ASC");
         $openShiftsStmt->execute([$date, $date]);
-        $openCount = (int)$openShiftsStmt->fetchColumn();
+        $openShifts = $openShiftsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $openCount = count($openShifts);
         if ($openCount > 0) {
-            throw new Exception("Cannot close day: There are {$openCount} active open shift(s). All cashiers must count and end their shifts before closing the day.");
+            $shiftNames = [];
+            foreach ($openShifts as $os) {
+                $shiftNames[] = "Shift #{$os['id']} ({$os['cashier_name']})";
+            }
+            $namesStr = implode(', ', $shiftNames);
+            throw new Exception("Cannot close day: There are {$openCount} active open shift(s) [{$namesStr}]. All cashiers must count and end their shifts before closing the day.");
         }
 
         // 2. Fetch all shifts of today
@@ -1743,6 +2042,14 @@ class CashierControl {
         $shortageOwedUsd = ($totalDiffUsd < 0) ? abs($totalDiffUsd) : 0.00;
 
         $isDiscrepancy = ($totalDiffUsd != 0.00 || $diffUsd != 0.00 || $diffKhr != 0);
+        $hasUnreviewedShift = false;
+        foreach ($allShifts as $s) {
+            if (!empty($s['needs_review']) || ($s['status'] ?? '') === 'needs_review') {
+                $hasUnreviewedShift = true;
+                break;
+            }
+        }
+        $dayNeedsReview = ($isDiscrepancy || $hasUnreviewedShift) ? 1 : 0;
         if ($isDiscrepancy) {
             $discrepancyType = ($totalDiffUsd < 0) ? 'Short' : 'Over';
             $reviewNotice = "[Needs Manager Review] Cash {$discrepancyType}: " . ($totalDiffUsd < 0 ? '-' : '+') . "$" . number_format(abs($totalDiffUsd), 2);
@@ -1750,6 +2057,9 @@ class CashierControl {
                 $reviewNotice .= " / " . ($diffKhr < 0 ? '-' : '+') . number_format(abs($diffKhr)) . " KHR";
             }
             $notes = trim($reviewNotice . (!empty($notes) ? "\n" . $notes : ''));
+        }
+        if ($hasUnreviewedShift) {
+            $notes = trim("[Needs Manager Review: Contains uncounted or force-ended shift]\n" . (!empty($notes) ? $notes : ''));
         }
 
         // Day sales breakdown
@@ -1884,6 +2194,16 @@ class CashierControl {
             $closeId = (int)$pdo->lastInsertId();
         }
 
+        $hasDailyNeedsReview = false;
+        try {
+            $chkNR = $pdo->query("SHOW COLUMNS FROM pos_daily_closes LIKE 'needs_review'")->fetch();
+            $hasDailyNeedsReview = !empty($chkNR);
+        } catch (Throwable $t) {}
+
+        if ($hasDailyNeedsReview) {
+            $pdo->exec("UPDATE pos_daily_closes SET needs_review = {$dayNeedsReview} WHERE id = {$closeId}");
+        }
+
         $closerRoleLabel = ucfirst($mgr['user_role']);
         $logMsg = "Day {$date} closed by {$closerRoleLabel} {$mgr['user_name']}. Final Z-Report generated: {$zReportNumber}. Total Sales: $" . number_format((float)$t['total_sales_usd'], 2) . ", Expected Cash: $" . number_format($dayExpectedUsd, 2) . ", Counted: $" . number_format($countedUsd, 2) . ", Diff: $" . number_format($diffUsd, 2);
         AuditLogger::log('DAY_CLOSED', $logMsg, 'z_report', $zReportNumber, $mgr['user_id'], $mgr['user_name'], $mgr['user_role']);
@@ -1919,8 +2239,9 @@ class CashierControl {
             'role'                 => $mgr['user_role'],
             'closed_by_role'       => $closerRoleLabel,
             'manager_name'         => $mgr['user_name'],
-            'needs_manager_review' => $isDiscrepancy,
-            'review_status'        => $isDiscrepancy ? 'Needs Manager Review' : 'Balanced',
+            'needs_review'         => $dayNeedsReview,
+            'needs_manager_review' => ($dayNeedsReview === 1),
+            'review_status'        => ($dayNeedsReview === 1) ? 'Needs Manager Review' : 'Balanced',
             'total_sales_usd'      => (float)$t['total_sales_usd'],
             'cash_sales_usd'       => (float)$t['cash_usd'],
             'aba_sales_usd'        => (float)$t['aba_usd'],

@@ -4,6 +4,10 @@
  * Includes network error handling and automatic device authentication.
  */
 class PosApi {
+    static async call(action, payload = null, options = {}) {
+        return await this.request(action, payload, options);
+    }
+
     static async request(action, payload = null, options = {}) {
         const config = PosConfig.get();
         const endpoint = PosConfig.getApiEndpoint();
@@ -640,6 +644,42 @@ class PosApi {
      */
     static async getDayLockStatus(date = null) {
         return await this.request('get_day_lock_status', { date });
+    }
+
+    /**
+     * Get active open shifts
+     */
+    static async getOpenShifts(date = '') {
+        return await this.request('get_open_shifts', { date });
+    }
+
+    /**
+     * Force-End Forgotten Shift by Manager / Owner
+     */
+    static async forceEndShift(shiftId, managerUsername, managerPin, reason, isUncounted = true, countedCashUsd = 0, countedCashKhr = 0) {
+        return await this.request('force_end_shift', {
+            shift_id: shiftId,
+            manager_username: managerUsername,
+            manager_pin: managerPin,
+            reason,
+            is_uncounted: isUncounted ? 1 : 0,
+            counted_cash_usd: countedCashUsd,
+            counted_cash_khr: countedCashKhr
+        });
+    }
+
+    /**
+     * Fast Close Day (Last cashier end shift & close day together)
+     */
+    static async fastCloseDay(shiftId, username, pin, countedCashUsd, countedCashKhr, notes = '') {
+        return await this.request('fast_close_day', {
+            shift_id: shiftId,
+            username,
+            pin,
+            counted_cash_usd: countedCashUsd,
+            counted_cash_khr: countedCashKhr,
+            notes
+        });
     }
 
     /**
