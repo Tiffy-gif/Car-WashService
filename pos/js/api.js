@@ -317,11 +317,13 @@ class PosApi {
     /**
      * Cancel Order
      */
-    static async cancelOrder(orderId, orderNumber, reason = 'Cancelled by staff', managerUsername = '', managerPin = '') {
+    static async cancelOrder(orderId, orderNumber, reason = 'Cancelled by staff', managerUsername = '', managerPin = '', reasonCode = '', note = '') {
         const payload = {
             order_id: orderId,
             order_number: orderNumber,
-            reason
+            reason,
+            reason_code: reasonCode,
+            note: note
         };
         if (managerUsername) payload.manager_username = managerUsername;
         if (managerPin) payload.manager_pin = managerPin;
@@ -595,6 +597,16 @@ class PosApi {
 
     static async getCloseDaySlip(closeIdOrDate) {
         return await this.request('get_close_day_slip', { close_id: closeIdOrDate });
+    }
+
+    /**
+     * Request a secure 2-minute one-time print link for browser fallback printing
+     */
+    static async getSlipPrintToken(slipType, slipRef) {
+        return await this.request('get_slip_print_token', {
+            slip_type: slipType,
+            slip_ref: slipRef
+        });
     }
 
     /**

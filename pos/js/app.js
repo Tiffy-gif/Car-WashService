@@ -225,6 +225,8 @@ class PosApp {
 
     static currentDailyReportData = null;
     static isDayClosed = false;
+    static isLongWaitBannerDismissed = false;
+    static unfinishedOrdersCount = 0;
     static closeOrdersPage = 1;
     static closeOrdersPageSize = 15;
     static currentQueueOrdersMap = {};
@@ -403,6 +405,9 @@ class PosApp {
     static currentCustomer = null; // { id, name, phone, plate, vehicle_type }
     static cart = []; // [ { id, type, name_en, name_km, price_usd, price_khr, qty, product_id, service_id } ]
     static currentDiscount = { type: 'none', value: 0 }; // type: 'none'|'percent'|'fixed', value: number
+    static pointsApplied = false;
+    static pointsToRedeem = 0;
+    static pointsDiscountUsd = 0.00;
     static paymentMethod = 'cash';
     static lastCompletedOrder = null;
 
@@ -971,6 +976,15 @@ class PosApp {
         update();
         if (!this._clockInterval) {
             this._clockInterval = setInterval(update, 1000);
+        }
+    }
+
+    static switchLanguage(targetLang) {
+        const current = I18nManager.getLang();
+        const next = targetLang || (current === 'km' ? 'en' : 'km');
+        if (next !== current) {
+            I18nManager.setLang(next);
+            this.onLanguageChanged();
         }
     }
 
@@ -2496,7 +2510,7 @@ class PosApp {
         if (btnExact) {
             btnExact.addEventListener('click', () => {
                 const totals = this.calculateTotals();
-                const payable = Math.max(0, totals.totalUsd - (this.pointsDiscountUsd || 0));
+                const payable = totals.totalUsd;
                 document.getElementById('cashTenderInput').value = payable.toFixed(2);
                 this.calculateChange();
             });
@@ -2660,6 +2674,30 @@ class PosApp {
         document.getElementById('btnCloseCancelModal')?.addEventListener('click', closeCancelModal);
         document.getElementById('btnDismissCancelModal')?.addEventListener('click', closeCancelModal);
         document.getElementById('btnConfirmCancelOrder')?.addEventListener('click', () => this.handleConfirmCancelOrder());
+        document.getElementById('cancelReasonSelect')?.addEventListener('change', (e) => {
+            const val = e.target.value;
+            const noteWrap = document.getElementById('cancelReasonNoteWrap');
+            const reqMark = document.getElementById('cancelReasonNoteReqMark');
+            const noteInput = document.getElementById('cancelReasonNoteInput');
+            if (noteWrap) {
+                if (val === 'other') {
+                    noteWrap.style.display = 'block';
+                    if (reqMark) reqMark.style.display = 'inline';
+                    if (noteInput) {
+                        noteInput.placeholder = I18nManager.t('cancelNoteRequiredPlaceholder') || 'Mandatory explanation note for Other...';
+                        noteInput.focus();
+                    }
+                } else if (val) {
+                    noteWrap.style.display = 'block';
+                    if (reqMark) reqMark.style.display = 'none';
+                    if (noteInput) {
+                        noteInput.placeholder = I18nManager.t('cancelNoteOptionalPlaceholder') || 'Optional note / details...';
+                    }
+                } else {
+                    noteWrap.style.display = 'none';
+                }
+            }
+        });
 
         // Pay Unpaid Order Modal Buttons
         const modalPayOrder = document.getElementById('modalPayOrder');
@@ -3090,17 +3128,19 @@ class PosApp {
         // 5. Slip Photo Capture in Payment Modal
         this.setupSlipPhotoHandlers();
 
-        // 6. Wait Time & Appointment Modal Listeners
+        // 6. Wait Time & Long Wait Cart Banner & Appointment Modal Listeners
         const closeLongWait = () => {
             document.getElementById('modalLongWaitWarning')?.classList.remove('open');
             this._dismissedOver45Key = this.getCartFingerprint();
         };
         document.getElementById('btnCloseLongWaitModal')?.addEventListener('click', closeLongWait);
         document.getElementById('btnContinueAnyway')?.addEventListener('click', closeLongWait);
-        document.getElementById('btnOfferBookAppointment')?.addEventListener('click', () => {
-            console.log('btnOfferBookAppointment clicked! Opening appointment modal...');
+
+        // Long Wait Cart Banner (Proposal 2)
+        document.getElementById('btnDismissLongWaitBanner')?.addEventListener('click', () => this.dismissLongWaitBanner());
+        const openApptBooking = () => {
+            this.dismissLongWaitBanner();
             document.getElementById('modalLongWaitWarning')?.classList.remove('open');
-            this._dismissedOver45Key = this.getCartFingerprint();
             this.openAppointmentModal();
             this.toggleModalApptBookingForm(true);
             const firstSvc = this.cart.find(it => it.type === 'service');
@@ -3120,7 +3160,15 @@ class PosApp {
                 const phIn = document.getElementById('modalApptCustPhone');
                 if (phIn) phIn.value = this.currentCustomer.phone;
             }
-        });
+        };
+        document.getElementById('btnOfferBookAppointment')?.addEventListener('click', openApptBooking);
+        document.getElementById('btnCartBookAppointment')?.addEventListener('click', openApptBooking);
+
+        // Stale Orders Review Modal Listeners (Proposal 4)
+        document.getElementById('btnOpenStaleOrdersModal')?.addEventListener('click', () => this.openStaleOrdersModal());
+        const closeStaleModal = () => document.getElementById('modalStaleOrdersReview')?.classList.remove('open');
+        document.getElementById('btnCloseStaleOrdersModal')?.addEventListener('click', closeStaleModal);
+        document.getElementById('btnDoneStaleOrdersModal')?.addEventListener('click', closeStaleModal);
 
         // 7. Appointments View Event Handlers
         document.getElementById('apptBookingDate')?.addEventListener('change', () => this.loadAppointmentSlots());
@@ -5406,8 +5454,12 @@ class PosApp {
 
     static clearCart() {
         this.cart = [];
+        this.isLongWaitBannerDismissed = false;
+        const longWaitBanner = document.getElementById('cartLongWaitBanner');
+        if (longWaitBanner) longWaitBanner.style.display = 'none';
         this.currentAppointmentId = null;
         this.currentDiscount = { type: 'none', value: 0 };
+        this.pointsApplied = false;
         this.pointsToRedeem = 0;
         this.pointsDiscountUsd = 0;
         this.loyaltyRewardGiven = null;
@@ -6522,6 +6574,22 @@ class PosApp {
         this.closeDiscountModal();
     }
 
+    static getCustomerPoints() {
+        const cust = this.currentCustomer;
+        if (!cust || !cust.name || cust.name === 'Walk-in Guest') return 0;
+        if (cust.loyalty_points !== undefined && cust.loyalty_points !== null) {
+            return parseInt(cust.loyalty_points || 0, 10);
+        }
+        if (cust.customer_id) {
+            const allCusts = PosStorage.getCustomers()?.customers || [];
+            const found = allCusts.find(c => c.id === cust.customer_id);
+            if (found && found.loyalty_points !== undefined) {
+                return parseInt(found.loyalty_points || 0, 10);
+            }
+        }
+        return 0;
+    }
+
     static calculateTotals() {
         const exchangeRate = this.getExchangeRate();
 
@@ -6529,6 +6597,7 @@ class PosApp {
         this.cart.forEach(item => {
             subtotalUsd += item.price_usd * item.qty;
         });
+        subtotalUsd = Math.round(subtotalUsd * 100) / 100;
 
         let discountUsd = 0;
         if (this.currentDiscount.type === 'percent') {
@@ -6536,8 +6605,27 @@ class PosApp {
         } else if (this.currentDiscount.type === 'fixed') {
             discountUsd = Math.min(subtotalUsd, this.currentDiscount.value);
         }
+        discountUsd = Math.round(discountUsd * 100) / 100;
 
-        const totalUsd = Math.max(0, subtotalUsd - discountUsd);
+        const billBeforePoints = Math.max(0, Math.round((subtotalUsd - discountUsd) * 100) / 100);
+
+        let pointsDiscountUsd = 0;
+        let pointsToRedeem = 0;
+
+        const custPoints = this.getCustomerPoints();
+        if (this.pointsApplied && custPoints > 0 && billBeforePoints > 0) {
+            const maxPointsForBill = Math.floor(billBeforePoints * 10);
+            pointsToRedeem = Math.min(custPoints, maxPointsForBill);
+            pointsDiscountUsd = Math.min(billBeforePoints, Math.round((pointsToRedeem / 10) * 100) / 100);
+            this.pointsToRedeem = pointsToRedeem;
+            this.pointsDiscountUsd = pointsDiscountUsd;
+        } else {
+            this.pointsToRedeem = 0;
+            this.pointsDiscountUsd = 0.00;
+        }
+
+        const totalDiscountUsd = Math.round((discountUsd + this.pointsDiscountUsd) * 100) / 100;
+        const totalUsd = Math.max(0, Math.round((subtotalUsd - totalDiscountUsd) * 100) / 100);
         const subtotalKhr = Math.round(subtotalUsd * exchangeRate);
         const totalKhr = Math.round(totalUsd * exchangeRate);
 
@@ -6545,10 +6633,125 @@ class PosApp {
             subtotalUsd,
             subtotalKhr,
             discountUsd,
+            pointsDiscountUsd: this.pointsDiscountUsd || 0,
+            pointsToRedeem: this.pointsToRedeem || 0,
+            totalDiscountUsd,
             totalUsd,
             totalKhr,
             exchangeRate
         };
+    }
+
+    static updateCartLoyaltyBox(totals) {
+        if (!totals) totals = this.calculateTotals();
+        const box = document.getElementById('cartLoyaltyBox');
+        const pointsText = document.getElementById('cartLoyaltyPointsText');
+        const actionBtn = document.getElementById('btnCartLoyaltyAction');
+        const pointsRow = document.getElementById('cartPointsDiscountRow');
+        const pointsRowText = document.getElementById('cartPointsDiscountText');
+        const pointsRowLabel = document.getElementById('cartPointsDiscountLabel');
+
+        const isKm = (I18nManager.getLang() === 'km');
+        const custPoints = this.getCustomerPoints();
+        const billBeforePoints = Math.max(0, Math.round((totals.subtotalUsd - totals.discountUsd) * 100) / 100);
+
+        if (custPoints > 0 && (this.cart || []).length > 0) {
+            const maxPointsForBill = Math.floor(billBeforePoints * 10);
+            const usablePoints = Math.min(custPoints, maxPointsForBill);
+            const usableUsd = (usablePoints / 10).toFixed(2);
+            const ptsLabel = isKm ? 'ពិន្ទុ' : 'pts';
+
+            if (box) {
+                box.style.display = 'flex';
+                box.classList.add('is-active');
+            }
+            if (pointsText) {
+                pointsText.textContent = `${usablePoints} ${ptsLabel} = $${usableUsd}`;
+            }
+
+            if (this.pointsApplied && totals.pointsDiscountUsd > 0) {
+                if (box) box.classList.add('has-applied');
+                if (actionBtn) {
+                    actionBtn.textContent = isKm ? 'លុបចេញ' : 'Remove';
+                    actionBtn.setAttribute('data-action', 'remove');
+                    actionBtn.classList.add('is-remove');
+                }
+                if (pointsRow) {
+                    pointsRow.style.display = 'flex';
+                    pointsRow.classList.add('is-active');
+                }
+                if (pointsRowLabel) {
+                    pointsRowLabel.textContent = isKm ? 'បញ្ចុះតម្លៃពិន្ទុ' : 'Points discount';
+                }
+                if (pointsRowText) {
+                    pointsRowText.textContent = `-$${totals.pointsDiscountUsd.toFixed(2)}`;
+                }
+            } else {
+                if (box) box.classList.remove('has-applied');
+                if (actionBtn) {
+                    actionBtn.textContent = isKm ? 'អនុវត្ត' : 'Apply';
+                    actionBtn.setAttribute('data-action', 'apply');
+                    actionBtn.classList.remove('is-remove');
+                }
+                if (pointsRow) {
+                    pointsRow.style.display = 'none';
+                    pointsRow.classList.remove('is-active');
+                }
+            }
+        } else {
+            if (box) {
+                box.style.display = 'none';
+                box.classList.remove('is-active');
+                box.classList.remove('has-applied');
+            }
+            if (pointsRow) {
+                pointsRow.style.display = 'none';
+                pointsRow.classList.remove('is-active');
+            }
+            if (actionBtn) {
+                actionBtn.textContent = isKm ? 'អនុវត្ត' : 'Apply';
+                actionBtn.setAttribute('data-action', 'apply');
+                actionBtn.classList.remove('is-remove');
+            }
+        }
+    }
+
+    static toggleCartLoyaltyPoints() {
+        const isKm = (I18nManager.getLang() === 'km');
+        const actionBtn = document.getElementById('btnCartLoyaltyAction');
+        const isRemove = this.pointsApplied || (actionBtn && actionBtn.getAttribute('data-action') === 'remove');
+
+        if (isRemove) {
+            this.pointsApplied = false;
+            this.pointsToRedeem = 0;
+            this.pointsDiscountUsd = 0.00;
+            const msg = isKm ? 'បានលុបការបញ្ចុះតម្លៃពិន្ទុ' : 'Points discount removed';
+            if (typeof Toast !== 'undefined' && Toast.show) Toast.show(msg, 'info');
+            this.renderCart();
+            return;
+        }
+
+        const custPoints = this.getCustomerPoints();
+        if (custPoints <= 0) {
+            const msg = isKm ? 'អតិថិជនគ្មានពិន្ទុគ្រប់គ្រាន់ទេ' : 'Customer has no loyalty points';
+            if (typeof Toast !== 'undefined' && Toast.show) Toast.show(msg, 'warning');
+            return;
+        }
+
+        const totals = this.calculateTotals();
+        const billBeforePoints = Math.max(0, totals.subtotalUsd - totals.discountUsd);
+        if (billBeforePoints <= 0) {
+            const msg = isKm ? 'មិនអាចប្រើពិន្ទុលើវិក្កយបត្រ $0 បានទេ' : 'Cannot apply points to a $0 bill';
+            if (typeof Toast !== 'undefined' && Toast.show) Toast.show(msg, 'warning');
+            return;
+        }
+
+        this.pointsApplied = true;
+        const msg = isKm
+            ? `បានអនុវត្តការបញ្ចុះតម្លៃពិន្ទុ`
+            : `Points discount applied`;
+        if (typeof Toast !== 'undefined' && Toast.show) Toast.show(msg, 'success');
+        this.renderCart();
     }
 
     static renderCart() {
@@ -6797,6 +7000,9 @@ class PosApp {
                 }
             }
         }
+
+        // Update Loyalty Points Summary Box & Points Discount Row
+        this.updateCartLoyaltyBox(totals);
 
         const totalUsdEl = document.getElementById('cartTotalUsd');
         if (totalUsdEl) totalUsdEl.textContent = `$${totals.totalUsd.toFixed(2)}`;
@@ -7232,16 +7438,34 @@ class PosApp {
         dropdown.classList.add('open');
     }
 
-    static selectCustomer(plate, name, phone, vehicleType, customerId = null, vehicleId = null) {
+    static selectCustomer(plate, name, phone, vehicleType, customerId = null, vehicleId = null, loyaltyPoints = null) {
+        const prevCid = this.currentCustomer?.customer_id;
+        if (prevCid !== customerId || !customerId) {
+            this.pointsApplied = false;
+            this.pointsToRedeem = 0;
+            this.pointsDiscountUsd = 0;
+            this.isLongWaitBannerDismissed = false;
+        }
         const cleanName = this.stripHtml(name) || 'Customer';
         const cleanPlate = this.stripHtml(plate);
+
+        let pts = (loyaltyPoints !== null && loyaltyPoints !== undefined) ? parseInt(loyaltyPoints, 10) : undefined;
+        if (pts === undefined && customerId) {
+            const allCusts = PosStorage.getCustomers()?.customers || [];
+            const found = allCusts.find(c => c.id === customerId);
+            if (found && found.loyalty_points !== undefined) {
+                pts = parseInt(found.loyalty_points, 10);
+            }
+        }
+
         this.currentCustomer = {
             plate: cleanPlate,
             name: cleanName,
             phone: phone || '',
             vehicle_type: vehicleType || this.selectedVehicleType,
             customer_id: customerId,
-            vehicle_id: vehicleId
+            vehicle_id: vehicleId,
+            loyalty_points: (pts !== undefined ? pts : 0)
         };
 
         // Update UI & Intake Inputs (Task 1)
@@ -7290,8 +7514,9 @@ class PosApp {
         // Vehicle Recognition - Load Customer & Vehicle Profile (Requirement 4)
         this.loadVehicleProfile(cleanPlate);
 
-        // Update GOTPOS Customer Card Header
+        // Update GOTPOS Customer Card Header & Refresh Cart
         this.updateGotposCustomerCard();
+        this.renderCart();
     }
 
     static setCustomerToWalkIn() {
@@ -7303,6 +7528,12 @@ class PosApp {
 
     static resetCustomer() {
         this.currentCustomer = null;
+        this.isLongWaitBannerDismissed = false;
+        const longWaitBanner = document.getElementById('cartLongWaitBanner');
+        if (longWaitBanner) longWaitBanner.style.display = 'none';
+        this.pointsApplied = false;
+        this.pointsToRedeem = 0;
+        this.pointsDiscountUsd = 0;
         this.currentCustomerBenefits = [];
         this.activeLoyaltyReward = null;
         this.loyaltyRewardGiven = null;
@@ -7338,8 +7569,9 @@ class PosApp {
         if (plateInp) plateInp.focus();
         else document.getElementById('custSearchInput')?.focus();
 
-        // Reset GOTPOS Customer Card Header
+        // Reset GOTPOS Customer Card Header & Refresh Cart
         this.updateGotposCustomerCard();
+        this.renderCart();
     }
 
     // ========================================================
@@ -7631,15 +7863,8 @@ class PosApp {
             tierDisplay.textContent = `${tierUpper} Member${plateStr}`;
         }
 
-        if (loyaltyRow && loyaltyVal) {
-            if (cust.customer_id || points > 0) {
-                loyaltyRow.style.display = 'inline-flex';
-                const ptsEquivUsd = (points / 10).toFixed(2);
-                const ptsLabel = isKm ? 'ពិន្ទុ' : 'pts';
-                loyaltyVal.textContent = `${points} ${ptsLabel} = $${ptsEquivUsd}`;
-            } else {
-                loyaltyRow.style.display = 'none';
-            }
+        if (loyaltyRow) {
+            loyaltyRow.style.display = 'none';
         }
 
         if (avatarEl) {
@@ -7662,6 +7887,7 @@ class PosApp {
         }
 
         if (btnReset) btnReset.style.display = 'inline-flex';
+        this.updateCartLoyaltyBox();
     }
 
     static toggleSavedCustomersPanel() {
@@ -8264,23 +8490,14 @@ class PosApp {
         if (tabKhqr) tabKhqr.style.display = hasBank ? '' : 'none';
         if (noBankNotice) noBankNotice.style.display = hasBank ? 'none' : 'flex';
 
-        // Reset loyalty redemption
-        this.pointsToRedeem = 0;
-        this.pointsDiscountUsd = 0;
-
-        let custPoints = 0;
-        const cust = this.currentCustomer;
-        if (cust && cust.customer_id) {
-            const allCusts = PosStorage.getCustomers()?.customers || [];
-            const found = allCusts.find(c => c.id === cust.customer_id);
-            if (found) {
-                custPoints = parseInt(found.loyalty_points || 0);
-            } else if (cust.loyalty_points !== undefined) {
-                custPoints = parseInt(cust.loyalty_points || 0);
-            }
-        } else if (cust && cust.loyalty_points !== undefined && cust.name !== 'Walk-in Guest') {
-            custPoints = parseInt(cust.loyalty_points || 0);
+        // Reset loyalty redemption if not already applied in cart
+        if (!this.pointsApplied) {
+            this.pointsToRedeem = 0;
+            this.pointsDiscountUsd = 0;
         }
+
+        const cust = this.currentCustomer;
+        let custPoints = this.getCustomerPoints();
         this.currentCustomerPoints = custPoints;
 
         const isKm = (I18nManager.getLang() === 'km');
@@ -8289,6 +8506,7 @@ class PosApp {
         const pointsUsdEl = document.getElementById('payModalPointsUsd');
         const pointsHintEl = document.getElementById('payModalPointsHint');
         const appliedBanner = document.getElementById('payModalPointsAppliedBanner');
+        const appliedText = document.getElementById('payModalPointsAppliedText');
         const btnUse = document.getElementById('btnUsePoints');
 
         if (cust && cust.customer_id && custPoints > 0) {
@@ -8298,8 +8516,18 @@ class PosApp {
             if (pointsHintEl) {
                 pointsHintEl.textContent = isKm ? '10 ពិន្ទុ = $1.00 (អាចប្រើបានគ្រប់ចំនួនពិន្ទុ)' : '10 pts = $1.00 (Any amount can be used)';
             }
-            if (appliedBanner) appliedBanner.style.display = 'none';
-            if (btnUse) btnUse.style.display = 'inline-flex';
+            if (this.pointsToRedeem > 0) {
+                if (appliedBanner) appliedBanner.style.display = 'flex';
+                if (appliedText) {
+                    appliedText.textContent = isKm
+                        ? `បានកាត់បន្ថយ ${this.pointsToRedeem} ពិន្ទុ (-$${this.pointsDiscountUsd.toFixed(2)})`
+                        : `Applied ${this.pointsToRedeem} pts discount (-$${this.pointsDiscountUsd.toFixed(2)})`;
+                }
+                if (btnUse) btnUse.style.display = 'none';
+            } else {
+                if (appliedBanner) appliedBanner.style.display = 'none';
+                if (btnUse) btnUse.style.display = 'inline-flex';
+            }
         } else {
             if (loyaltySection) loyaltySection.style.display = 'none';
         }
@@ -8377,7 +8605,7 @@ class PosApp {
 
     static calculateChange() {
         const totals = this.calculateTotals();
-        const payableUsd = Math.max(0, totals.totalUsd - (this.pointsDiscountUsd || 0));
+        const payableUsd = totals.totalUsd;
         const tendered = parseFloat(document.getElementById('cashTenderInput').value) || 0;
         const changeUsd = Math.max(0, tendered - payableUsd);
         const changeKhr = Math.round(changeUsd * totals.exchangeRate);
@@ -8387,34 +8615,26 @@ class PosApp {
     }
 
     static handleUseLoyaltyPoints() {
-        const totals = this.calculateTotals();
-        const baseUsd = totals.totalUsd;
-        if (baseUsd <= 0 || !this.currentCustomerPoints || this.currentCustomerPoints <= 0) return;
+        const custPoints = this.getCustomerPoints();
+        if (custPoints <= 0) return;
 
-        // Largest allowed points: min(customer points, points to cover total)
-        // 10 points = $1.00 => points needed = ceil(baseUsd * 10)
-        const pointsNeeded = Math.ceil(baseUsd * 10);
-        const pointsToUse = Math.min(this.currentCustomerPoints, pointsNeeded);
-        const discountUsd = Math.min(baseUsd, Math.round((pointsToUse / 10) * 100) / 100);
-
-        this.pointsToRedeem = pointsToUse;
-        this.pointsDiscountUsd = discountUsd;
+        this.pointsApplied = true;
+        this.renderCart();
         this.updatePaymentModalTotals();
     }
 
     static handleCancelUseLoyaltyPoints() {
+        this.pointsApplied = false;
         this.pointsToRedeem = 0;
         this.pointsDiscountUsd = 0;
+        this.renderCart();
         this.updatePaymentModalTotals();
     }
 
     static updatePaymentModalTotals() {
         const totals = this.calculateTotals();
-        const baseUsd = totals.totalUsd;
-        const discountUsd = this.pointsDiscountUsd || 0;
-        const payableUsd = Math.max(0, baseUsd - discountUsd);
-        const exchangeRate = this.getExchangeRate();
-        const payableKhr = Math.round(payableUsd * exchangeRate);
+        const payableUsd = totals.totalUsd;
+        const payableKhr = totals.totalKhr;
 
         const usdEl = document.getElementById('payModalTotalUsd');
         const khrEl = document.getElementById('payModalTotalKhr');
@@ -8428,14 +8648,7 @@ class PosApp {
         const pointsBalEl = document.getElementById('payModalPointsBalance');
         const pointsHintEl = document.getElementById('payModalPointsHint');
 
-        const cust = this.currentCustomer;
-        let custPoints = 0;
-        if (cust && cust.customer_id) {
-            const allCusts = PosStorage.getCustomers()?.customers || [];
-            const found = allCusts.find(c => c.id === cust.customer_id);
-            if (found) custPoints = parseInt(found.loyalty_points || 0);
-            else if (cust.loyalty_points !== undefined) custPoints = parseInt(cust.loyalty_points || 0);
-        }
+        const custPoints = this.getCustomerPoints();
         if (pointsBalEl && custPoints > 0) {
             pointsBalEl.textContent = `${custPoints} ${isKm ? 'ពិន្ទុ' : 'pts'}`;
         }
@@ -8447,8 +8660,8 @@ class PosApp {
             if (appliedBanner) appliedBanner.style.display = 'flex';
             if (appliedText) {
                 appliedText.textContent = isKm
-                    ? `បានកាត់បន្ថយ ${this.pointsToRedeem} ពិន្ទុ (-$${discountUsd.toFixed(2)})`
-                    : `Applied ${this.pointsToRedeem} pts discount (-$${discountUsd.toFixed(2)})`;
+                    ? `បានកាត់បន្ថយ ${this.pointsToRedeem} ពិន្ទុ (-$${this.pointsDiscountUsd.toFixed(2)})`
+                    : `Applied ${this.pointsToRedeem} pts discount (-$${this.pointsDiscountUsd.toFixed(2)})`;
             }
             if (btnUse) btnUse.style.display = 'none';
         } else {
@@ -9001,22 +9214,23 @@ class PosApp {
         // 6. Totals & Payment Calculations
         const subtotal = items.reduce((sum, it) => sum + ((it.price_usd || 0) * (it.qty || 1)), 0);
         const discountUsd = parseFloat(order.discount_usd || 0);
+        const ptsRedeemed = parseInt(order.points_redeemed || 0);
+        const ptsDiscountUsd = parseFloat(order.points_discount_usd || 0);
+        const manualDiscountUsd = Math.max(0, discountUsd - ptsDiscountUsd);
         const showDiscount = isSettingOn(settings.receipt_show_discount, true);
         const totalUsd = parseFloat(order.total_usd !== undefined ? order.total_usd : (subtotal - discountUsd));
         const totalKhr = parseInt(order.total_khr || Math.round(totalUsd * rate));
 
         let discHtml = '';
-        if (showDiscount && discountUsd > 0) {
+        if (showDiscount && manualDiscountUsd > 0) {
             discHtml = `
                 <div class="receipt-summary-row">
                     <span>${getLbl('discount', 'បញ្ចុះតម្លៃ៖', 'Discount:', 'បញ្ចុះតម្លៃ / Discount:')}</span>
-                    <span style="font-family: monospace; font-weight: 700;">-$${discountUsd.toFixed(2)}</span>
+                    <span style="font-family: monospace; font-weight: 700;">-$${manualDiscountUsd.toFixed(2)}</span>
                 </div>
             `;
         }
 
-        const ptsRedeemed = parseInt(order.points_redeemed || 0);
-        const ptsDiscountUsd = parseFloat(order.points_discount_usd || 0);
         let ptsDiscHtml = '';
         if (ptsRedeemed > 0 && ptsDiscountUsd > 0) {
             ptsDiscHtml = `
@@ -10668,6 +10882,8 @@ class PosApp {
 
         // Requirement 1 & 4: Fetch bays and queue data
         await this.fetchBaysAndQueue(true);
+        // Proposal 4: Check for stale waiting orders from previous days
+        this.checkStaleOrders();
 
         let orders = [];
         let isOfflineFallback = false;
@@ -11417,8 +11633,12 @@ class PosApp {
         if (prompt) {
             prompt.textContent = `តើអ្នកពិតជាចង់បោះបង់ការកុម្ម៉ង់ #${orderNumber} (${plate}) មែនទេ?`;
         }
-        const reasonInput = document.getElementById('cancelReasonInput');
-        if (reasonInput) reasonInput.value = '';
+        const reasonSelect = document.getElementById('cancelReasonSelect');
+        if (reasonSelect) reasonSelect.value = '';
+        const noteWrap = document.getElementById('cancelReasonNoteWrap');
+        if (noteWrap) noteWrap.style.display = 'none';
+        const noteInput = document.getElementById('cancelReasonNoteInput');
+        if (noteInput) noteInput.value = '';
         document.getElementById('modalCancelOrder')?.classList.add('open');
     }
 
@@ -11426,13 +11646,23 @@ class PosApp {
         if (!this.targetCancelOrder) return;
         const btn = document.getElementById('btnConfirmCancelOrder');
 
-        // Requirement 13: Reason required (at least 5 characters)
-        const reason = document.getElementById('cancelReasonInput')?.value.trim();
-        if (!reason || reason.length < 5) {
-            alert(I18nManager.t('cancelReasonRequired') || 'Cancellation reason is required and must be at least 5 characters.');
-            document.getElementById('cancelReasonInput')?.focus();
+        const reasonSelect = document.getElementById('cancelReasonSelect');
+        const reasonCode = reasonSelect ? reasonSelect.value : '';
+        if (!reasonCode) {
+            alert(I18nManager.t('cancelReasonSelectRequired') || 'Please select a cancellation reason.');
+            reasonSelect?.focus();
             return;
         }
+
+        const note = document.getElementById('cancelReasonNoteInput')?.value.trim() || '';
+        if (reasonCode === 'other' && (!note || note.length < 3)) {
+            alert(I18nManager.t('cancelReasonOtherNoteRequired') || 'A typed explanation note is required when choosing Other.');
+            document.getElementById('cancelReasonNoteInput')?.focus();
+            return;
+        }
+
+        const selectedOptionText = reasonSelect.options[reasonSelect.selectedIndex]?.text || reasonCode;
+        const fullReason = (reasonCode === 'other') ? `Other: ${note}` : (note ? `${selectedOptionText} (${note})` : selectedOptionText);
 
         // Physical Manager PIN authorization on screen
         document.getElementById('modalCancelOrder')?.classList.remove('open');
@@ -11444,9 +11674,11 @@ class PosApp {
                     const res = await PosApi.cancelOrder(
                         this.targetCancelOrder.id,
                         this.targetCancelOrder.order_number,
-                        reason,
+                        fullReason,
                         mgr.username,
-                        mgr.pin
+                        mgr.pin,
+                        reasonCode,
+                        note
                     );
                     if (res && res.success) {
                         const successMsg = I18nManager.t('orderCancelledSuccess') || `Order #${this.targetCancelOrder.order_number} cancelled and product stock returned!`;
@@ -15051,6 +15283,26 @@ class PosApp {
         try {
             const todayStr = (new Date()).toISOString().substring(0, 10);
             const res = await PosApi.call('get_open_shifts', { date: todayStr });
+            this.unfinishedOrdersCount = parseInt(res?.unfinished_orders_count ?? 0, 10);
+
+            // Update Unfinished Orders Warning Banner (Proposal 5: both fast-close and standard close)
+            const unfAlert = document.getElementById('endDayUnfinishedOrdersAlert');
+            const unfText = document.getElementById('endDayUnfinishedOrdersText');
+            const chkUnf = document.getElementById('chkConfirmCloseWithUnfinished');
+            if (chkUnf) chkUnf.checked = false;
+
+            if (unfAlert) {
+                if (this.unfinishedOrdersCount > 0) {
+                    unfAlert.style.display = 'block';
+                    if (unfText) {
+                        unfText.innerHTML = isKm 
+                            ? `បច្ចុប្បន្នមានការបញ្ជាទិញចំនួន <strong>${this.unfinishedOrdersCount}</strong> មិនទាន់បញ្ចប់នៅឡើយ (កំពុងរង់ចាំ កំពុងលាង ឬកំពុងដំណើរការ)។ ការបិទបញ្ជីថ្ងៃនឹងមិនលុបចោលការបញ្ជាទិញទាំងនេះទេ ប៉ុន្តែលោកអ្នកត្រូវតែទទួលស្គាល់មុនពេលបិទបញ្ជី។`
+                            : `There are currently <strong>${this.unfinishedOrdersCount}</strong> active unfinished order(s) (waiting, washing, or in progress). Closing the day does not cancel these orders, but you must confirm acknowledgment before proceeding.`;
+                    }
+                } else {
+                    unfAlert.style.display = 'none';
+                }
+            }
             const curRole = (this.currentUser?.role || '').toLowerCase();
             const isManagerOrOwner = ['owner', 'admin', 'manager', 'system_admin'].includes(curRole);
             const curUserId = this.currentUser?.id;
@@ -15158,6 +15410,17 @@ class PosApp {
             return await this.handleFastCloseDaySubmit();
         }
 
+        if (this.unfinishedOrdersCount > 0) {
+            const chk = document.getElementById('chkConfirmCloseWithUnfinished');
+            if (!chk || !chk.checked) {
+                const warnMsg = (window.I18nManager && typeof window.I18nManager.t === 'function' && window.I18nManager.getLang() === 'km')
+                    ? 'សូមគូសធីកប្រអប់បញ្ជាក់ដើម្បីបន្តការបិទបញ្ជីថ្ងៃ ទោះបីជានៅមានការបញ្ជាទិញមិនទាន់បញ្ចប់ក៏ដោយ'
+                    : 'Please check the confirmation box to confirm closing the day despite unfinished orders.';
+                alert(warnMsg);
+                return;
+            }
+        }
+
         const pin = document.getElementById('endDayPin')?.value.trim() || '';
         const notes = document.getElementById('endDayNotes')?.value.trim() || '';
         const username = this.currentUser?.username || '';
@@ -15207,6 +15470,17 @@ class PosApp {
     }
 
     static async handleFastCloseDaySubmit() {
+        if (this.unfinishedOrdersCount > 0) {
+            const chk = document.getElementById('chkConfirmCloseWithUnfinished');
+            if (!chk || !chk.checked) {
+                const warnMsg = (window.I18nManager && typeof window.I18nManager.t === 'function' && window.I18nManager.getLang() === 'km')
+                    ? 'សូមគូសធីកប្រអប់បញ្ជាក់ដើម្បីបន្តការបិទបញ្ជីថ្ងៃ ទោះបីជានៅមានការបញ្ជាទិញមិនទាន់បញ្ចប់ក៏ដោយ'
+                    : 'Please check the confirmation box to confirm closing the day despite unfinished orders.';
+                alert(warnMsg);
+                return;
+            }
+        }
+
         const shiftId = this.fastCloseShiftId || (this.activeShift?.id) || 0;
         const countUsd = parseFloat(document.getElementById('fastCloseCountUsd')?.value || 0);
         const countKhr = parseInt(document.getElementById('fastCloseCountKhr')?.value || 0);
@@ -16080,6 +16354,8 @@ class PosApp {
         // 2. Update cart wait time row
         const cartWaitRow = document.getElementById('cartWaitTimeRow');
         const cartWaitBadge = document.getElementById('cartWaitTimeBadge');
+        const cartLongWaitBanner = document.getElementById('cartLongWaitBanner');
+        const cartLongWaitMins = document.getElementById('cartLongWaitMins');
         const hasServicesInCart = this.cart.some(it => it.type === 'service');
 
         if (cartWaitRow && cartWaitBadge && waitData.cart_wait && hasServicesInCart) {
@@ -16088,23 +16364,175 @@ class PosApp {
             cartWaitBadge.innerHTML = `<i class="fa-regular fa-clock"></i> ${PosApp.escapeHtml(txt)}`;
             cartWaitRow.style.display = 'flex';
 
-            // 3. Over 45 min warning prompt (Requirement 2)
-            if (cWait.is_over_45) {
-                const cartKey = this.getCartFingerprint();
-                if (this._dismissedOver45Key !== cartKey) {
-                    this.openLongWaitWarning(cWait.wait_minutes || cWait.total_wait_minutes || 45);
-                }
+            // 3. Long wait notice banner in cart (Proposal 1 & 2: Compare only queue wait, show only queue wait, non-blocking banner)
+            const isOver = !!(cWait.is_over_threshold ?? cWait.is_over_45);
+            const queueMins = cWait.queue_wait_minutes ?? cWait.wait_minutes;
+            if (isOver && !this.isLongWaitBannerDismissed && cartLongWaitBanner) {
+                if (cartLongWaitMins) cartLongWaitMins.textContent = `${queueMins} min`;
+                cartLongWaitBanner.style.display = 'flex';
+            } else if (cartLongWaitBanner) {
+                cartLongWaitBanner.style.display = 'none';
             }
-        } else if (cartWaitRow) {
-            cartWaitRow.style.display = 'none';
+        } else {
+            if (cartWaitRow) cartWaitRow.style.display = 'none';
+            if (cartLongWaitBanner) cartLongWaitBanner.style.display = 'none';
         }
     }
 
+    static dismissLongWaitBanner() {
+        this.isLongWaitBannerDismissed = true;
+        const banner = document.getElementById('cartLongWaitBanner');
+        if (banner) banner.style.display = 'none';
+    }
+
     static openLongWaitWarning(waitMins) {
+        // Obsolete blocking modal suppressed in favor of non-blocking cart banner
         const modal = document.getElementById('modalLongWaitWarning');
         const span = document.getElementById('longWaitMinsText');
         if (span) span.textContent = `${waitMins} min`;
-        if (modal) modal.classList.add('open');
+    }
+
+    // ========================================================
+    // STALE ORDERS REVIEW (Proposal 4)
+    // ========================================================
+    static async checkStaleOrders() {
+        const banner = document.getElementById('staleOrdersQueueBanner');
+        const textEl = document.getElementById('staleOrdersQueueText');
+        if (!banner) return;
+        try {
+            const res = await PosApi.call('get_stale_orders');
+            const stale = res?.stale_orders || [];
+            const count = res?.count ?? stale.length;
+            const isKm = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km');
+            if (count > 0) {
+                if (textEl) {
+                    textEl.textContent = isKm
+                        ? `មានការបញ្ជាទិញរង់ចាំចាស់ចំនួន ${count} ពីថ្ងៃមុនមិនទាន់បានចូលបន្ទប់លាងទេ។`
+                        : `There are ${count} old waiting order(s) from previous days not in a bay.`;
+                }
+                banner.style.display = 'flex';
+            } else {
+                banner.style.display = 'none';
+            }
+        } catch (e) {
+            console.warn('Failed to check stale orders:', e);
+            banner.style.display = 'none';
+        }
+    }
+
+    static async openStaleOrdersModal() {
+        const modal = document.getElementById('modalStaleOrdersReview');
+        const container = document.getElementById('staleOrdersListContainer');
+        if (!modal) return;
+        modal.classList.add('open');
+        if (container) {
+            container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-muted);"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading old orders...</div>';
+        }
+        try {
+            const res = await PosApi.call('get_stale_orders');
+            const stale = res?.stale_orders || [];
+            if (!container) return;
+            if (stale.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-muted);"><i class="fa-solid fa-check-circle text-success mr-1"></i> No old waiting orders found.</div>';
+                return;
+            }
+            const isKm = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km');
+            let html = '';
+            stale.forEach(ord => {
+                const isPaid = (ord.payment_status === 'paid');
+                const canComplete = !!ord.can_complete;
+                const statusBadge = isPaid 
+                    ? '<span class="badge badge-success" style="background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Paid ($' + parseFloat(ord.total_usd || 0).toFixed(2) + ')</span>'
+                    : '<span class="badge badge-warning" style="background: #fffbeb; color: #92400e; border: 1px solid #fde68a; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Unpaid ($' + parseFloat(ord.total_usd || 0).toFixed(2) + ')</span>';
+
+                const completeBtn = canComplete
+                    ? `<button type="button" class="btn btn-sm btn-success" style="font-weight: 700;" onclick="PosApp.completeStaleOrderPrompt(${ord.id}, '${PosApp.escapeHtml(ord.order_number)}')">
+                        <i class="fa-solid fa-check mr-1"></i> ${isKm ? 'សម្គាល់ថាបានបញ្ចប់' : 'Mark Complete'}
+                       </button>`
+                    : `<button type="button" class="btn btn-sm btn-outline" disabled title="${isKm ? 'អាចបញ្ចប់បានតែការបញ្ជាទិញដែលបានបង់ប្រាក់រួចប៉ុណ្ណោះ' : 'Only paid orders can be marked complete'}" style="opacity: 0.5; font-size: 0.75rem;">
+                        <i class="fa-solid fa-lock mr-1"></i> ${isKm ? 'មិនទាន់បង់ប្រាក់ (Unpaid)' : 'Unpaid (Cancel only)'}
+                       </button>`;
+
+                html += `
+                    <div class="stale-order-row">
+                        <div class="stale-order-info">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px;">
+                                <strong style="color: var(--text-main); font-size: 0.9rem;">#${PosApp.escapeHtml(ord.order_number)}</strong>
+                                ${statusBadge}
+                                <span style="font-size: 0.75rem; color: var(--text-muted);"><i class="fa-regular fa-clock mr-1"></i>${PosApp.escapeHtml(ord.created_at)}</span>
+                            </div>
+                            <div style="font-size: 0.82rem; color: var(--text-main);">
+                                <i class="fa-solid fa-car mr-1 text-muted"></i> <strong>${PosApp.escapeHtml(ord.plate_number || 'No Plate')}</strong>
+                                • ${PosApp.escapeHtml(ord.customer_name || 'Guest')}
+                                • <span style="color: var(--text-muted);">${PosApp.escapeHtml(ord.service_names || 'Wash Service')}</span>
+                            </div>
+                        </div>
+                        <div class="stale-order-actions">
+                            <button type="button" class="btn btn-sm btn-outline-danger" style="font-weight: 700;" onclick="PosApp.cancelStaleOrderPrompt(${ord.id}, '${PosApp.escapeHtml(ord.order_number)}')">
+                                <i class="fa-solid fa-ban mr-1"></i> ${isKm ? 'បោះបង់ (មានមូលហេតុ)' : 'Cancel with reason'}
+                            </button>
+                            ${completeBtn}
+                        </div>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        } catch (e) {
+            console.error('Error loading stale orders for modal:', e);
+            if (container) {
+                container.innerHTML = `<div class="alert alert-danger" style="padding: 0.75rem;">${PosApp.escapeHtml(e.message || 'Failed to load stale orders')}</div>`;
+            }
+        }
+    }
+
+    static async cancelStaleOrderPrompt(orderId, orderNum) {
+        const isKm = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km');
+        const reason = prompt(isKm ? `សូមបញ្ចូលមូលហេតុនៃការបោះបង់ការបញ្ជាទិញ #${orderNum}៖` : `Enter cancellation reason for order #${orderNum}:`);
+        if (reason === null) return;
+        const cleanReason = (reason || '').trim();
+        if (cleanReason.length < 3) {
+            alert(isKm ? 'សូមបញ្ចូលមូលហេតុយ៉ាងតិច ៣ តួអក្សរ' : 'A written cancellation reason is required (at least 3 characters).');
+            return;
+        }
+        try {
+            const res = await PosApi.call('cancel_order', { order_id: orderId, reason: cleanReason });
+            if (res && res.success) {
+                alert(isKm ? `ការបញ្ជាទិញ #${orderNum} ត្រូវបានបោះបង់ដោយជោគជ័យ។` : `Order #${orderNum} cancelled successfully.`);
+                await this.openStaleOrdersModal();
+                await this.renderJobQueue();
+            } else {
+                alert(res?.error || res?.message || 'Failed to cancel order.');
+            }
+        } catch (e) {
+            alert(e.message || 'Failed to cancel order.');
+        }
+    }
+
+    static async completeStaleOrderPrompt(orderId, orderNum) {
+        const isKm = (typeof I18nManager !== 'undefined' && I18nManager.getLang() === 'km');
+        const pin = prompt(isKm ? `សូមបញ្ចូលលេខកូដសម្ងាត់អ្នកគ្រប់គ្រង (Manager PIN) ដើម្បីបញ្ចប់ #${orderNum}៖` : `Enter Manager PIN to mark order #${orderNum} as complete:`);
+        if (pin === null) return;
+        const cleanPin = (pin || '').trim();
+        if (!cleanPin) {
+            alert(isKm ? 'លេខកូដសម្ងាត់អ្នកគ្រប់គ្រងគឺចាំបាច់' : 'Manager PIN is required.');
+            return;
+        }
+        try {
+            const res = await PosApi.call('complete_stale_order', {
+                order_id: orderId,
+                manager_pin: cleanPin,
+                manager_username: this.currentUser?.username || ''
+            });
+            if (res && res.success) {
+                alert(isKm ? `ការបញ្ជាទិញ #${orderNum} ត្រូវបានសម្គាល់ថាបានបញ្ចប់ដោយជោគជ័យ។` : `Order #${orderNum} marked complete successfully.`);
+                await this.openStaleOrdersModal();
+                await this.renderJobQueue();
+            } else {
+                alert(res?.error || res?.message || 'Failed to complete stale order.');
+            }
+        } catch (e) {
+            alert(e.message || 'Failed to complete stale order.');
+        }
     }
 
     // ========================================================

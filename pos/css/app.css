@@ -1071,6 +1071,32 @@ body[data-theme="dark"] .test-mode-badge {
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--border);
   animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
+}
+
+.modal-content::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+}
+
+.modal-content:hover::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.5);
+}
+
+.modal-content::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 @keyframes modalPop {
@@ -8815,25 +8841,35 @@ body {
   scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
 }
 
-.saved-cust-list-wrap::-webkit-scrollbar {
+.saved-cust-list-wrap::-webkit-scrollbar,
+.select-cust-list-wrap::-webkit-scrollbar,
+#savedCustListWrap::-webkit-scrollbar {
   width: 5px;
 }
 
-.saved-cust-list-wrap::-webkit-scrollbar-track {
+.saved-cust-list-wrap::-webkit-scrollbar-track,
+.select-cust-list-wrap::-webkit-scrollbar-track,
+#savedCustListWrap::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.saved-cust-list-wrap::-webkit-scrollbar-thumb {
+.saved-cust-list-wrap::-webkit-scrollbar-thumb,
+.select-cust-list-wrap::-webkit-scrollbar-thumb,
+#savedCustListWrap::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.25);
   border-radius: 10px;
   transition: background 0.2s ease;
 }
 
-.saved-cust-list-wrap:hover::-webkit-scrollbar-thumb {
+.saved-cust-list-wrap:hover::-webkit-scrollbar-thumb,
+.select-cust-list-wrap:hover::-webkit-scrollbar-thumb,
+#savedCustListWrap:hover::-webkit-scrollbar-thumb {
   background: rgba(100, 116, 139, 0.5);
 }
 
-.saved-cust-list-wrap::-webkit-scrollbar-button {
+.saved-cust-list-wrap::-webkit-scrollbar-button,
+.select-cust-list-wrap::-webkit-scrollbar-button,
+#savedCustListWrap::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
@@ -21125,6 +21161,116 @@ select.modal-appt-control option {
   background: #0f172a !important;
 }
 
+/* GOTPOS Usable Loyalty Points Box (in Financial Summary just above Sub Total) */
+#cartLoyaltyBox,
+.gotpos-loyalty-box {
+  display: none !important;
+}
+
+#cartLoyaltyBox.is-active,
+.gotpos-loyalty-box.is-active {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  background: var(--gotpos-primary-subtle, #fff8f5) !important;
+  border: 1px dashed var(--gotpos-primary-border, #ffcaa6) !important;
+  border-radius: 8px !important;
+  padding: 8px 12px !important;
+  margin-bottom: 8px !important;
+  transition: all 0.2s ease !important;
+}
+
+#cartLoyaltyBox.is-active.has-applied,
+.gotpos-loyalty-box.is-active.has-applied {
+  background: #ecfdf5 !important;
+  border-color: #6ee7b7 !important;
+}
+
+[data-theme="dark"] #cartLoyaltyBox.is-active,
+[data-theme="dark"] .gotpos-loyalty-box.is-active {
+  background: rgba(234, 88, 12, 0.12) !important;
+  border-color: rgba(234, 88, 12, 0.35) !important;
+}
+
+[data-theme="dark"] #cartLoyaltyBox.is-active.has-applied,
+[data-theme="dark"] .gotpos-loyalty-box.is-active.has-applied {
+  background: rgba(5, 150, 105, 0.15) !important;
+  border-color: rgba(5, 150, 105, 0.4) !important;
+}
+
+.gotpos-loyalty-info {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: var(--gotpos-text-main, #1e293b) !important;
+}
+
+[data-theme="dark"] .gotpos-loyalty-info {
+  color: #f8fafc !important;
+}
+
+.gotpos-loyalty-info .gotpos-loyalty-icon {
+  font-size: 15px !important;
+  color: #f59e0b !important;
+}
+
+.btn-gotpos-loyalty-action {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  padding: 4px 14px !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  border: 1px solid var(--gotpos-primary, #ea580c) !important;
+  background: var(--gotpos-primary, #ea580c) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease !important;
+}
+
+.btn-gotpos-loyalty-action:hover {
+  opacity: 0.9 !important;
+  transform: translateY(-1px) !important;
+}
+
+.btn-gotpos-loyalty-action.is-remove {
+  background: transparent !important;
+  border-color: #ef4444 !important;
+  color: #ef4444 !important;
+}
+
+.btn-gotpos-loyalty-action.is-remove:hover {
+  background: #fee2e2 !important;
+  color: #dc2626 !important;
+}
+
+[data-theme="dark"] .btn-gotpos-loyalty-action.is-remove:hover {
+  background: rgba(220, 38, 38, 0.25) !important;
+  color: #fca5a5 !important;
+}
+
+/* Points discount summary row */
+#cartPointsDiscountRow,
+.gotpos-summary-row.points-discount-row {
+  display: none !important;
+}
+
+#cartPointsDiscountRow.is-active,
+.gotpos-summary-row.points-discount-row.is-active {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  font-size: 13px !important;
+  color: #dc2626 !important;
+  font-weight: 700 !important;
+  padding: 2px 0 !important;
+}
+
+[data-theme="dark"] #cartPointsDiscountRow.is-active,
+[data-theme="dark"] .gotpos-summary-row.points-discount-row.is-active {
+  color: #f87171 !important;
+}
+
 .gotpos-summary-row {
   display: flex !important;
   justify-content: space-between !important;
@@ -23042,6 +23188,13 @@ body {
   background: #f8fafc !important;
   border-bottom: 1px solid var(--border, #e2e8f0) !important;
   overflow-x: auto !important;
+  scrollbar-width: none !important;
+}
+
+.select-cust-tabs-row::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .cust-tab-btn {
@@ -23096,6 +23249,38 @@ body {
   overflow-y: auto !important;
   padding: 0.5rem 1.25rem 1rem 1.25rem !important;
   background: var(--bg-surface, #ffffff) !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(148, 163, 184, 0.3) transparent !important;
+}
+
+.select-cust-list-wrap::-webkit-scrollbar,
+#savedCustListWrap::-webkit-scrollbar {
+  width: 5px !important;
+  height: 5px !important;
+}
+
+.select-cust-list-wrap::-webkit-scrollbar-track,
+#savedCustListWrap::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.select-cust-list-wrap::-webkit-scrollbar-thumb,
+#savedCustListWrap::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25) !important;
+  border-radius: 10px !important;
+  transition: background 0.2s ease !important;
+}
+
+.select-cust-list-wrap:hover::-webkit-scrollbar-thumb,
+#savedCustListWrap:hover::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.5) !important;
+}
+
+.select-cust-list-wrap::-webkit-scrollbar-button,
+#savedCustListWrap::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .select-cust-list-wrap .saved-cust-card {
@@ -23164,6 +23349,22 @@ body {
 
 [data-theme="dark"] .select-cust-list-wrap {
   background: #141d33 !important;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent !important;
+}
+
+[data-theme="dark"] .select-cust-list-wrap::-webkit-scrollbar-track,
+[data-theme="dark"] #savedCustListWrap::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+[data-theme="dark"] .select-cust-list-wrap::-webkit-scrollbar-thumb,
+[data-theme="dark"] #savedCustListWrap::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2) !important;
+}
+
+[data-theme="dark"] .select-cust-list-wrap:hover::-webkit-scrollbar-thumb,
+[data-theme="dark"] #savedCustListWrap:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.35) !important;
 }
 
 [data-theme="dark"] .select-cust-list-wrap .saved-cust-card {
@@ -24350,6 +24551,57 @@ body.pos-vk-dragging * {
   color: #ef4444;
   background: rgba(239, 68, 68, 0.1);
 }
+
+/* Long Wait Cart Banner */
+.cart-long-wait-banner {
+  animation: fadeInDown 0.2s ease-out;
+}
+
+[data-theme="dark"] .cart-long-wait-banner {
+  background: rgba(245, 158, 11, 0.15) !important;
+  border-color: rgba(245, 158, 11, 0.35) !important;
+  color: #fbbf24 !important;
+}
+
+[data-theme="dark"] .cart-long-wait-banner #cartLongWaitMins {
+  color: #f59e0b !important;
+}
+
+[data-theme="dark"] .cart-long-wait-banner .btn-close-banner {
+  color: #fbbf24 !important;
+}
+
+/* Stale Orders Review Modal */
+.stale-order-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+  background: var(--bg-card);
+  gap: 12px;
+}
+
+.stale-order-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.stale-order-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+[data-theme="dark"] #endDayUnfinishedOrdersAlert {
+  background: rgba(249, 115, 22, 0.15) !important;
+  border-color: rgba(249, 115, 22, 0.35) !important;
+  color: #fb923c !important;
+}
+
 
 
 

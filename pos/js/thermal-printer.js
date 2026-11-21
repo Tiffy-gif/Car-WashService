@@ -604,8 +604,17 @@ class PosThermalPrinter {
         y += Math.round(26 * spacingMul);
 
         const showDiscount = isSettingOn(settings.receipt_show_discount, true);
-        if (showDiscount && order.discount_usd > 0) {
-            this.drawTwoColumns(ctx, getLbl('discount', 'បញ្ចុះតម្លៃ៖', 'Discount:', 'បញ្ចុះតម្លៃ / Discount:'), `-$${parseFloat(order.discount_usd).toFixed(2)}`, margin, width - margin, y);
+        const totalDiscount = parseFloat(order.discount_usd || 0);
+        const ptsRedeemed = parseInt(order.points_redeemed || 0);
+        const ptsDiscount = parseFloat(order.points_discount_usd || 0);
+        const manualDiscount = Math.max(0, totalDiscount - ptsDiscount);
+
+        if (showDiscount && manualDiscount > 0) {
+            this.drawTwoColumns(ctx, getLbl('discount', 'បញ្ចុះតម្លៃ៖', 'Discount:', 'បញ្ចុះតម្លៃ / Discount:'), `-$${manualDiscount.toFixed(2)}`, margin, width - margin, y);
+            y += Math.round(26 * spacingMul);
+        }
+        if (ptsRedeemed > 0 && ptsDiscount > 0) {
+            this.drawTwoColumns(ctx, getLbl('pointsRedeemed', `ពិន្ទុ (${ptsRedeemed} pts)៖`, `Points (${ptsRedeemed} pts):`, `ពិន្ទុ / Points (${ptsRedeemed} pts):`), `-$${ptsDiscount.toFixed(2)}`, margin, width - margin, y);
             y += Math.round(26 * spacingMul);
         }
 
@@ -1596,12 +1605,30 @@ class PosThermalPrinter {
     }
 
     /**
+     * Helper to open secure slip browser window using a 2-minute one-time print link
+     */
+    static async openSecureSlipWindow(slipType, slipRef) {
+        try {
+            if (typeof PosApi !== 'undefined' && PosApi.getSlipPrintToken) {
+                const res = await PosApi.getSlipPrintToken(slipType, slipRef);
+                if (res && res.success && res.url) {
+                    window.open(`../${res.url}`, '_blank', 'width=420,height=600');
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to obtain one-time print token, falling back to direct URL:', e);
+        }
+        window.open(`../views/cashier/slip.php?type=${encodeURIComponent(slipType)}&id=${encodeURIComponent(slipRef)}&autoprint=1`, '_blank', 'width=420,height=600');
+    }
+
+    /**
      * Dispatch Printing for Open Float Slip
      */
     static async printOpenShiftSlip(shiftData) {
         const config = PosConfig.get();
         if (!config.printerDirectEnabled) {
-            window.open(`../views/cashier/slip.php?type=open&id=${shiftData.shift_id}&autoprint=1`, '_blank', 'width=420,height=600');
+            await this.openSecureSlipWindow('open', shiftData.shift_id);
             return { success: true, fallback: true };
         }
 
@@ -1611,7 +1638,7 @@ class PosThermalPrinter {
             return await this.sendPayload(bytes);
         } catch (err) {
             console.warn('Direct print open shift slip failed, falling back to browser window:', err);
-            window.open(`../views/cashier/slip.php?type=open&id=${shiftData.shift_id}&autoprint=1`, '_blank', 'width=420,height=600');
+            await this.openSecureSlipWindow('open', shiftData.shift_id);
             return { success: false, fallback: true, error: err.message };
         }
     }
@@ -1622,7 +1649,7 @@ class PosThermalPrinter {
     static async printEndShiftSlip(shiftData) {
         const config = PosConfig.get();
         if (!config.printerDirectEnabled) {
-            window.open(`../views/cashier/slip.php?type=end&id=${shiftData.shift_id}&autoprint=1`, '_blank', 'width=420,height=600');
+            await this.openSecureSlipWindow('end', shiftData.shift_id);
             return { success: true, fallback: true };
         }
 
@@ -1632,7 +1659,7 @@ class PosThermalPrinter {
             return await this.sendPayload(bytes);
         } catch (err) {
             console.warn('Direct print end shift slip failed, falling back to browser window:', err);
-            window.open(`../views/cashier/slip.php?type=end&id=${shiftData.shift_id}&autoprint=1`, '_blank', 'width=420,height=600');
+            await this.openSecureSlipWindow('end', shiftData.shift_id);
             return { success: false, fallback: true, error: err.message };
         }
     }
@@ -1644,7 +1671,7 @@ class PosThermalPrinter {
         const config = PosConfig.get();
         const closeRef = closeData.close_id || closeData.z_report_number || closeData.close_date;
         if (!config.printerDirectEnabled) {
-            window.open(`../views/cashier/slip.php?type=close_day&id=${closeRef}&autoprint=1`, '_blank', 'width=420,height=600');
+            await this.openSecureSlipWindow('close_day', closeRef);
             return { success: true, fallback: true };
         }
 
@@ -1654,7 +1681,7 @@ class PosThermalPrinter {
             return await this.sendPayload(bytes);
         } catch (err) {
             console.warn('Direct print close day slip failed, falling back to browser window:', err);
-            window.open(`../views/cashier/slip.php?type=close_day&id=${closeRef}&autoprint=1`, '_blank', 'width=420,height=600');
+            await this.openSecureSlipWindow('close_day', closeRef);
             return { success: false, fallback: true, error: err.message };
         }
     }

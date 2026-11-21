@@ -605,7 +605,7 @@
                         <div class="gotpos-cust-details">
                             <h6 class="gotpos-cust-name" id="gotposCustNameDisplay">Walk-in Guest</h6>
                             <p class="gotpos-cust-tier" id="gotposCustTierDisplay">Standard Guest</p>
-                            <div class="gotpos-cust-loyalty-row" id="gotposCustLoyaltyRow" style="display: none;">
+                            <div class="gotpos-cust-loyalty-row" id="gotposCustLoyaltyRow" style="display: none !important;">
                                 <i class="fa-solid fa-coins text-amber"></i>
                                 <span class="gotpos-cust-loyalty-val" id="gotposCustLoyaltyVal">0 pts = $0.00</span>
                             </div>
@@ -789,6 +789,23 @@
                             <span class="cart-wait-badge" id="cartWaitTimeBadge">Wait about 25 min</span>
                         </div>
 
+                        <!-- Long Wait Cart Banner (Proposal 2: Non-blocking banner showing pure queue wait with Book Appointment button) -->
+                        <div class="cart-long-wait-banner" id="cartLongWaitBanner" style="display: none; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 8px 10px; margin: 8px 0; font-size: 0.82rem; color: #92400e; align-items: center; justify-content: space-between; gap: 8px;">
+                            <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;">
+                                <i class="fa-solid fa-clock-rotate-left" style="color: #d97706; font-size: 1rem; flex-shrink: 0;"></i>
+                                <div style="line-height: 1.25;">
+                                    <span style="font-weight: 700;" data-i18n="waitIsLongNotice">Queue wait is long:</span>
+                                    <span id="cartLongWaitMins" style="font-weight: 800; color: #b45309;">45 min</span>.
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                                <button type="button" class="btn btn-sm btn-primary" id="btnCartBookAppointment" style="padding: 3px 8px; font-size: 0.75rem; font-weight: 700; white-space: nowrap;">
+                                    <i class="fa-solid fa-calendar-plus mr-1"></i> <span data-i18n="bookAppointment">Book</span>
+                                </button>
+                                <button type="button" class="btn-close-banner" id="btnDismissLongWaitBanner" style="background: none; border: none; font-size: 1.1rem; color: #92400e; cursor: pointer; padding: 2px 5px; line-height: 1;" title="Dismiss">&times;</button>
+                            </div>
+                        </div>
+
                         <!-- GOTPOS Discount Box -->
                         <div class="gotpos-discount-box" id="gotposDiscountBox">
                             <div class="gotpos-discount-info">
@@ -807,6 +824,16 @@
 
                         <!-- GOTPOS Financial Summary Breakdown -->
                         <div class="gotpos-financial-summary">
+                            <!-- Loyalty Points Available Box (just above Sub Total in the financial summary) -->
+                            <div class="gotpos-loyalty-box" id="cartLoyaltyBox" style="display: none;">
+                                <div class="gotpos-loyalty-info">
+                                    <i class="fa-solid fa-coins text-amber gotpos-loyalty-icon"></i>
+                                    <span class="gotpos-loyalty-text" id="cartLoyaltyPointsText">0 pts = $0.00</span>
+                                </div>
+                                <button type="button" class="btn-gotpos-loyalty-action" id="btnCartLoyaltyAction" data-action="apply"
+                                    onclick="PosApp.toggleCartLoyaltyPoints()" data-i18n="apply">Apply</button>
+                            </div>
+
                             <div class="gotpos-summary-row">
                                 <span data-i18n="subtotal">Sub Total</span>
                                 <span id="cartSubtotalText">$0.00</span>
@@ -814,6 +841,10 @@
                             <div class="gotpos-summary-row discount-row" id="discountSummaryRow" style="display: none;">
                                 <span id="cartDiscountLabel">Discount</span>
                                 <span class="text-danger" id="cartDiscountText">-$0.00</span>
+                            </div>
+                            <div class="gotpos-summary-row points-discount-row" id="cartPointsDiscountRow" style="display: none;">
+                                <span id="cartPointsDiscountLabel" data-i18n="pointsDiscount">Points discount</span>
+                                <span class="text-danger" id="cartPointsDiscountText">-$0.00</span>
                             </div>
                             <div class="gotpos-summary-total">
                                 <span data-i18n="totalPayable">Total Payable</span>
@@ -997,6 +1028,18 @@
                     <span id="queueErrorText"></span>
                     <button type="button" class="btn btn-outline btn-sm" id="btnRetryQueue">
                         <i class="fa-solid fa-rotate"></i> <span data-i18n="retryBtn">ព្យាយាមម្តងទៀត</span>
+                    </button>
+                </div>
+
+                <!-- Stale Orders Alert Banner in Queue View (Proposal 4) -->
+                <div id="staleOrdersQueueBanner" class="alert alert-warning"
+                    style="display: none; margin-bottom: 1rem; justify-content: space-between; align-items: center; background: #fffbeb; border: 1px solid #fde68a; color: #92400e;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fa-solid fa-triangle-exclamation text-warning" style="font-size: 1.1rem;"></i>
+                        <span id="staleOrdersQueueText">There are old waiting orders from previous days.</span>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-warning" id="btnOpenStaleOrdersModal" style="font-weight: 700; white-space: nowrap;">
+                        <i class="fa-solid fa-list-check mr-1"></i> <span data-i18n="reviewOldOrders">Review Old Orders</span>
                     </button>
                 </div>
 
@@ -2390,12 +2433,30 @@
                     data-i18n="cancelOrderConfirmQuestion">
                     Are you sure you want to cancel this order? This action cannot be undone.
                 </p>
-                <div style="text-align: left; margin-bottom: 0.5rem;">
-                    <label
-                        style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Reason
-                        for Cancellation:</label>
-                    <input type="text" id="cancelReasonInput" class="form-control"
-                        placeholder="e.g. Customer changed mind, wrong vehicle...">
+                <div style="text-align: left; margin-bottom: 0.75rem;">
+                    <label for="cancelReasonSelect"
+                        style="font-size: 0.82rem; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 0.35rem;" data-i18n="cancelReasonLabel">Reason
+                        for Cancellation: *</label>
+                    <select id="cancelReasonSelect" class="form-control"
+                        style="width: 100%; padding: 0.55rem 0.75rem; border-radius: var(--radius-sm); font-size: 0.88rem; font-weight: 600; border: 1.5px solid var(--border); background: var(--bg-card); color: var(--text-main); margin-bottom: 0.5rem;">
+                        <option value="" disabled selected data-i18n="selectCancelReason">-- Select a Reason / ជ្រើសរើសមូលហេតុ --</option>
+                        <option value="customer_changed_mind" data-i18n="reasonCustomerChangedMind">Customer changed mind / អតិថិជនប្តូរចិត្ត</option>
+                        <option value="wrong_service_product" data-i18n="reasonWrongService">Wrong service or product selected / ជ្រើសរើសសេវាកម្ម ឬទំនិញខុស</option>
+                        <option value="wrong_vehicle_plate" data-i18n="reasonWrongPlate">Wrong vehicle / plate number / បញ្ចូលស្លាកលេខ ឬរថយន្តខុស</option>
+                        <option value="left_queue_wait_time" data-i18n="reasonLeftQueue">Left queue / Wait time too long / រង់ចាំយូរពេក / ចាកចេញពីជួរ</option>
+                        <option value="duplicate_order" data-i18n="reasonDuplicateOrder">Duplicate order created / បានបង្កើតការកុម្ម៉ង់ស្ទួន</option>
+                        <option value="vehicle_condition_issue" data-i18n="reasonVehicleIssue">Vehicle issue / Cannot service / រថយន្តមានបញ្ហា / មិនអាចផ្តល់សេវាបាន</option>
+                        <option value="payment_failed" data-i18n="reasonPaymentFailed">Payment failed / Declined / ការទូទាត់បរាជ័យ / ធនាគារឬកាតមិនដំណើរការ</option>
+                        <option value="other" data-i18n="reasonOther">Other (typed note required) / ផ្សេងៗ (តម្រូវឱ្យវាយបញ្ចូលមូលហេតុ)</option>
+                    </select>
+                    <div id="cancelReasonNoteWrap" style="display: none; margin-top: 0.5rem;">
+                        <label for="cancelReasonNoteInput"
+                            style="font-size: 0.78rem; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">
+                            <span data-i18n="cancelReasonNoteLabel">Explanation Note:</span> <span id="cancelReasonNoteReqMark" style="color: #ef4444;">*</span>
+                        </label>
+                        <input type="text" id="cancelReasonNoteInput" class="form-control"
+                            placeholder="Type reason explanation..." data-i18n-placeholder="cancelReasonNotePlaceholder">
+                    </div>
                 </div>
             </div>
             <div class="modal-footer" style="justify-content: space-between;">
@@ -3670,6 +3731,21 @@
                     </div>
                 </div>
 
+                <!-- Warning: Unfinished Orders Alert & Confirmation (Proposal 5) -->
+                <div id="endDayUnfinishedOrdersAlert" style="display: none; background: #fff7ed; border: 1px solid #fed7aa; border-radius: var(--radius-md); padding: 0.85rem; margin-bottom: 1rem;">
+                    <div style="font-weight: 800; color: #c2410c; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        <span data-i18n="endDayUnfinishedWarningTitle">ការព្រមាន៖ មានការបញ្ជាទិញមិនទាន់បញ្ចប់ (Unfinished Orders Warning)</span>
+                    </div>
+                    <div id="endDayUnfinishedOrdersText" style="font-size: 0.82rem; color: #9a3412; margin-bottom: 0.65rem; line-height: 1.4;">
+                        <!-- Injected dynamically -->
+                    </div>
+                    <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; font-size: 0.82rem; font-weight: 700; color: #7c2d12;">
+                        <input type="checkbox" id="chkConfirmCloseWithUnfinished" style="margin-top: 2px; width: 16px; height: 16px; cursor: pointer;">
+                        <span data-i18n="confirmCloseWithUnfinished">ខ្ញុំយល់ព្រមបន្តការបិទបញ្ជីថ្ងៃ ទោះបីជានៅមានការបញ្ជាទិញមិនទាន់បញ្ចប់ក៏ដោយ (I confirm closing the day despite unfinished orders)</span>
+                    </label>
+                </div>
+
                 <!-- Closing Notes -->
                 <div class="form-group" id="endDayNotesGroup" style="margin-bottom: 1rem;">
                     <label style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.3rem; display: block;" data-i18n="endDayNotes">កំណត់ចំណាំ (Closing Notes):</label>
@@ -4104,7 +4180,36 @@
         </div>
     </div>
 
-    <!-- Modal: Cart Item Price Change Prompt (Requirement 2) -->
+    <!-- Modal: Stale Orders Review (Proposal 4: Default action Cancel with reason; Paid-only Mark Complete with Manager PIN; No bulk) -->
+    <div class="modal-backdrop" id="modalStaleOrdersReview" style="z-index: 9992;">
+        <div class="modal-content" style="max-width: 680px; max-height: 85vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h3 style="display: flex; align-items: center; gap: 0.5rem; color: #b45309;">
+                    <i class="fa-solid fa-clock-rotate-left"></i>
+                    <span data-i18n="reviewStaleOrders">ពិនិត្យការបញ្ជាទិញចាស់ (Review Old Waiting Orders)</span>
+                </h3>
+                <button type="button" class="btn btn-outline btn-sm btn-icon" id="btnCloseStaleOrdersModal">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem;">
+                <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-md); padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.82rem; color: #92400e;">
+                    <i class="fa-solid fa-circle-info mr-1"></i>
+                    <span>
+                        These orders are waiting from previous days and are not in a bay. They are left out of current queue estimates. Unpaid orders can only be cancelled with a reason. Only already-paid orders can be marked complete (requires Manager PIN).
+                    </span>
+                </div>
+                <div id="staleOrdersListContainer">
+                    <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                        <i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading old orders...
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 0.75rem 1.25rem; justify-content: flex-end;">
+                <button type="button" class="btn btn-secondary" id="btnDoneStaleOrdersModal" data-i18n="close">Close</button>
+            </div>
+        </div>
+    </div>
     <div class="modal-backdrop" id="modalCartPriceChange">
         <div class="modal-content" style="max-width: 460px; text-align: center;">
             <div class="modal-header" style="justify-content: center; position: relative;">
