@@ -6,10 +6,12 @@ require_once dirname(__DIR__, 2) . '/core/Database.php';
 require_once dirname(__DIR__, 2) . '/core/Auth.php';
 require_once dirname(__DIR__, 2) . '/core/Language.php';
 require_once dirname(__DIR__, 2) . '/core/Helpers.php';
+require_once dirname(__DIR__, 2) . '/core/OrderCancellation.php';
 
 Auth::requirePermission('reports.view');
 $pageTitle = __('nav_reports');
 $pdo = Database::getInstance();
+$canViewProfit = Auth::canViewProfit();
 
 // Period Filter
 $period = $_GET['period'] ?? 'this_month';
@@ -566,6 +568,222 @@ $techReport = PerformanceAnalytics::getTechnicianEfficiency7Days($pdo);
 $patternReport = PerformanceAnalytics::getBottleneckAndIdlePatterns($pdo, $perfStartDate, $perfEndDate);
 $timecardList = TimecardManager::getTimecards($pdo, $perfStartDate, $perfEndDate);
 
+// 9. Cancelled Orders & Lost Revenue Analytics (Visible to Owner & Manager)
+$canViewCancelReport = in_array(Auth::getRole(), ['owner', 'manager'], true);
+$allCancelledOrders = [];
+$totalCancelledCount = 0;
+$totalLostRevenueUsd = 0.00;
+$totalLostRevenueKhr = 0;
+$cancelledByReason = [];
+
+if ($canViewCancelReport) {
+    $cancelDateWhere = "";
+    $cancelParams = [];
+
+    if ($period === 'today') {
+        $cancelDateWhere = "AND DATE(COALESCE(o.cancelled_at, o.created_at)) = CURDATE()";
+    } elseif ($period === 'this_week') {
+        $cancelDateWhere = "AND YEARWEEK(COALESCE(o.cancelled_at, o.created_at), 1) = YEARWEEK(CURDATE(), 1)";
+    } elseif ($period === 'this_month') {
+        $cancelDateWhere = "AND MONTH(COALESCE(o.cancelled_at, o.created_at)) = MONTH(CURDATE()) AND YEAR(COALESCE(o.cancelled_at, o.created_at)) = YEAR(CURDATE())";
+    } elseif ($period === 'this_year') {
+        $cancelDateWhere = "AND YEAR(COALESCE(o.cancelled_at, o.created_at)) = YEAR(CURDATE())";
+    } elseif ($period === 'custom' && $startDate && $endDate) {
+        $cancelDateWhere = "AND DATE(COALESCE(o.cancelled_at, o.created_at)) BETWEEN ? AND ?";
+        $cancelParams = [$startDate, $endDate];
+    }
+
+    $cancelWhere = $cancelDateWhere . $deviceWhere;
+
+    $hasCancelCodeCol = false;
+    try {
+        $pdo->query("SELECT cancel_reason_code FROM orders LIMIT 0");
+        $hasCancelCodeCol = true;
+    } catch (Throwable $e) {
+        $hasCancelCodeCol = false;
+    }
+
+    $cancelCodeSelect = $hasCancelCodeCol ? "o.cancel_reason_code" : "NULL as cancel_reason_code";
+
+    $cancelsSql = "
+        SELECT 
+            o.id,
+            o.order_number,
+            o.total_usd,
+            o.total_khr,
+            o.cancel_reason,
+            {$cancelCodeSelect},
+            o.cancelled_by_user_id,
+            o.cancel_approved_by_user_id,
+            o.cancelled_at,
+            o.created_at,
+            o.plate_number,
+            c.name as customer_name,
+            u1.full_name as canceller_name,
+            u1.username as canceller_username,
+            u1.role as canceller_role,
+            u2.full_name as approver_name,
+            u2.username as approver_username,
+            u2.role as approver_role,
+            dev.device_name,
+            dev.device_uid
+        FROM orders o
+        LEFT JOIN customers c ON o.customer_id = c.id
+        LEFT JOIN users u1 ON o.cancelled_by_user_id = u1.id
+        LEFT JOIN users u2 ON o.cancel_approved_by_user_id = u2.id
+        LEFT JOIN pos_devices dev ON o.pos_device_id = dev.id
+        WHERE o.status = 'cancelled' {$cancelWhere}
+        ORDER BY COALESCE(o.cancelled_at, o.created_at) DESC, o.id DESC
+    ";
+    $cancelStmt = $pdo->prepare($cancelsSql);
+    $cancelStmt->execute($cancelParams);
+    $allCancelledOrders = $cancelStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $totalCancelledCount = count($allCancelledOrders);
+    $curRate = get_exchange_rate();
+
+    foreach ($allCancelledOrders as &$cord) {
+        $amtUsd = (float)($cord['total_usd'] ?? 0);
+        $amtKhr = (int)($cord['total_khr'] ?? round($amtUsd * $curRate));
+        $totalLostRevenueUsd += $amtUsd;
+        $totalLostRevenueKhr += $amtKhr;
+
+        $cat = OrderCancellation::categorizeForReport($cord['cancel_reason_code'] ?? null, $cord['cancel_reason'] ?? '');
+        $cord['report_cat_key'] = $cat['group_key'];
+        $cord['report_cat_label'] = $cat['group_label'];
+
+        if (!isset($cancelledByReason[$cat['group_key']])) {
+            $cancelledByReason[$cat['group_key']] = [
+                'key' => $cat['group_key'],
+                'label' => $cat['group_label'],
+                'count' => 0,
+                'lost_usd' => 0.00,
+                'lost_khr' => 0
+            ];
+        }
+        $cancelledByReason[$cat['group_key']]['count']++;
+        $cancelledByReason[$cat['group_key']]['lost_usd'] += $amtUsd;
+        $cancelledByReason[$cat['group_key']]['lost_khr'] += $amtKhr;
+    }
+    unset($cord);
+}
+
+// CSV Export for Cash Movements (Redirect to dedicated view exporter)
+if (isset($_GET['export']) && $_GET['export'] === 'cash_movements') {
+    if (!in_array(Auth::getRole(), ['owner', 'manager'], true)) {
+        http_response_code(403);
+        die("Permission denied: Cash Movements export is restricted to Owner and Manager.");
+    }
+    $expParams = $_GET;
+    $expParams['view'] = 'cash_movements';
+    $expParams['export'] = 'csv';
+    header('Location: ?' . http_build_query($expParams));
+    exit;
+}
+
+// CSV Export for Cashier Sessions (Redirect to dedicated view exporter)
+if (isset($_GET['export']) && $_GET['export'] === 'cashier_sessions') {
+    if (!in_array(Auth::getRole(), ['owner', 'manager'], true)) {
+        http_response_code(403);
+        die("Permission denied: Cashier Sessions export is restricted to Owner and Manager.");
+    }
+    $expParams = $_GET;
+    $expParams['view'] = 'cashier_sessions';
+    $expParams['export'] = 'csv';
+    header('Location: ?' . http_build_query($expParams));
+    exit;
+}
+
+// CSV Export for Cancelled Orders & Lost Revenue
+if (isset($_GET['export']) && $_GET['export'] === 'cancellations') {
+    if (!in_array(Auth::getRole(), ['owner', 'manager'], true)) {
+        http_response_code(403);
+        die("Permission denied: Cancellation report is restricted to Owner and Manager.");
+    }
+    Auth::requirePermission('reports.export');
+    $filename = "CarWash_Cancellations_" . $period . "_" . date('Ymd_His') . ".csv";
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+
+    $out = fopen('php://output', 'w');
+    fwrite($out, "\xEF\xBB\xBF");
+
+    fputcsv($out, ['AQUAGLEAM CAR WASH - CANCELLED ORDERS & LOST REVENUE REPORT']);
+    fputcsv($out, [
+        'Period:', strtoupper(str_replace('_', ' ', $period)),
+        'Start Date:', $startDate,
+        'End Date:', $endDate,
+        'Device Filter:', $selectedDeviceName,
+        'Timezone:', 'Asia/Phnom_Penh (UTC+7)',
+        'Generated At:', date('Y-m-d H:i:s'),
+        'Generated By:', (Auth::getUserName() ?: Auth::getUsername()) . ' (' . ucfirst(Auth::getRole()) . ')'
+    ]);
+    fputcsv($out, []);
+
+    // Summary
+    fputcsv($out, ['--- CANCELLATION SUMMARY ---']);
+    fputcsv($out, ['Total Cancellations', $totalCancelledCount]);
+    fputcsv($out, ['Total Lost Revenue (USD)', number_format($totalLostRevenueUsd, 2)]);
+    fputcsv($out, ['Total Lost Revenue (KHR)', number_format($totalLostRevenueKhr)]);
+    fputcsv($out, []);
+
+    // Breakdown by Reason
+    fputcsv($out, ['--- BREAKDOWN BY REASON ---']);
+    fputcsv($out, ['Reason Category', 'Count', '% of Cancellations', 'Lost Revenue (USD)', 'Lost Revenue (KHR)']);
+    foreach ($cancelledByReason as $rGrp) {
+        $pct = ($totalCancelledCount > 0) ? round(($rGrp['count'] / $totalCancelledCount) * 100, 1) : 0;
+        fputcsv($out, [
+            $rGrp['label'],
+            $rGrp['count'],
+            $pct . '%',
+            number_format($rGrp['lost_usd'], 2),
+            number_format($rGrp['lost_khr'])
+        ]);
+    }
+    fputcsv($out, []);
+
+    // Detailed List
+    fputcsv($out, ['--- DETAILED CANCELLED ORDERS ---']);
+    fputcsv($out, [
+        'Order #',
+        'Date Time',
+        'Plate Number',
+        'Customer Name',
+        'Lost Revenue (USD)',
+        'Lost Revenue (KHR)',
+        'Reason Category',
+        'Reason Details / Note',
+        'Cancelled By',
+        'Approved By',
+        'Device'
+    ]);
+
+    foreach ($allCancelledOrders as $co) {
+        $cancellerStr = $co['canceller_name'] ? "{$co['canceller_name']} (@{$co['canceller_username']})" : 'Staff';
+        $approverStr = $co['approver_name'] ? "{$co['approver_name']} (@{$co['approver_username']})" : '-';
+        $devStr = $co['device_name'] ? "{$co['device_name']} ({$co['device_uid']})" : 'Back Office Web';
+        $cancelTime = $co['cancelled_at'] ?: $co['created_at'];
+
+        fputcsv($out, [
+            $co['order_number'],
+            $cancelTime,
+            $co['plate_number'] ?: 'N/A',
+            $co['customer_name'] ?: 'General Customer',
+            number_format((float)($co['total_usd'] ?? 0), 2),
+            number_format((int)($co['total_khr'] ?? 0)),
+            $co['report_cat_label'],
+            $co['cancel_reason'] ?: '-',
+            $cancellerStr,
+            $approverStr,
+            $devStr
+        ]);
+    }
+    fclose($out);
+    exit;
+}
+
 // CSV Export for Bay Utilization
 if (isset($_GET['export']) && $_GET['export'] === 'bay_utilization') {
     Auth::requirePermission('reports.export');
@@ -737,11 +955,13 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     fputcsv($out, ['  - Car Wash Services', number_format($washRevenue, 2), number_format((int)round($washRevenue * $curRate))]);
     fputcsv($out, ['  - Repair & Maintenance Labor', number_format($repairRevenue, 2), number_format((int)round($repairRevenue * $curRate))]);
     fputcsv($out, ['  - Products & Spare Parts Sales', number_format($productRevenue, 2), number_format((int)round($productRevenue * $curRate))]);
-    fputcsv($out, ['Cost of Goods Sold (COGS)', '-' . number_format($productCogs, 2), '-' . number_format((int)round($productCogs * $curRate))]);
-    fputcsv($out, ['Operating Expenses', '-' . number_format($totalExp, 2), '-' . number_format((int)round($totalExp * $curRate))]);
-    fputcsv($out, ['NET OPERATING PROFIT', number_format($netOperatingProfit, 2), number_format($netOperatingProfitKhr)]);
-    if ($hasMissingCogs) {
-        fputcsv($out, ['WARNING: Missing COGS Data', "{$missingCogsCount} sold items lack cost price (affecting $" . number_format($missingCogsSales, 2) . " in sales)", 'Profit may be overstated']);
+    if ($canViewProfit) {
+        fputcsv($out, ['Cost of Goods Sold (COGS)', '-' . number_format($productCogs, 2), '-' . number_format((int)round($productCogs * $curRate))]);
+        fputcsv($out, ['Operating Expenses', '-' . number_format($totalExp, 2), '-' . number_format((int)round($totalExp * $curRate))]);
+        fputcsv($out, ['NET OPERATING PROFIT', number_format($netOperatingProfit, 2), number_format($netOperatingProfitKhr)]);
+        if ($hasMissingCogs) {
+            fputcsv($out, ['WARNING: Missing COGS Data', "{$missingCogsCount} sold items lack cost price (affecting $" . number_format($missingCogsSales, 2) . " in sales)", 'Profit may be overstated']);
+        }
     }
     fputcsv($out, []);
 
@@ -764,18 +984,32 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 
     // Products & Spare Parts
     fputcsv($out, ['--- PRODUCTS & SPARE PARTS SALES ---']);
-    fputcsv($out, ['Item Name', 'Category', 'Brand', 'Units Sold', 'Total Sales (USD)', 'COGS Cost (USD)', 'Gross Profit (USD)']);
-    foreach ($topProducts as $tp) {
-        $catLabel = (Language::current() === 'km') ? $tp['category_name_km'] : $tp['category_name_en'];
-        fputcsv($out, [
-            $tp['name'],
-            $catLabel,
-            $tp['brand'],
-            $tp['total_qty'],
-            number_format((float)$tp['total_sales'], 2),
-            number_format((float)$tp['total_cost'], 2),
-            number_format((float)$tp['gross_profit'], 2)
-        ]);
+    if ($canViewProfit) {
+        fputcsv($out, ['Item Name', 'Category', 'Brand', 'Units Sold', 'Total Sales (USD)', 'COGS Cost (USD)', 'Gross Profit (USD)']);
+        foreach ($topProducts as $tp) {
+            $catLabel = (Language::current() === 'km') ? $tp['category_name_km'] : $tp['category_name_en'];
+            fputcsv($out, [
+                $tp['name'],
+                $catLabel,
+                $tp['brand'],
+                $tp['total_qty'],
+                number_format((float)$tp['total_sales'], 2),
+                number_format((float)$tp['total_cost'], 2),
+                number_format((float)$tp['gross_profit'], 2)
+            ]);
+        }
+    } else {
+        fputcsv($out, ['Item Name', 'Category', 'Brand', 'Units Sold', 'Total Sales (USD)']);
+        foreach ($topProducts as $tp) {
+            $catLabel = (Language::current() === 'km') ? $tp['category_name_km'] : $tp['category_name_en'];
+            fputcsv($out, [
+                $tp['name'],
+                $catLabel,
+                $tp['brand'],
+                $tp['total_qty'],
+                number_format((float)$tp['total_sales'], 2)
+            ]);
+        }
     }
     fputcsv($out, []);
 
@@ -1609,6 +1843,17 @@ include dirname(__DIR__) . '/layouts/header.php';
                 <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=timecards">
                     <i class="fa-solid fa-clock" style="color: #10b981; width: 16px;"></i> Staff Timecards (CSV)
                 </a>
+                <?php if (in_array(Auth::getRole(), ['owner', 'manager'], true)): ?>
+                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&device=<?= urlencode($selectedDevice) ?>&export=cancellations">
+                    <i class="fa-solid fa-ban" style="color: #dc2626; width: 16px;"></i> <?= htmlspecialchars(__('export_cancellations_csv', 'Cancelled Orders (CSV)')) ?>
+                </a>
+                <a href="?view=cash_movements&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&device=<?= urlencode($selectedDevice) ?>&export=csv">
+                    <i class="fa-solid fa-money-bill-transfer" style="color: #ea580c; width: 16px;"></i> <?= htmlspecialchars(__('export_cash_movements_csv', 'Cash Movements (CSV)')) ?>
+                </a>
+                <a href="?view=cashier_sessions&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=csv">
+                    <i class="fa-solid fa-user-clock" style="color: #2563eb; width: 16px;"></i> <?= htmlspecialchars(__('export_shifts_csv', 'Cashier Sessions (CSV)')) ?>
+                </a>
+                <?php endif; ?>
                 <?php endif; ?>
                 <button type="button" onclick="window.print(); toggleReportsActions();">
                     <i class="fa-solid fa-print" style="color: var(--primary); width: 16px;"></i> Print Report
@@ -1623,7 +1868,7 @@ include dirname(__DIR__) . '/layouts/header.php';
         </div>
     </div>
 
-    <?php if ($hasMissingCogs): ?>
+    <?php if ($canViewProfit && $hasMissingCogs): ?>
     <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid #f59e0b; border-radius: var(--radius-lg); padding: 14px 18px; margin-bottom: 20px; display: flex; align-items: center; gap: 14px; color: #b45309;">
         <i class="fa-solid fa-triangle-exclamation" style="font-size: 22px; flex-shrink: 0; color: #d97706;"></i>
         <div style="flex: 1;">
@@ -1664,6 +1909,7 @@ include dirname(__DIR__) . '/layouts/header.php';
             </div>
         </div>
 
+        <?php if ($canViewProfit): ?>
         <!-- Card 2: Cost of Goods Sold (COGS) -->
         <div class="kpi-card">
             <div class="kpi-card-top">
@@ -1734,10 +1980,67 @@ include dirname(__DIR__) . '/layouts/header.php';
                 </span>
             </div>
         </div>
+        <?php else: ?>
+        <!-- Department Revenue Cards for Managers without Profit Permission -->
+        <!-- Card 2: Car Wash Services Revenue -->
+        <div class="kpi-card">
+            <div class="kpi-card-top">
+                <div>
+                    <div class="kpi-card-title">Car Wash Services</div>
+                    <div class="kpi-card-value" style="color: #0284c7;"><?= formatUSD($washRevenue) ?></div>
+                    <div class="kpi-card-khr">(<?= formatKHR((int)round($washRevenue * $curRate)) ?>)</div>
+                </div>
+                <div class="kpi-icon-box" style="background: rgba(2, 132, 199, 0.12); color: #0284c7;">
+                    <i class="fa-solid fa-shower"></i>
+                </div>
+            </div>
+            <div class="kpi-card-footer">
+                <span>Wash bay revenue &amp; service volume</span>
+                <span class="text-muted"><strong><?= count($servicesBreakdown) ?></strong> services</span>
+            </div>
+        </div>
+
+        <!-- Card 3: Repair & Maintenance Labor -->
+        <div class="kpi-card">
+            <div class="kpi-card-top">
+                <div>
+                    <div class="kpi-card-title">Repair &amp; Labor</div>
+                    <div class="kpi-card-value" style="color: #ea580c;"><?= formatUSD($repairRevenue) ?></div>
+                    <div class="kpi-card-khr">(<?= formatKHR((int)round($repairRevenue * $curRate)) ?>)</div>
+                </div>
+                <div class="kpi-icon-box" style="background: rgba(234, 88, 12, 0.12); color: #ea580c;">
+                    <i class="fa-solid fa-screwdriver-wrench"></i>
+                </div>
+            </div>
+            <div class="kpi-card-footer">
+                <span>Mechanic &amp; technical labor revenue</span>
+                <span class="text-muted"><strong><?= count($repairBreakdown) ?></strong> job types</span>
+            </div>
+        </div>
+
+        <!-- Card 4: Products & Parts Sales -->
+        <div class="kpi-card">
+            <div class="kpi-card-top">
+                <div>
+                    <div class="kpi-card-title">Parts &amp; Oil Sales</div>
+                    <div class="kpi-card-value" style="color: #9333ea;"><?= formatUSD($productRevenue) ?></div>
+                    <div class="kpi-card-khr">(<?= formatKHR((int)round($productRevenue * $curRate)) ?>)</div>
+                </div>
+                <div class="kpi-icon-box" style="background: rgba(147, 51, 234, 0.12); color: #9333ea;">
+                    <i class="fa-solid fa-boxes-stacked"></i>
+                </div>
+            </div>
+            <div class="kpi-card-footer">
+                <span>Total parts &amp; inventory retail revenue</span>
+                <span class="text-muted"><strong><?= $productUnits ?></strong> units sold</span>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 
     <!-- 4. Visual Comparison Charts: 3 Clean Cards (Responsive, Light & Dark Theme Resilient) -->
     <div class="charts-grid">
+        <?php if ($canViewProfit): ?>
         <!-- Chart 1: Financial Balance (Revenue vs Expenses vs COGS) -->
         <div class="chart-card">
             <div class="chart-header">
@@ -1787,6 +2090,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                 </div>
             </div>
         </div>
+        <?php endif; ?>
 
         <!-- Chart 2: Revenue Stream Breakdown (Wash vs Repair vs Parts) -->
         <div class="chart-card">
@@ -1908,6 +2212,7 @@ include dirname(__DIR__) . '/layouts/header.php';
         </div>
 
         <div class="metric-pill-card">
+            <?php if ($canViewProfit): ?>
             <div>
                 <div class="text-xs text-muted" style="text-transform: uppercase; font-weight: 700;">Parts &amp; Oil Net Margin</div>
                 <div style="font-size: 22px; font-weight: 800; color: #16a34a; margin-top: 4px;"><?= formatUSD($productProfit) ?></div>
@@ -1919,6 +2224,18 @@ include dirname(__DIR__) . '/layouts/header.php';
             <div class="kpi-icon-box" style="background: rgba(22, 163, 74, 0.12); color: #16a34a;">
                 <i class="fa-solid fa-boxes-stacked"></i>
             </div>
+            <?php else: ?>
+            <div>
+                <div class="text-xs text-muted" style="text-transform: uppercase; font-weight: 700;">Parts &amp; Oil Retail Sales</div>
+                <div style="font-size: 22px; font-weight: 800; color: #9333ea; margin-top: 4px;"><?= formatUSD($productRevenue) ?></div>
+                <div class="text-xs text-muted" style="margin-top: 2px;">
+                    <?= $productUnits ?> retail units sold in this period
+                </div>
+            </div>
+            <div class="kpi-icon-box" style="background: rgba(147, 51, 234, 0.12); color: #9333ea;">
+                <i class="fa-solid fa-boxes-stacked"></i>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -2436,8 +2753,10 @@ include dirname(__DIR__) . '/layouts/header.php';
             </div>
             <div style="display: flex; gap: 16px; font-size: 13px; flex-wrap: wrap;">
                 <span>Revenue: <strong style="color: #9333ea;"><?= formatUSD($productRevenue) ?></strong></span>
+                <?php if ($canViewProfit): ?>
                 <span>COGS: <strong><?= formatUSD($productCogs) ?></strong></span>
                 <span>Gross Profit: <strong style="color: #16a34a;"><?= formatUSD($productProfit) ?></strong></span>
+                <?php endif; ?>
             </div>
         </div>
         <div class="table-responsive-clean">
@@ -2449,15 +2768,17 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <th style="min-width: 120px;">Brand</th>
                         <th class="table-num" style="min-width: 100px;">Units Sold</th>
                         <th class="table-num" style="min-width: 140px;">Sales Revenue</th>
+                        <?php if ($canViewProfit): ?>
                         <th class="table-num" style="min-width: 120px;">COGS Cost</th>
                         <th class="table-num" style="min-width: 140px;">Gross Profit</th>
                         <th style="min-width: 130px;">Margin</th>
+                        <?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($topProducts)): ?>
                         <tr>
-                            <td colspan="8">
+                            <td colspan="<?= $canViewProfit ? 8 : 5 ?>">
                                 <div class="empty-state-box">
                                     <div class="empty-state-icon"><i class="fa-solid fa-oil-can"></i></div>
                                     <div class="empty-state-text">No engine oil or car care product sales recorded in this period.</div>
@@ -2485,6 +2806,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <td><?= htmlspecialchars($tp['brand']) ?></td>
                             <td class="table-num"><strong><?= (int)$tp['total_qty'] ?></strong></td>
                             <td class="table-num"><strong><?= formatUSD($sales) ?></strong></td>
+                            <?php if ($canViewProfit): ?>
                             <td class="table-num text-muted"><?= formatUSD($cost) ?></td>
                             <td class="table-num" style="color: #16a34a; font-weight: 700;"><?= formatUSD($profit) ?></td>
                             <td>
@@ -2495,6 +2817,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                                     <span class="text-xs text-muted" style="width: 32px; text-align: right;"><?= $marginP ?>%</span>
                                 </div>
                             </td>
+                            <?php endif; ?>
                         </tr>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -3136,6 +3459,247 @@ include dirname(__DIR__) . '/layouts/header.php';
             </div>
         </div>
     </div>
+
+    <!-- 6. CANCELLED ORDERS & LOST REVENUE REPORT (Owner & Manager Only) -->
+    <?php if ($canViewCancelReport): ?>
+    <div class="card" id="cancellations_report" style="margin-top: 24px;">
+        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div>
+                <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                    <i class="fa-solid fa-ban" style="color: #dc2626;"></i>
+                    <?= htmlspecialchars(__('cancel_report_title', 'Cancelled Orders & Lost Revenue')) ?>
+                </h3>
+                <p class="text-xs text-muted" style="margin-top: 2px;">
+                    Audit log of all voided orders, lost revenue breakdown by reason, and staff authorizations.
+                </p>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <div style="background: #fef2f2; border: 1px solid #fecaca; padding: 6px 14px; border-radius: var(--radius-sm); font-size: 12px; color: #991b1b;">
+                    <span>Total Cancellations:</span> <strong style="font-size: 14px; font-weight: 800;"><?= $totalCancelledCount ?></strong>
+                </div>
+                <div style="background: #fff7ed; border: 1px solid #fed7aa; padding: 6px 14px; border-radius: var(--radius-sm); font-size: 12px; color: #c2410c;">
+                    <span>Lost Revenue:</span> <strong style="font-size: 14px; font-weight: 800;"><?= formatUSD($totalLostRevenueUsd) ?></strong>
+                    <span class="text-xs" style="color: #ea580c;">(<?= formatKHR($totalLostRevenueKhr) ?>)</span>
+                </div>
+                <?php if (Auth::can('reports.export')): ?>
+                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&device=<?= urlencode($selectedDevice) ?>&export=cancellations" class="btn btn-secondary btn-sm" title="Download cancellation spreadsheet (CSV)">
+                    <i class="fa-solid fa-file-csv mr-1" style="color: #dc2626;"></i> <?= htmlspecialchars(__('export_cancellations_csv', 'CSV Export')) ?>
+                </a>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <div style="padding: 16px;">
+            <!-- Breakdown by Reason Table & Visual Distribution -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <!-- Table -->
+                <div style="border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden;">
+                    <div style="padding: 10px 14px; background: var(--bg-subtle); font-weight: 700; font-size: 13px; border-bottom: 1px solid var(--border);">
+                        <i class="fa-solid fa-chart-pie mr-1" style="color: #dc2626;"></i> Breakdown by Reason
+                    </div>
+                    <table class="table-clean" style="margin: 0;">
+                        <thead>
+                            <tr>
+                                <th>Reason Category</th>
+                                <th class="table-num">Count</th>
+                                <th class="table-num">% of Voids</th>
+                                <th class="table-num">Lost Revenue</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($cancelledByReason)): ?>
+                                <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 16px;">No cancellations recorded in this period.</td></tr>
+                            <?php else: ?>
+                                <?php foreach ($cancelledByReason as $rGrp): 
+                                    $pct = ($totalCancelledCount > 0) ? round(($rGrp['count'] / $totalCancelledCount) * 100, 1) : 0;
+                                ?>
+                                    <tr>
+                                        <td>
+                                            <?php if ($rGrp['key'] === 'other_old'): ?>
+                                                <span class="badge badge-slate" style="font-size: 11px;"><?= htmlspecialchars($rGrp['label']) ?></span>
+                                            <?php elseif ($rGrp['key'] === 'other'): ?>
+                                                <span class="badge badge-amber" style="font-size: 11px;"><?= htmlspecialchars($rGrp['label']) ?></span>
+                                            <?php else: ?>
+                                                <span class="badge badge-danger" style="font-size: 11px;"><?= htmlspecialchars($rGrp['label']) ?></span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="table-num" style="font-weight: 700;"><?= $rGrp['count'] ?></td>
+                                        <td class="table-num"><?= $pct ?>%</td>
+                                        <td class="table-num" style="font-weight: 700; color: #dc2626;">
+                                            <?= formatUSD($rGrp['lost_usd']) ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Distribution Bars -->
+                <div style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; background: var(--bg-subtle); display: flex; flex-direction: column; justify-content: center; gap: 12px;">
+                    <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">
+                        <i class="fa-solid fa-chart-bar mr-1" style="color: #ea580c;"></i> Reason Distribution (% of Volume)
+                    </div>
+                    <?php if (empty($cancelledByReason)): ?>
+                        <div class="text-xs text-muted" style="text-align: center; padding: 20px;">No cancellation records for distribution.</div>
+                    <?php else: ?>
+                        <?php foreach ($cancelledByReason as $rGrp): 
+                            $pct = ($totalCancelledCount > 0) ? round(($rGrp['count'] / $totalCancelledCount) * 100, 1) : 0;
+                            $barColor = ($rGrp['key'] === 'other_old') ? '#64748b' : (($rGrp['key'] === 'other') ? '#ea580c' : '#dc2626');
+                        ?>
+                            <div>
+                                <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                                    <span style="font-weight: 600;"><?= htmlspecialchars($rGrp['label']) ?></span>
+                                    <span><strong><?= $rGrp['count'] ?></strong> (<?= $pct ?>%)</span>
+                                </div>
+                                <div style="height: 8px; background: var(--border); border-radius: 99px; overflow: hidden;">
+                                    <div style="height: 100%; width: <?= max(2, min(100, $pct)) ?>%; background: <?= $barColor ?>;"></div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <!-- Detailed Cancelled Orders Table -->
+            <div style="overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md);">
+                <table class="table-clean">
+                    <thead>
+                        <tr>
+                            <th style="min-width: 140px;">Order #</th>
+                            <th style="min-width: 130px;">Date &amp; Time</th>
+                            <th style="min-width: 130px;">Vehicle Plate</th>
+                            <th style="min-width: 130px;">Customer</th>
+                            <th style="min-width: 120px;" class="table-num">Lost Revenue</th>
+                            <th style="min-width: 160px;">Reason Category</th>
+                            <th style="min-width: 200px;">Reason Details / Note</th>
+                            <th style="min-width: 160px;">Cancelled By</th>
+                            <th style="min-width: 140px;">POS Device</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (empty($allCancelledOrders)): ?>
+                            <tr>
+                                <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 32px;">
+                                    <i class="fa-solid fa-circle-check" style="color: #16a34a; font-size: 24px; margin-bottom: 8px; display: block;"></i>
+                                    No orders were cancelled during this period.
+                                </td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($allCancelledOrders as $cord): 
+                                $cTime = $cord['cancelled_at'] ?: $cord['created_at'];
+                                $canceller = $cord['canceller_name'] ? "{$cord['canceller_name']} (@{$cord['canceller_username']})" : 'Staff';
+                                if (!empty($cord['approver_name']) && $cord['approver_name'] !== $cord['canceller_name']) {
+                                    $canceller .= "<div class='text-xs text-muted'>Appr: {$cord['approver_name']}</div>";
+                                }
+                                $deviceText = $cord['device_name'] ? "{$cord['device_name']}" : 'Back Office Web';
+                            ?>
+                                <tr>
+                                    <td>
+                                        <strong style="font-family: var(--font-mono); color: var(--text-main);">#<?= htmlspecialchars($cord['order_number']) ?></strong>
+                                    </td>
+                                    <td class="text-xs text-muted" style="font-family: var(--font-mono);">
+                                        <?= date('d M Y, h:i A', strtotime($cTime)) ?>
+                                    </td>
+                                    <td>
+                                        <span style="font-family: var(--font-mono); font-weight: 700; background: var(--bg-subtle); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border);">
+                                            <?= htmlspecialchars($cord['plate_number'] ?: 'N/A') ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <?= htmlspecialchars($cord['customer_name'] ?: 'Guest Customer') ?>
+                                    </td>
+                                    <td class="table-num">
+                                        <strong style="color: #dc2626;"><?= formatUSD((float)($cord['total_usd'] ?? 0)) ?></strong>
+                                        <div class="text-xs text-muted"><?= formatKHR((int)($cord['total_khr'] ?? 0)) ?></div>
+                                    </td>
+                                    <td>
+                                        <?php if ($cord['report_cat_key'] === 'other_old'): ?>
+                                            <span class="badge badge-slate" style="font-size: 11px;"><?= htmlspecialchars($cord['report_cat_label']) ?></span>
+                                        <?php elseif ($cord['report_cat_key'] === 'other'): ?>
+                                            <span class="badge badge-amber" style="font-size: 11px;"><?= htmlspecialchars($cord['report_cat_label']) ?></span>
+                                        <?php else: ?>
+                                            <span class="badge badge-danger" style="font-size: 11px;"><?= htmlspecialchars($cord['report_cat_label']) ?></span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td style="font-size: 12.5px; line-height: 1.4;">
+                                        <?= htmlspecialchars($cord['cancel_reason'] ?: '-') ?>
+                                    </td>
+                                    <td style="font-size: 12.5px;">
+                                        <?= $canceller ?>
+                                    </td>
+                                    <td style="font-size: 12px;" class="text-muted">
+                                        <i class="fa-solid fa-tablet-screen-button mr-1"></i> <?= htmlspecialchars($deviceText) ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <!-- 7. CASH MOVEMENTS & DRAWER ACTIVITY BANNER (Owner & Manager Only) -->
+    <?php if (in_array(Auth::getRole(), ['owner', 'manager'], true)): ?>
+    <div class="card" style="margin-top: 24px; background: linear-gradient(to right, var(--bg-card), var(--bg-subtle));">
+        <div style="padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+            <div style="display: flex; align-items: center; gap: 14px;">
+                <div style="width: 48px; height: 48px; border-radius: var(--radius-md); background: #ffedd5; color: #ea580c; display: flex; align-items: center; justify-content: center; font-size: 22px;">
+                    <i class="fa-solid fa-money-bill-transfer"></i>
+                </div>
+                <div>
+                    <h3 style="margin: 0; font-size: 17px; font-weight: 800; color: var(--text-main);">
+                        <?= htmlspecialchars(__('cash_movements_title', 'Cash Movements & Drawer Activity Report')) ?>
+                    </h3>
+                    <p style="margin: 3px 0 0 0; font-size: 13px; color: var(--text-muted);">
+                        <?= htmlspecialchars(__('cash_movements_desc', 'Audit trail of all cash in, cash out and no-sale drawer openings across shifts and registers.')) ?>
+                    </p>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <a href="?view=cash_movements&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&device=<?= urlencode($selectedDevice) ?>" class="btn btn-secondary">
+                    <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> View Cash Movements
+                </a>
+                <?php if (Auth::can('reports.export')): ?>
+                <a href="?view=cash_movements&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&device=<?= urlencode($selectedDevice) ?>&export=csv" class="btn btn-primary" style="background: #ea580c; border-color: #ea580c;">
+                    <i class="fa-solid fa-file-csv mr-1"></i> Export (CSV)
+                </a>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- 8. CASHIER SESSIONS & SHIFT AUDITS BANNER (Owner & Manager Only) -->
+    <div class="card" style="margin-top: 16px; background: linear-gradient(to right, var(--bg-card), var(--bg-subtle));">
+        <div style="padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+            <div style="display: flex; align-items: center; gap: 14px;">
+                <div style="width: 48px; height: 48px; border-radius: var(--radius-md); background: #dbeafe; color: #2563eb; display: flex; align-items: center; justify-content: center; font-size: 22px;">
+                    <i class="fa-solid fa-user-clock"></i>
+                </div>
+                <div>
+                    <h3 style="margin: 0; font-size: 17px; font-weight: 800; color: var(--text-main);">
+                        <?= htmlspecialchars(__('cashier_sessions_title', 'Cashier Sessions & Shift Audits')) ?>
+                    </h3>
+                    <p style="margin: 3px 0 0 0; font-size: 13px; color: var(--text-muted);">
+                        <?= htmlspecialchars(__('cashier_sessions_desc', 'Audit cashier shifts, opening floats, counted cash, over/short balances, shortages, and review flags.')) ?>
+                    </p>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <a href="?view=cashier_sessions&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>" class="btn btn-secondary">
+                    <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> View Cashier Sessions
+                </a>
+                <?php if (Auth::can('reports.export')): ?>
+                <a href="?view=cashier_sessions&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=csv" class="btn btn-primary" style="background: #2563eb; border-color: #2563eb;">
+                    <i class="fa-solid fa-file-csv mr-1"></i> Export (CSV)
+                </a>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <!-- Manager Timecard Correction Modal Dialog -->
     <div id="correctionModal" style="display: none; position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px); align-items: center; justify-content: center;">

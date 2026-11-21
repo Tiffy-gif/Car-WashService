@@ -398,6 +398,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         update_setting($pdo, 'multiplier_motorbike', (string)$mulMoto, $userId, $userName);
         update_setting($pdo, 'estimate_buffer_percent', (string)$bufferPercent, $userId, $userName);
 
+        // Long Wait Warning Settings (Back Office only: Owner and Manager)
+        $enableLongWait = isset($_POST['enable_long_wait_warning']) ? 1 : 0;
+        $longWaitThreshold = max(5, min(360, (int)($_POST['long_wait_threshold_minutes'] ?? 45)));
+        update_setting($pdo, 'enable_long_wait_warning', (string)$enableLongWait, $userId, $userName);
+        update_setting($pdo, 'long_wait_threshold_minutes', (string)$longWaitThreshold, $userId, $userName);
+
         if (isset($_POST['delay_reasons_text'])) {
             $lines = array_values(array_filter(array_map('trim', explode("\n", (string)$_POST['delay_reasons_text']))));
             if (!empty($lines)) {
@@ -2195,6 +2201,8 @@ $baysList = BayManager::getAllBays($pdo);
                 $mulTruck = get_setting('multiplier_van_truck', '1.4');
                 $mulMoto = get_setting('multiplier_motorbike', '0.6');
                 $estBuffer = get_setting('estimate_buffer_percent', '10');
+                $enableLongWait = (int)get_setting('enable_long_wait_warning', '1');
+                $longWaitThreshold = (int)get_setting('long_wait_threshold_minutes', '45');
                 require_once dirname(__DIR__, 2) . '/core/SmartQueueEngine.php';
                 $delayReasons = SmartQueueEngine::getAvailableDelayReasons($pdo);
                 $delayReasonsText = implode("\n", $delayReasons);
@@ -2255,6 +2263,37 @@ $baysList = BayManager::getAllBays($pdo);
                         <textarea name="delay_reasons_text" class="form-textarea" rows="4" style="font-size: 13px; font-family: var(--font-family);"><?= htmlspecialchars($delayReasonsText) ?></textarea>
                         <div class="text-xs text-muted" style="margin-top: 4px;">
                             Washer and technicians pick from this list when a job exceeds its estimate by 5+ minutes. (Note: "Waiting for part approval" is detected automatically).
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Long Wait Warning Configuration (Owner / Manager only) -->
+                <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--border);">
+                    <div class="form-group">
+                        <label class="form-label" style="font-weight: 700;">
+                            <i class="fa-solid fa-bell mr-1 text-primary"></i> Long Wait Notice on POS
+                        </label>
+                        <div style="display: flex; align-items: center; gap: 10px; margin-top: 6px;">
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 600;">
+                                <input type="checkbox" name="enable_long_wait_warning" value="1" <?= $enableLongWait ? 'checked' : '' ?> style="width: 18px; height: 18px; cursor: pointer;">
+                                <span>Enable Long Wait Cart Banner &amp; Alerts</span>
+                            </label>
+                        </div>
+                        <div class="text-xs text-muted" style="margin-top: 6px;">
+                            Shows a small appointment banner in the POS cart and notifies the wash supervisor when queue line wait exceeds the limit.
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" style="font-weight: 700;">
+                            <i class="fa-solid fa-clock mr-1 text-primary"></i> Long Wait Threshold (Minutes)
+                        </label>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" min="5" max="360" name="long_wait_threshold_minutes" value="<?= htmlspecialchars((string)$longWaitThreshold) ?>" class="form-input" required style="max-width: 120px;">
+                            <span style="font-weight: 700; color: var(--text-muted);">minutes</span>
+                        </div>
+                        <div class="text-xs text-muted" style="margin-top: 4px;">
+                            Evaluates the pure queue wait time before bay opens (excludes customer's own service time). (Default: 45 min)
                         </div>
                     </div>
                 </div>

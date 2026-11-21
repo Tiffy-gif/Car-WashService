@@ -239,6 +239,12 @@ include dirname(__DIR__) . '/layouts/header.php';
             </button>
         <?php endif; ?>
         <?php if ($isManagerOrOwner): ?>
+            <a href="?view=cash_movements" class="btn btn-secondary">
+                <i class="fa-solid fa-money-bill-transfer mr-1" style="color: #ea580c;"></i> Cash Movements
+            </a>
+            <a href="?view=cashier_sessions" class="btn btn-secondary">
+                <i class="fa-solid fa-user-clock mr-1" style="color: #2563eb;"></i> Cashier Sessions
+            </a>
             <button type="button" class="btn btn-secondary" onclick="openModal('spotAuditModal')">
                 <i class="fa-solid fa-magnifying-glass-chart mr-1" style="color: #2563eb;"></i> Trigger Spot Audit
             </button>

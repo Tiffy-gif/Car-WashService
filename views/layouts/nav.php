@@ -46,12 +46,6 @@ $rawMenuGroups = [
                 'permission' => 'pos.access',
             ],
             [
-                'view'       => 'bays_queue',
-                'label'      => __('nav_bays_queue', 'Live Bays & Queue'),
-                'icon'       => 'fa-warehouse',
-                'permission' => 'bays.view',
-            ],
-            [
                 'view'       => 'appointments',
                 'label'      => __('nav_appointments', 'Appointments'),
                 'icon'       => 'fa-calendar-check',
@@ -64,22 +58,18 @@ $rawMenuGroups = [
                 'permission' => 'orders.list',
             ],
             [
-                'view'       => 'shift',
-                'label'      => __('nav_shifts', 'Shifts & Cash Handover'),
-                'icon'       => 'fa-hand-holding-dollar',
-                'permission' => 'pos.access',
-            ],
-            [
                 'view'       => 'washer_jobs',
                 'label'      => __('nav_washer_screen'),
                 'icon'       => 'fa-soap',
                 'permission' => 'washer_jobs.view',
+                'role_restricted' => ['washer'],
             ],
             [
                 'view'       => 'mechanic_jobs',
                 'label'      => __('nav_mechanic_screen'),
                 'icon'       => 'fa-wrench',
                 'permission' => 'mechanic_jobs.view',
+                'role_restricted' => ['mechanic', 'technical'],
             ],
         ],
     ],
@@ -145,12 +135,27 @@ $rawMenuGroups = [
                 'label'      => __('nav_expenses'),
                 'icon'       => 'fa-wallet',
                 'permission' => 'expenses.list',
+                'allow_roles' => ['manager'],
             ],
             [
                 'view'       => 'reports',
                 'label'      => __('nav_reports'),
                 'icon'       => 'fa-chart-line',
                 'permission' => 'reports.view',
+            ],
+            [
+                'view'       => 'cash_movements',
+                'label'      => __('nav_cash_movements', 'Cash Movements'),
+                'icon'       => 'fa-money-bill-transfer',
+                'permission' => 'reports.view',
+                'role_restricted' => ['owner', 'manager'],
+            ],
+            [
+                'view'       => 'cashier_sessions',
+                'label'      => __('nav_cashier_sessions', 'Cashier Sessions'),
+                'icon'       => 'fa-user-clock',
+                'permission' => 'reports.view',
+                'role_restricted' => ['owner', 'manager'],
             ],
         ],
     ],
@@ -205,14 +210,22 @@ $rawMenuGroups = [
     ],
 ];
 
-// Filter groups and items by user permissions
+// Filter groups and items by user permissions and roles
 $visibleMenuGroups = [];
 foreach ($rawMenuGroups as $grp) {
     $allowedItems = [];
     foreach ($grp['items'] as $item) {
-        if (Auth::can($item['permission'])) {
-            $allowedItems[] = $item;
+        $allowRole = !empty($item['allow_roles']) && in_array(Auth::getRole(), (array)$item['allow_roles'], true);
+        if (!Auth::can($item['permission']) && !$allowRole) {
+            continue;
         }
+        if (!empty($item['role_restricted']) && !in_array(Auth::getRole(), (array)$item['role_restricted'], true)) {
+            continue;
+        }
+        if (!empty($item['profit_restricted']) && !Auth::canViewProfit()) {
+            continue;
+        }
+        $allowedItems[] = $item;
     }
     if (!empty($allowedItems)) {
         $grp['items'] = $allowedItems;

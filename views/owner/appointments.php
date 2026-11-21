@@ -96,8 +96,9 @@ include dirname(__DIR__) . '/layouts/header.php';
         <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
             <i class="fa-solid fa-calendar-check mr-1"></i> <?= $totalAppointments ?> Total Bookings
         </span>
-        <span style="font-size: 13px; color: var(--text-muted);">
+        <span style="font-size: 13px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 8px;">
             Customer Reservations &amp; Service Bay Scheduling
+            <button type="button" onclick="openAppointmentInfoModal()" title="<?= htmlspecialchars(__('app_info_title', 'How Appointments & Late Arrivals Work')) ?>" style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--bg-subtle); color: var(--primary); border: 1.5px solid var(--primary); font-size: 12px; font-weight: 800; cursor: pointer; padding: 0; line-height: 1; transition: all 0.15s ease;" onmouseover="this.style.background='var(--primary)';this.style.color='#fff';" onmouseout="this.style.background='var(--bg-subtle)';this.style.color='var(--primary)';">!</button>
         </span>
     </div>
     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
@@ -155,9 +156,12 @@ include dirname(__DIR__) . '/layouts/header.php';
 <!-- Appointments Table Card -->
 <div class="card">
     <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-        <h2 style="font-size: 16px; font-weight: 700; margin: 0; color: var(--text-main);">
-            <i class="fa-solid fa-list mr-1" style="color: var(--primary);"></i> Upcoming Booking Schedule
-        </h2>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <h2 style="font-size: 16px; font-weight: 700; margin: 0; color: var(--text-main);">
+                <i class="fa-solid fa-list mr-1" style="color: var(--primary);"></i> Upcoming Booking Schedule
+            </h2>
+            <button type="button" onclick="openAppointmentInfoModal()" title="<?= htmlspecialchars(__('app_info_title', 'How Appointments & Late Arrivals Work')) ?>" style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--bg-subtle); color: var(--primary); border: 1.5px solid var(--primary); font-size: 11px; font-weight: 800; cursor: pointer; padding: 0; line-height: 1; transition: all 0.15s ease;" onmouseover="this.style.background='var(--primary)';this.style.color='#fff';" onmouseout="this.style.background='var(--bg-subtle)';this.style.color='var(--primary)';">!</button>
+        </div>
         <div class="text-xs text-muted">
             Showing <?= count($appointments) ?> registered bookings
         </div>
@@ -341,6 +345,142 @@ include dirname(__DIR__) . '/layouts/header.php';
         </form>
     </div>
 </div>
+
+<!-- Modal: Appointment Process & Late Arrival Info -->
+<div id="appointmentInfoModal" class="modal-backdrop" onclick="if(event.target === this) closeAppointmentInfoModal();" style="display: none; z-index: 9999;">
+    <div class="modal" style="max-width: 620px; box-shadow: var(--shadow-xl); border: 1px solid var(--border);">
+        <div class="modal-header" style="background: var(--bg-surface); padding: 18px 22px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(2, 132, 199, 0.12); color: #0284c7; display: flex; align-items: center; justify-content: center; font-size: 16px;">
+                    <i class="fa-solid fa-calendar-check"></i>
+                </div>
+                <h3 class="modal-title" style="margin: 0; font-size: 17px; font-weight: 700; color: var(--text-main);">
+                    <?= htmlspecialchars(__('app_info_modal_title', 'How Appointments Work & What To Do If A Customer Is Late')) ?>
+                </h3>
+            </div>
+            <button type="button" class="modal-close" onclick="closeAppointmentInfoModal()" style="font-size: 22px; line-height: 1; cursor: pointer; padding: 4px 8px; border-radius: 6px; background: transparent; border: none; color: var(--text-muted);">&times;</button>
+        </div>
+        
+        <div class="modal-body" style="padding: 20px 22px; background: var(--bg-surface); max-height: calc(85vh - 140px); overflow-y: auto;">
+            <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5;">
+                <?= htmlspecialchars(__('app_info_modal_subtitle', 'Simple step-by-step guide for cashiers and managers on how to handle bookings, late arrivals, and no-shows:')) ?>
+            </p>
+
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <!-- 1. Customer Books -->
+                <div style="padding: 12px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #0284c7;"></span>
+                        1. <?= htmlspecialchars(__('app_step1_title', 'Customer Books a Time')) ?>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; padding-left: 14px;">
+                        <?= htmlspecialchars(__('app_step1_desc', 'The customer picks a date, time, and service. Their booking appears on this schedule and inside the POS screen.')) ?>
+                    </div>
+                </div>
+
+                <!-- 2. Arrives On Time -->
+                <div style="padding: 12px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <div style="font-weight: 700; font-size: 13px; color: #16a34a; margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #16a34a;"></span>
+                        2. <?= htmlspecialchars(__('app_step2_title', 'Customer Arrives On Time (Click "Intake")')) ?>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; padding-left: 14px;">
+                        <?= htmlspecialchars(__('app_step2_desc', 'Click "Intake" next to their name (or pick them in the POS screen). Their car plate and services will automatically load into the register, and they get next priority for a wash bay.')) ?>
+                    </div>
+                </div>
+
+                <!-- 3. Never Leave Wash Bays Empty -->
+                <div style="padding: 12px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <div style="font-weight: 700; font-size: 13px; color: #0284c7; margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #0284c7;"></span>
+                        3. <?= htmlspecialchars(__('app_step3_title', 'Never Leave Wash Bays Empty Waiting')) ?>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; padding-left: 14px;">
+                        <?= htmlspecialchars(__('app_step3_desc', 'Keep washing walk-in cars! Do not let workers stand around waiting for an appointment. When the appointment customer arrives, they get into the next bay that finishes.')) ?>
+                    </div>
+                </div>
+
+                <!-- 4. 15 Minutes Late -->
+                <div style="padding: 12px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <div style="font-weight: 700; font-size: 13px; color: #ca8a04; margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ca8a04;"></span>
+                        4. <?= htmlspecialchars(__('app_step4_title', 'Customer 15 Minutes Late? Give Them A Quick Call')) ?>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; padding-left: 14px;">
+                        <?= htmlspecialchars(__('app_step4_desc', 'Give them a 15-minute grace period. If they booked for 3:00 PM and haven\'t arrived by 3:15 PM, call their phone number to ask if they are stuck in traffic or want to reschedule.')) ?>
+                    </div>
+                </div>
+
+                <!-- 5. Very Late Arrival (e.g. 3:30 PM) -->
+                <div style="padding: 12px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <div style="font-weight: 700; font-size: 13px; color: #ea580c; margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ea580c;"></span>
+                        5. <?= htmlspecialchars(__('app_step5_title', 'Customer Arrives Very Late (e.g. 3:30 PM for a 3:00 PM booking)')) ?>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; padding-left: 14px;">
+                        <?= htmlspecialchars(__('app_step5_desc', 'Their appointment priority is now expired. You still accept their car, but they cannot jump in front of cars already being washed. They simply join the normal walk-in line.')) ?>
+                    </div>
+                </div>
+
+                <!-- 6. Customer Never Shows Up -->
+                <div style="padding: 12px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                    <div style="font-weight: 700; font-size: 13px; color: var(--danger, #ef4444); margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--danger, #ef4444);"></span>
+                        6. <?= htmlspecialchars(__('app_step6_title', 'Customer Never Shows Up (No-Show)')) ?>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; padding-left: 14px;">
+                        <?= htmlspecialchars(__('app_step6_desc', 'If you called and they cannot make it, or the day ends and they never arrived, click the red Cancel button (🚫) to mark it Cancelled so your daily schedule stays clean and accurate.')) ?>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Golden Rule Notice -->
+            <div style="margin-top: 16px; padding: 12px 14px; background: rgba(2, 132, 199, 0.08); border-left: 3px solid #0284c7; border-radius: 0 var(--radius-md) var(--radius-md) 0; font-size: 12px; color: var(--text-main); line-height: 1.5;">
+                <i class="fa-solid fa-lightbulb" style="color: #0284c7; margin-right: 6px;"></i>
+                <strong><?= htmlspecialchars(__('app_proc_tip', 'Golden Rule: On-time customers get priority. Late customers join the regular line. Wash bays never sit empty waiting!')) ?></strong>
+            </div>
+        </div>
+
+        <div class="modal-footer" style="padding: 14px 22px; border-top: 1px solid var(--border); background: var(--bg-surface); display: flex; justify-content: flex-end;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="closeAppointmentInfoModal()">
+                <?= htmlspecialchars(__('close', 'Close')) ?>
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+function openModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'flex';
+}
+function closeModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+}
+function openAppointmentInfoModal() {
+    const modal = document.getElementById('appointmentInfoModal');
+    if (modal) {
+        modal.classList.add('active');
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+}
+function closeAppointmentInfoModal() {
+    const modal = document.getElementById('appointmentInfoModal');
+    if (modal) {
+        modal.classList.remove('active');
+        modal.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+}
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeAppointmentInfoModal();
+        closeModal('appointmentModal');
+    }
+});
+</script>
 
 <?php include dirname(__DIR__) . '/layouts/footer.php'; ?>
 

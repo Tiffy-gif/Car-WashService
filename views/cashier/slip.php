@@ -16,6 +16,96 @@ $type = $_GET['type'] ?? 'end'; // 'open', 'end', 'close_day'
 $id = (int)($_GET['id'] ?? $_GET['shift_id'] ?? $_GET['close_id'] ?? 0);
 $date = $_GET['date'] ?? date('Y-m-d');
 $zrep = $_GET['zrep'] ?? '';
+$rawOtk = trim((string)($_GET['otk'] ?? ''));
+
+$slipRef = ($type === 'close_day') ? (!empty($zrep) ? $zrep : ($id > 0 ? (string)$id : $date)) : (string)$id;
+
+// ========================================================
+// SECURITY ACCESS CONTROL: Dual-Path Authentication
+// Path 1: Logged-in Web Session (Owner, Manager, or Shift Cashier)
+// Path 2: Scrambled 2-minute One-Time Token (Tablet Fallback Print)
+// ========================================================
+$pdo = Database::getInstance();
+$isAuthorized = false;
+$authErrorType = 'denied'; // 'denied', 'expired', 'table_missing'
+
+Auth::startSession();
+if (Auth::check()) {
+    $uRole = strtolower((string)Auth::getRole());
+    $uId = (int)Auth::getUserId();
+    if (in_array($uRole, ['owner', 'admin', 'system_admin', 'manager'], true)) {
+        $isAuthorized = true;
+    } elseif ($uRole === 'cashier') {
+        if ($type === 'open' || $type === 'end') {
+            $shiftOwnerId = (int)$pdo->query("SELECT cashier_id FROM cashier_shifts WHERE id = " . (int)$id)->fetchColumn();
+            if ($shiftOwnerId === $uId) {
+                $isAuthorized = true;
+            }
+        } elseif ($type === 'close_day') {
+            $closerId = (int)$pdo->query("SELECT closed_by_user_id FROM pos_daily_closes WHERE id = " . (int)$id . " OR z_report_number = " . $pdo->quote($slipRef) . " OR close_date = " . $pdo->quote($slipRef))->fetchColumn();
+            if ($closerId === $uId) {
+                $isAuthorized = true;
+            }
+        }
+    }
+} elseif ($rawOtk !== '') {
+    $otkRes = CashierControl::validateAndConsumeSlipPrintToken($rawOtk, $type, $slipRef);
+    if (!empty($otkRes['valid'])) {
+        $isAuthorized = true;
+    } else {
+        $authErrorType = $otkRes['error'] ?? 'denied';
+    }
+}
+
+if (!$isAuthorized) {
+    http_response_code(403);
+    $titleEn = "Access Denied";
+    $titleKm = "ការចូលប្រើត្រូវបានបដិសេធ";
+    $descEn = "You do not have permission to view this slip. Only the owner, a manager, or the cashier assigned to this shift can access this page.";
+    $descKm = "អ្នកមិនមានការអនុញ្ញាតដើម្បីមើលវិក្កយបត្រនេះទេ។ មានតែម្ចាស់ហាង អ្នកគ្រប់គ្រង ឬអ្នកគិតលុយនៃវេននេះប៉ុណ្ណោះដែលអាចមើលបាន។";
+
+    if ($authErrorType === 'expired' || $authErrorType === 'already_used') {
+        $titleEn = "Print Link Expired";
+        $titleKm = "តំណភ្ជាប់បោះពុម្ពបានផុតកំណត់";
+        $descEn = "This one-time print link has expired or has already been used. Please request a new print from the POS screen.";
+        $descKm = "តំណភ្ជាប់បោះពុម្ពប្រើម្តងនេះបានផុតកំណត់ ឬត្រូវបានប្រើប្រាស់រួចហើយ។ សូមស្នើសុំបោះពុម្ពម្តងទៀតពីផ្ទាំង POS។";
+    } elseif ($authErrorType === 'table_missing') {
+        $titleEn = "Service Updating";
+        $titleKm = "សេវាកម្មកំពុងធ្វើបច្ចុប្បន្នភាព";
+        $descEn = "Slip printing security service is currently updating. Please try again shortly or log in.";
+        $descKm = "សេវាកម្មបោះពុម្ពវិក្កយបត្រកំពុងធ្វើបច្ចុប្បន្នភាព។ សូមព្យាយាមម្តងទៀតក្នុងពេលបន្តិចទៀត ឬចូលគណនី។";
+    }
+    ?>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title><?= htmlspecialchars($titleEn) ?> - Car Wash Pro</title>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+        <style>
+            body { background: #f8fafc; font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+            .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.08); max-width: 440px; width: 100%; padding: 32px 24px; text-align: center; }
+            .icon { width: 64px; height: 64px; background: #fee2e2; color: #dc2626; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 28px; margin-bottom: 16px; }
+            .title { font-size: 20px; font-weight: 800; color: #0f172a; margin-bottom: 6px; }
+            .subtitle { font-size: 14px; font-weight: 600; color: #dc2626; margin-bottom: 14px; }
+            .desc { font-size: 13px; color: #64748b; line-height: 1.5; margin-bottom: 24px; }
+            .btn { display: inline-block; padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; text-decoration: none; background: #0284c7; color: #fff; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <div class="icon"><i class="fa-solid fa-lock"></i></div>
+            <div class="title"><?= htmlspecialchars($titleEn) ?></div>
+            <div class="subtitle"><?= htmlspecialchars($titleKm) ?></div>
+            <div class="desc"><?= htmlspecialchars($descEn) ?><br><br><?= htmlspecialchars($descKm) ?></div>
+            <a href="../../index.php" class="btn"><i class="fa-solid fa-house"></i> Return to Backoffice</a>
+        </div>
+    </body>
+    </html>
+    <?php
+    exit;
+}
 
 $slipData = null;
 $error = null;
@@ -387,7 +477,7 @@ $autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] == '1';
                         <tr><td>Cash Received</td><td class="r">+$<?= number_format($slipData['cash_received_usd'], 2) ?></td><td class="r">+<?= number_format($slipData['cash_received_khr']) ?></td></tr>
                         <tr><td>Change Given</td><td class="r">-$<?= number_format($slipData['change_given_usd'], 2) ?></td><td class="r">-<?= number_format($slipData['change_given_khr']) ?></td></tr>
                         <tr><td>Cash In</td><td class="r">+$<?= number_format($slipData['cash_in_usd'], 2) ?></td><td class="r">+<?= number_format($slipData['cash_in_khr']) ?></td></tr>
-                        <tr><td>Cash Out / Expenses</td><td class="r">-$<?= number_format($slipData['cash_out_usd'], 2) ?></td><td class="r">-<?= number_format($slipData['cash_out_khr']) ?></td></tr>
+                        <tr><td><?= htmlspecialchars(__('slip_cash_out_drawer_payout', (class_exists('Language') && Language::current() === 'km') ? 'ដកប្រាក់ចេញ / ការបើកថតប្រាក់' : 'Cash Out / Drawer Payout')) ?></td><td class="r">-$<?= number_format($slipData['cash_out_usd'], 2) ?></td><td class="r">-<?= number_format($slipData['cash_out_khr']) ?></td></tr>
                         <tr><td>Refunds Paid</td><td class="r">-$<?= number_format($slipData['cash_refunds_usd'], 2) ?></td><td class="r">-<?= number_format($slipData['cash_refunds_khr']) ?></td></tr>
                         <tr style="font-weight: bold; border-top: 1px solid #000;">
                             <td>Expected Cash</td>
@@ -495,7 +585,7 @@ $autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] == '1';
                         <tr><td>Cash Received</td><td class="r">+$<?= number_format($slipData['cash_received_usd'], 2) ?></td><td class="r">+<?= number_format($slipData['cash_received_khr']) ?></td></tr>
                         <tr><td>Change Given</td><td class="r">-$<?= number_format($slipData['change_given_usd'], 2) ?></td><td class="r">-<?= number_format($slipData['change_given_khr']) ?></td></tr>
                         <tr><td>Cash In</td><td class="r">+$<?= number_format($slipData['cash_in_usd'], 2) ?></td><td class="r">+<?= number_format($slipData['cash_in_khr']) ?></td></tr>
-                        <tr><td>Cash Out</td><td class="r">-$<?= number_format($slipData['cash_out_usd'], 2) ?></td><td class="r">-<?= number_format($slipData['cash_out_khr']) ?></td></tr>
+                        <tr><td><?= htmlspecialchars(__('slip_cash_out_drawer_payout', (class_exists('Language') && Language::current() === 'km') ? 'ដកប្រាក់ចេញ / ការបើកថតប្រាក់' : 'Cash Out / Drawer Payout')) ?></td><td class="r">-$<?= number_format($slipData['cash_out_usd'], 2) ?></td><td class="r">-<?= number_format($slipData['cash_out_khr']) ?></td></tr>
                         <tr><td>Cash Refunds</td><td class="r">-$<?= number_format($slipData['cash_refunds_usd'], 2) ?></td><td class="r">-<?= number_format($slipData['cash_refunds_khr']) ?></td></tr>
                         <tr style="font-weight: bold; border-top: 1px solid #000;">
                             <td>Expected Cash</td>

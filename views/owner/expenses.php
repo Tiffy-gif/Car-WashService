@@ -7,7 +7,20 @@ require_once dirname(__DIR__, 2) . '/core/Auth.php';
 require_once dirname(__DIR__, 2) . '/core/Language.php';
 require_once dirname(__DIR__, 2) . '/core/Helpers.php';
 
-Auth::requirePermission('expenses.list');
+$isManager = (Auth::getRole() === 'manager');
+$canList = Auth::can('expenses.list') || $isManager;
+$canAdd = Auth::can('expenses.add') || $isManager;
+$canEdit = Auth::can('expenses.edit') || $isManager;
+$canDelete = Auth::can('expenses.delete') || $isManager;
+
+if (!$canList && !$canAdd) {
+    Auth::requirePermission('expenses.list');
+}
+
+$canViewProfit = Auth::canViewProfit();
+$currentUserId = (int)Auth::getUserId();
+$todayStr = date('Y-m-d');
+
 $pageTitle = __('nav_expenses');
 $pdo = Database::getInstance();
 
@@ -25,72 +38,109 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
 
     if ($action === 'save_expense') {
         $expId = !empty($_POST['expense_id']) ? (int)$_POST['expense_id'] : null;
-        if ($expId && !Auth::can('expenses.edit')) {
+        if ($expId && !$canEdit) {
             $message = 'Permission denied: Cannot edit expense.';
             $messageType = 'danger';
-        } elseif (!$expId && !Auth::can('expenses.add')) {
+        } elseif (!$expId && !$canAdd) {
             $message = 'Permission denied: Cannot add expense.';
             $messageType = 'danger';
         } else {
-        $categoryId = !empty($_POST['category_id']) ? (int)$_POST['category_id'] : null;
-        $category = trim($_POST['category'] ?? '');
-        $desc = trim($_POST['description'] ?? '');
-        $usd = max(0.00, (float)($_POST['amount_usd'] ?? 0.00));
-        $khr = (int)round($usd * get_exchange_rate());
-        $date = trim($_POST['expense_date'] ?? date('Y-m-d'));
-        $recordedBy = Auth::getUserId();
-
-        // Resolve category_id and category slug
-        if ($categoryId) {
-            $catLookup = $pdo->prepare("SELECT id, code, name_en FROM categories WHERE id = ?");
-            $catLookup->execute([$categoryId]);
-            if ($cRow = $catLookup->fetch()) {
-                $category = $cRow['code'];
-            }
-        } elseif ($category !== '') {
-            $catLookup = $pdo->prepare("SELECT id, code, name_en FROM categories WHERE type = 'expense' AND (code = ? OR name_en = ?)");
-            $catLookup->execute([$category, $category]);
-            if ($cRow = $catLookup->fetch()) {
-                $categoryId = (int)$cRow['id'];
-                $category = $cRow['code'];
-            }
-        }
-
-        if (!$categoryId && empty($category)) {
-            $catLookup = $pdo->query("SELECT id, code FROM categories WHERE type = 'expense' ORDER BY sort_order ASC LIMIT 1");
-            if ($cRow = $catLookup->fetch()) {
-                $categoryId = (int)$cRow['id'];
-                $category = $cRow['code'];
-            } else {
-                $category = 'Water';
-            }
-        }
-
-        if ($desc === '' || $usd <= 0) {
-            $message = 'Description and a valid amount greater than $0 are required.';
-            $messageType = 'danger';
-        } else {
+            $existingExp = null;
             if ($expId) {
-                $stmt = $pdo->prepare("UPDATE expenses SET category = ?, category_id = ?, description = ?, amount_usd = ?, amount_khr = ?, expense_date = ? WHERE id = ?");
-                $stmt->execute([$category, $categoryId, $desc, $usd, $khr, $date, $expId]);
-            } else {
-                $stmt = $pdo->prepare("INSERT INTO expenses (category, category_id, description, amount_usd, amount_khr, expense_date, recorded_by) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$category, $categoryId, $desc, $usd, $khr, $date, $recordedBy]);
+                $chk = $pdo->prepare("SELECT id, category, category_id, description, amount_usd, expense_date, recorded_by FROM expenses WHERE id = ?");
+                $chk->execute([$expId]);
+                $existingExp = $chk->fetch(PDO::FETCH_ASSOC);
+                if (!$existingExp) {
+                    $message = 'Expense not found.';
+                    $messageType = 'danger';
+                } elseif (!$canViewProfit) {
+                    // Non-profit managers can only edit their own entries from today
+                    if ((int)$existingExp['recorded_by'] !== $currentUserId || $existingExp['expense_date'] !== $todayStr) {
+                        $message = 'Permission denied: You can only edit your own expenses recorded today.';
+                        $messageType = 'danger';
+                    }
+                }
             }
-            $message = 'Expense saved successfully!';
-        }
+
+            if ($messageType !== 'danger') {
+                $categoryId = !empty($_POST['category_id']) ? (int)$_POST['category_id'] : null;
+                $category = trim($_POST['category'] ?? '');
+                $desc = trim($_POST['description'] ?? '');
+                $usd = max(0.00, (float)($_POST['amount_usd'] ?? 0.00));
+                $khr = (int)round($usd * get_exchange_rate());
+                
+                // For non-profit viewers, expense date is strictly enforced to today
+                $date = (!$canViewProfit) ? $todayStr : trim($_POST['expense_date'] ?? $todayStr);
+                $recordedBy = $currentUserId;
+
+                // Resolve category_id and category slug
+                if ($categoryId) {
+                    $catLookup = $pdo->prepare("SELECT id, code, name_en FROM categories WHERE id = ?");
+                    $catLookup->execute([$categoryId]);
+                    if ($cRow = $catLookup->fetch()) {
+                        $category = $cRow['code'];
+                    }
+                } elseif ($category !== '') {
+                    $catLookup = $pdo->prepare("SELECT id, code, name_en FROM categories WHERE type = 'expense' AND (code = ? OR name_en = ?)");
+                    $catLookup->execute([$category, $category]);
+                    if ($cRow = $catLookup->fetch()) {
+                        $categoryId = (int)$cRow['id'];
+                        $category = $cRow['code'];
+                    }
+                }
+
+                if (!$categoryId && empty($category)) {
+                    $catLookup = $pdo->query("SELECT id, code FROM categories WHERE type = 'expense' ORDER BY sort_order ASC LIMIT 1");
+                    if ($cRow = $catLookup->fetch()) {
+                        $categoryId = (int)$cRow['id'];
+                        $category = $cRow['code'];
+                    } else {
+                        $category = 'Water';
+                    }
+                }
+
+                if ($desc === '' || $usd <= 0) {
+                    $message = 'Description and a valid amount greater than $0 are required.';
+                    $messageType = 'danger';
+                } else {
+                    if ($expId && $existingExp) {
+                        $oldAmt = (float)$existingExp['amount_usd'];
+                        $stmt = $pdo->prepare("UPDATE expenses SET category = ?, category_id = ?, description = ?, amount_usd = ?, amount_khr = ?, expense_date = ? WHERE id = ?");
+                        $stmt->execute([$category, $categoryId, $desc, $usd, $khr, $date, $expId]);
+                        audit_log('EXPENSE_EDIT', "Updated expense #{$expId}: amount changed from $" . number_format($oldAmt, 2) . " to $" . number_format($usd, 2) . " (Desc: '{$desc}')", 'expense', (string)$expId);
+                        $message = 'Expense saved successfully!';
+                    } else {
+                        $stmt = $pdo->prepare("INSERT INTO expenses (category, category_id, description, amount_usd, amount_khr, expense_date, recorded_by) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                        $stmt->execute([$category, $categoryId, $desc, $usd, $khr, $date, $recordedBy]);
+                        $newExpId = (int)$pdo->lastInsertId();
+                        audit_log('EXPENSE_ADD', "Recorded new expense #{$newExpId} of $" . number_format($usd, 2) . " (Desc: '{$desc}')", 'expense', (string)$newExpId);
+                        $message = 'Expense saved successfully!';
+                    }
+                }
+            }
         }
     } elseif ($action === 'delete_expense') {
-        if (!Auth::can('expenses.delete')) {
+        if (!$canDelete) {
             $message = 'Permission denied: Cannot delete expense.';
             $messageType = 'danger';
         } else {
             $expId = (int)($_POST['expense_id'] ?? 0);
             if ($expId > 0) {
-                // SOFT DELETE per requirement
-                $pdo->prepare("UPDATE expenses SET is_active = 0 WHERE id = ?")->execute([$expId]);
-                audit_log('EXPENSE_CANCEL', "Cancelled expense #{$expId} (soft delete)", 'expense', (string)$expId);
-                $message = 'Expense cancelled successfully (soft deleted)!';
+                $chk = $pdo->prepare("SELECT id, amount_usd, expense_date, recorded_by FROM expenses WHERE id = ?");
+                $chk->execute([$expId]);
+                $existingExp = $chk->fetch(PDO::FETCH_ASSOC);
+                if (!$existingExp) {
+                    $message = 'Expense not found.';
+                    $messageType = 'danger';
+                } elseif (!$canViewProfit && ((int)$existingExp['recorded_by'] !== $currentUserId || $existingExp['expense_date'] !== $todayStr)) {
+                    $message = 'Permission denied: You can only cancel your own expenses recorded today.';
+                    $messageType = 'danger';
+                } else {
+                    $oldAmt = (float)$existingExp['amount_usd'];
+                    $pdo->prepare("UPDATE expenses SET is_active = 0 WHERE id = ?")->execute([$expId]);
+                    audit_log('EXPENSE_CANCEL', "Cancelled expense #{$expId}: amount was $" . number_format($oldAmt, 2) . " (soft delete)", 'expense', (string)$expId);
+                    $message = 'Expense cancelled successfully (soft deleted)!';
+                }
             }
         }
     }
@@ -104,31 +154,50 @@ foreach ($expenseCategories as $ec) {
     $expCatMap['code_' . $ec['code']] = $ec;
 }
 
-// Filter month/year
-$selectedMonth = $_GET['month'] ?? date('Y-m');
-$expStmt = $pdo->prepare("
-    SELECT e.*, u.full_name as recorder_name 
-    FROM expenses e 
-    LEFT JOIN users u ON e.recorded_by = u.id 
-    WHERE DATE_FORMAT(e.expense_date, '%Y-%m') = ?
-      AND (e.is_active IS NULL OR e.is_active = 1)
-    ORDER BY e.expense_date DESC, e.id DESC
-");
-$expStmt->execute([$selectedMonth]);
-$expenses = $expStmt->fetchAll();
+if (!$canViewProfit) {
+    // Non-profit managers see ONLY their own entries from today, no history
+    $selectedMonth = $todayStr;
+    $expStmt = $pdo->prepare("
+        SELECT e.*, u.full_name as recorder_name 
+        FROM expenses e 
+        LEFT JOIN users u ON e.recorded_by = u.id 
+        WHERE e.expense_date = CURDATE()
+          AND e.recorded_by = ?
+          AND (e.is_active IS NULL OR e.is_active = 1)
+        ORDER BY e.id DESC
+    ");
+    $expStmt->execute([$currentUserId]);
+    $expenses = $expStmt->fetchAll();
+    $totalMonthUsd = 0.00;
+    $todayUsd = 0.00;
+    $catBreakdown = [];
+} else {
+    // Filter month/year for owners / profit viewers
+    $selectedMonth = $_GET['month'] ?? date('Y-m');
+    $expStmt = $pdo->prepare("
+        SELECT e.*, u.full_name as recorder_name 
+        FROM expenses e 
+        LEFT JOIN users u ON e.recorded_by = u.id 
+        WHERE DATE_FORMAT(e.expense_date, '%Y-%m') = ?
+          AND (e.is_active IS NULL OR e.is_active = 1)
+        ORDER BY e.expense_date DESC, e.id DESC
+    ");
+    $expStmt->execute([$selectedMonth]);
+    $expenses = $expStmt->fetchAll();
 
-// Month summary stats
-$totalMonthUsd = 0.00;
-$catBreakdown = [];
-foreach ($expenses as $e) {
-    $totalMonthUsd += (float)$e['amount_usd'];
-    $catKey = !empty($e['category_id']) ? ('id_' . $e['category_id']) : ('code_' . $e['category']);
-    $catBreakdown[$catKey] = ($catBreakdown[$catKey] ?? 0.00) + (float)$e['amount_usd'];
+    // Month summary stats
+    $totalMonthUsd = 0.00;
+    $catBreakdown = [];
+    foreach ($expenses as $e) {
+        $totalMonthUsd += (float)$e['amount_usd'];
+        $catKey = !empty($e['category_id']) ? ('id_' . $e['category_id']) : ('code_' . $e['category']);
+        $catBreakdown[$catKey] = ($catBreakdown[$catKey] ?? 0.00) + (float)$e['amount_usd'];
+    }
+
+    // Today expenses
+    $todayStmt = $pdo->query("SELECT COALESCE(SUM(amount_usd), 0) FROM expenses WHERE expense_date = CURDATE() AND (is_active IS NULL OR is_active = 1)");
+    $todayUsd = (float)$todayStmt->fetchColumn();
 }
-
-// Today expenses
-$todayStmt = $pdo->query("SELECT COALESCE(SUM(amount_usd), 0) FROM expenses WHERE expense_date = CURDATE() AND (is_active IS NULL OR is_active = 1)");
-$todayUsd = (float)$todayStmt->fetchColumn();
 
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
@@ -136,14 +205,16 @@ include dirname(__DIR__) . '/layouts/header.php';
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
     <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
         <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
-            <i class="fa-solid fa-receipt mr-1"></i> <?= count($expenses) ?> Expense Records
+            <i class="fa-solid fa-receipt mr-1"></i> <?= count($expenses) ?> <?= $canViewProfit ? 'Expense Records' : 'Submissions Today' ?>
         </span>
         <span style="font-size: 13px; color: var(--text-muted);">
-            Monthly Operating Expenses &amp; Outflow Ledger
+            <?= $canViewProfit ? 'Monthly Operating Expenses &amp; Outflow Ledger' : 'My Operating Expense Entries for Today (' . date('M d, Y') . ')' ?>
         </span>
     </div>
     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-        <input type="month" class="form-input" style="min-height: 40px; padding: 6px 14px; width: 170px;" value="<?= htmlspecialchars($selectedMonth) ?>" onchange="location.href='?view=expenses&month=' + this.value">
+        <?php if ($canViewProfit): ?>
+            <input type="month" class="form-input" style="min-height: 40px; padding: 6px 14px; width: 170px;" value="<?= htmlspecialchars($selectedMonth) ?>" onchange="location.href='?view=expenses&month=' + this.value">
+        <?php endif; ?>
         <button type="button" class="btn btn-primary" onclick="openNewExpenseModal()">
             <i class="fa-solid fa-plus mr-1"></i> Add New Expense
         </button>
@@ -157,6 +228,7 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 <?php endif; ?>
 
+<?php if ($canViewProfit): ?>
 <!-- Metric KPI Cards -->
 <div class="grid grid-cols-3" style="margin-bottom: 24px;">
     <div class="stat-card">
@@ -214,6 +286,7 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 </div>
 <?php endif; ?>
+<?php endif; ?>
 
 <!-- Expenses List Table -->
 <div class="card">
@@ -235,7 +308,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                     <tr>
                         <td colspan="7" style="text-align: center; padding: 40px; color: var(--text-muted);">
                             <i class="fa-solid fa-receipt" style="font-size: 32px; opacity: 0.3; margin-bottom: 8px;"></i>
-                            <p>No expenses logged for this month. Click "+ Add New Expense" to record one.</p>
+                            <p><?= $canViewProfit ? 'No expenses logged for this month. Click "+ Add New Expense" to record one.' : 'No expenses logged by you today. Click "+ Add New Expense" to record one.' ?></p>
                         </td>
                     </tr>
                 <?php else: ?>
@@ -249,6 +322,9 @@ include dirname(__DIR__) . '/layouts/header.php';
                         $cColor = $cObj['color'] ?? '#0284c7';
                         $cIcon = $cObj['icon'] ?? 'fa-tag';
                         $cName = $cObj ? ((Language::current() === 'km') ? $cObj['name_km'] : $cObj['name_en']) : $ex['category'];
+
+                        $canEditRow = $canEdit && ($canViewProfit || ((int)$ex['recorded_by'] === $currentUserId && $ex['expense_date'] === $todayStr));
+                        $canDeleteRow = $canDelete && ($canViewProfit || ((int)$ex['recorded_by'] === $currentUserId && $ex['expense_date'] === $todayStr));
                     ?>
                     <tr>
                         <td>
@@ -272,17 +348,21 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <span class="text-xs text-muted"><?= htmlspecialchars($ex['recorder_name'] ?? 'Admin') ?></span>
                         </td>
                         <td style="text-align: right;">
-                            <button type="button" class="btn btn-secondary btn-sm" data-expense="<?= htmlspecialchars(json_encode($ex, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>" onclick="editExpense(this)">
+                            <?php if ($canEditRow): ?>
+                            <button type="button" class="btn btn-secondary btn-sm" data-expense="<?= htmlspecialchars(json_encode($ex, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>" onclick="editExpense(this)" title="Edit Expense">
                                 <i class="fa-solid fa-pen-to-square"></i>
                             </button>
+                            <?php endif; ?>
+                            <?php if ($canDeleteRow): ?>
                             <form action="" method="POST" style="display: inline;" onsubmit="return confirm('<?= htmlspecialchars(__('confirm_delete')) ?>');">
                                 <?= csrf_field() ?>
                                 <input type="hidden" name="action" value="delete_expense">
                                 <input type="hidden" name="expense_id" value="<?= $ex['id'] ?>">
-                                <button type="submit" class="btn btn-danger btn-sm">
+                                <button type="submit" class="btn btn-danger btn-sm" title="Cancel Expense">
                                     <i class="fa-solid fa-trash-can"></i>
                                 </button>
                             </form>
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>
@@ -328,7 +408,12 @@ include dirname(__DIR__) . '/layouts/header.php';
                     </div>
                     <div class="form-group">
                         <label class="form-label">Expense Date *</label>
-                        <input type="date" name="expense_date" id="exp_date" class="form-input" value="<?= date('Y-m-d') ?>" required>
+                        <?php if ($canViewProfit): ?>
+                            <input type="date" name="expense_date" id="exp_date" class="form-input" value="<?= date('Y-m-d') ?>" required>
+                        <?php else: ?>
+                            <input type="text" name="expense_date" id="exp_date" class="form-input" value="<?= date('Y-m-d') ?>" readonly style="background: var(--bg-subtle); cursor: not-allowed; font-weight: 600;">
+                            <small class="text-xs text-muted" style="display:block; margin-top: 3px;">Restricted to today.</small>
+                        <?php endif; ?>
                     </div>
                 </div>
 
@@ -354,6 +439,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 
 <script>
 const expenseCategoriesList = <?= json_encode($expenseCategories) ?>;
+const canViewProfit = <?= $canViewProfit ? 'true' : 'false' ?>;
 
 function updateExpCatChoice(sel) {
     const opt = sel.options[sel.selectedIndex];
@@ -418,7 +504,7 @@ function editExpense(btnOrEx) {
         document.getElementById('exp_category_id').value = ex.category_id || '';
     }
     
-    document.getElementById('exp_date').value = ex.expense_date;
+    document.getElementById('exp_date').value = canViewProfit ? ex.expense_date : '<?= date('Y-m-d') ?>';
     document.getElementById('exp_amount').value = ex.amount_usd;
     document.getElementById('exp_desc').value = ex.description;
     updateKhrPreview();

@@ -212,7 +212,9 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <th>Category</th>
                         <th>Current Quantity</th>
                         <th>Min Alert Level</th>
-                        <th>Unit Cost</th>
+                        <?php if (Auth::canViewProfit()): ?>
+                            <th>Unit Cost</th>
+                        <?php endif; ?>
                         <th>Stock Status</th>
                         <th style="text-align: right;">Quick Restock</th>
                     </tr>
@@ -248,7 +250,9 @@ include dirname(__DIR__) . '/layouts/header.php';
                             </strong>
                         </td>
                         <td><?= (float)$it['min_alert_qty'] ?> <?= htmlspecialchars($it['unit']) ?></td>
-                        <td><?= formatUSD((float)$it['unit_cost_usd']) ?></td>
+                        <?php if (Auth::canViewProfit()): ?>
+                            <td><?= formatUSD((float)$it['unit_cost_usd']) ?></td>
+                        <?php endif; ?>
                         <td>
                             <?php if ($isLow): ?>
                                 <span class="badge badge-danger"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Low Stock</span>

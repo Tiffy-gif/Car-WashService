@@ -46,7 +46,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         $category = trim($_POST['category'] ?? '');
         $brand = trim($_POST['brand'] ?? '');
         $unit = trim($_POST['unit'] ?? 'can');
-        $costPrice = max(0.00, (float)($_POST['cost_price_usd'] ?? 0.00));
+        if (!Auth::canViewProfit()) {
+            if ($pId > 0) {
+                $oldCostStmt = $pdo->prepare("SELECT cost_price_usd FROM products WHERE id = ?");
+                $oldCostStmt->execute([$pId]);
+                $costPrice = (float)($oldCostStmt->fetchColumn() ?: 0.00);
+            } else {
+                $costPrice = 0.00;
+            }
+        } else {
+            $costPrice = max(0.00, (float)($_POST['cost_price_usd'] ?? 0.00));
+        }
         $sellPrice = max(0.00, (float)($_POST['price_usd'] ?? 0.00));
         $priceKhr = (int)round($sellPrice * get_exchange_rate());
         $stockQty = (int)($_POST['stock_qty'] ?? 0);
@@ -1752,7 +1762,13 @@ include dirname(__DIR__) . '/layouts/header.php';
                                 <button type="button" class="btn-stock-plus" onclick="openQuickRestock(<?= $p['id'] ?>, '<?= htmlspecialchars($p['name_en'], ENT_QUOTES) ?>', <?= $physical ?>)">
                                     + Stock
                                 </button>
-                                <button type="button" class="btn-icon-sq" data-product="<?= htmlspecialchars(json_encode($p, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>" onclick="openEditProductModal(this)" title="Edit Product">
+                                <?php 
+                                $pRowData = $p; 
+                                if (!Auth::canViewProfit()) { 
+                                    unset($pRowData['cost_price_usd']); 
+                                } 
+                                ?>
+                                <button type="button" class="btn-icon-sq" data-product="<?= htmlspecialchars(json_encode($pRowData, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>" onclick="openEditProductModal(this)" title="Edit Product">
                                     <i class="fa-solid fa-pencil"></i>
                                 </button>
                                 <div style="position: relative; display: inline-block;">
@@ -1835,7 +1851,9 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <th>Category</th>
                         <th>Current Quantity</th>
                         <th>Min Alert Level</th>
-                        <th>Unit Cost</th>
+                        <?php if (Auth::canViewProfit()): ?>
+                            <th>Unit Cost</th>
+                        <?php endif; ?>
                         <th>Stock Status</th>
                         <th style="text-align: right;">Quick Restock</th>
                     </tr>
@@ -1843,7 +1861,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                 <tbody>
                     <?php if (empty($supplies)): ?>
                     <tr>
-                        <td colspan="7" style="text-align: center; padding: 48px; color: var(--text-muted);">
+                        <td colspan="<?= Auth::canViewProfit() ? 7 : 6 ?>" style="text-align: center; padding: 48px; color: var(--text-muted);">
                             <i class="fa-solid fa-flask" style="font-size: 36px; margin-bottom: 12px; opacity: 0.3;"></i>
                             <div>No washing chemical supplies found in inventory.</div>
                         </td>
@@ -1879,7 +1897,9 @@ include dirname(__DIR__) . '/layouts/header.php';
                                 </strong>
                             </td>
                             <td><?= (float)$it['min_alert_qty'] ?> <?= htmlspecialchars($it['unit']) ?></td>
-                            <td><?= formatUSD((float)$it['unit_cost_usd']) ?></td>
+                            <?php if (Auth::canViewProfit()): ?>
+                                <td><?= formatUSD((float)$it['unit_cost_usd']) ?></td>
+                            <?php endif; ?>
                             <td>
                                 <?php if ($isLow): ?>
                                     <span class="badge badge-danger"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Low Stock</span>
@@ -2106,11 +2126,13 @@ include dirname(__DIR__) . '/layouts/header.php';
                 </div>
 
                 <div class="grid grid-cols-2" style="gap: 16px;">
+                    <?php if (Auth::canViewProfit()): ?>
                     <div class="form-group">
                         <label class="form-label">Cost Price ($ USD)</label>
                         <input type="number" step="0.25" min="0" name="cost_price_usd" id="prod_cost_price" class="form-input" placeholder="28.00">
                     </div>
-                    <div class="form-group">
+                    <?php endif; ?>
+                    <div class="form-group" style="<?= !Auth::canViewProfit() ? 'grid-column: span 2;' : '' ?>">
                         <label class="form-label">Selling Price ($ USD) *</label>
                         <input type="number" step="0.25" min="0.25" name="price_usd" id="prod_sell_price" class="form-input" style="font-weight: 700; font-size: 16px;" placeholder="38.00" required>
                     </div>
@@ -2558,7 +2580,8 @@ function openNewProductModal() {
     
     document.getElementById('prod_brand').value = '';
     document.getElementById('prod_unit').value = 'can (4L)';
-    document.getElementById('prod_cost_price').value = '25.00';
+    const costInputNew = document.getElementById('prod_cost_price');
+    if (costInputNew) costInputNew.value = '25.00';
     document.getElementById('prod_sell_price').value = '35.00';
     document.getElementById('prod_stock_qty').value = '10';
     document.getElementById('prod_min_alert').value = '4';
@@ -2596,7 +2619,8 @@ function openEditProductModal(btnOrP) {
 
     document.getElementById('prod_brand').value = p.brand || '';
     document.getElementById('prod_unit').value = p.unit || 'unit';
-    document.getElementById('prod_cost_price').value = p.cost_price_usd ? parseFloat(p.cost_price_usd).toFixed(2) : '0.00';
+    const costInputEdit = document.getElementById('prod_cost_price');
+    if (costInputEdit) costInputEdit.value = p.cost_price_usd ? parseFloat(p.cost_price_usd).toFixed(2) : '0.00';
     document.getElementById('prod_sell_price').value = p.price_usd ? parseFloat(p.price_usd).toFixed(2) : '0.00';
     document.getElementById('prod_stock_qty').value = p.stock_qty ?? 0;
     document.getElementById('prod_min_alert').value = p.min_stock_alert ?? 0;

@@ -12,6 +12,7 @@ require_once dirname(__DIR__, 2) . '/core/CashierControl.php';
 require_once dirname(__DIR__, 2) . '/core/StockControl.php';
 require_once dirname(__DIR__, 2) . '/core/BankTransferControl.php';
 require_once dirname(__DIR__, 2) . '/core/TelegramNotifier.php';
+require_once dirname(__DIR__, 2) . '/core/OrderCancellation.php';
 
 Auth::requirePermission('orders.list');
 $pageTitle = __('nav_orders');
@@ -340,9 +341,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $message = 'Permission denied: Cannot cancel order.';
             $messageType = 'danger';
         } else {
-            $cancelReason = trim($_POST['cancel_reason'] ?? '');
-            if ($cancelReason === '') {
-                $cancelReason = 'Customer requested cancellation';
+            $reasonCode = trim($_POST['cancel_reason_code'] ?? '');
+            $cancelNote = trim($_POST['cancel_note'] ?? $_POST['cancel_reason'] ?? '');
+            if ($reasonCode === 'other' && $cancelNote === '') {
+                $message = __('cancel_note_required_hint', 'A typed explanation note is required when choosing "Other".');
+                $messageType = 'danger';
+                $canProceed = false;
+            } else {
+                $cleanReason = OrderCancellation::formatReason($reasonCode, $cancelNote);
             }
 
             $ordStmt = $pdo->prepare("SELECT id, order_number, status, payment_status FROM orders WHERE id = ?");
@@ -373,7 +379,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                     if ($canProceed) {
                         $currUser = Auth::user();
                         $cancellerName = $currUser ? "{$currUser['full_name']} (" . ucfirst($currUser['role']) . ")" : 'Staff';
-                        $fullReason = "Cancelled by {$cancellerName}" . ($mgrInfo ? " [Auth by Manager: {$mgrInfo['manager_name']}]" : "") . ": {$cancelReason}";
+                        $fullReason = "Cancelled by {$cancellerName}" . ($mgrInfo ? " [Auth by Manager: {$mgrInfo['manager_name']}]" : "") . ": {$cleanReason}";
 
                         // Release reserved stock or restore committed stock
                         if ($isPaidOrder) {
@@ -413,25 +419,55 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                         }
 
                         // Update order to cancelled
-                        $cancelStmt = $pdo->prepare("
-                            UPDATE orders 
-                            SET status = 'cancelled', 
-                                payment_status = 'cancelled', 
-                                repair_status = 'cancelled', 
-                                cancel_reason = ?, 
-                                cancelled_at = CURRENT_TIMESTAMP, 
-                                notes = CONCAT(COALESCE(notes, ''), ?) 
-                            WHERE id = ?
-                        ");
-                        $cancelStmt->execute([$fullReason, " [{$fullReason}]", $orderId]);
+                        $hasCancelCodeCol = false;
+                        try {
+                            $pdo->query("SELECT cancel_reason_code FROM orders LIMIT 0");
+                            $hasCancelCodeCol = true;
+                        } catch (Throwable $e) {
+                            $hasCancelCodeCol = false;
+                        }
+
+                        $currentStaffUserId = Auth::getUserId();
+                        $approverUserId = $mgrInfo ? (int)$mgrInfo['manager_id'] : $currentStaffUserId;
+
+                        if ($hasCancelCodeCol) {
+                            $cancelStmt = $pdo->prepare("
+                                UPDATE orders 
+                                SET status = 'cancelled', 
+                                    payment_status = 'cancelled', 
+                                    repair_status = 'cancelled', 
+                                    cancel_reason = ?, 
+                                    cancel_reason_code = ?,
+                                    cancelled_by_user_id = ?,
+                                    cancel_approved_by_user_id = ?,
+                                    cancelled_at = CURRENT_TIMESTAMP, 
+                                    notes = CONCAT(COALESCE(notes, ''), ?) 
+                                WHERE id = ?
+                            ");
+                            $cancelStmt->execute([$fullReason, $reasonCode ?: null, $currentStaffUserId, $approverUserId, " [{$fullReason}]", $orderId]);
+                        } else {
+                            $cancelStmt = $pdo->prepare("
+                                UPDATE orders 
+                                SET status = 'cancelled', 
+                                    payment_status = 'cancelled', 
+                                    repair_status = 'cancelled', 
+                                    cancel_reason = ?, 
+                                    cancelled_by_user_id = ?,
+                                    cancel_approved_by_user_id = ?,
+                                    cancelled_at = CURRENT_TIMESTAMP, 
+                                    notes = CONCAT(COALESCE(notes, ''), ?) 
+                                WHERE id = ?
+                            ");
+                            $cancelStmt->execute([$fullReason, $currentStaffUserId, $approverUserId, " [{$fullReason}]", $orderId]);
+                        }
 
                         AuditLogger::log('ORDER_CANCEL', "Cancelled order #{$order['order_number']}. Reason: {$fullReason}", 'order', (string)$orderId);
                         TelegramNotifier::notifyOrderCancelled(
                             (string)$order['order_number'],
                             (string)($order['plate_number'] ?? ''),
                             (float)($order['total_usd'] ?? 0),
-                            $fullReason,
-                            (string)(Auth::getUserName() ?: 'Staff')
+                            $cleanReason,
+                            $cancellerName . ($mgrInfo ? " (Approved by {$mgrInfo['manager_name']})" : '')
                         );
                         $message = "Order #{$order['order_number']} has been CANCELLED. Inventory stock and loyalty points were restored.";
                     }
@@ -1041,9 +1077,25 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <li>Exclude this order from all revenue and income reports</li>
                     </ul>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Cancellation Reason *</label>
-                    <input type="text" name="cancel_reason" id="cancel_reason" class="form-input" placeholder="e.g. Customer changed mind, wrong vehicle" required>
+                <?php $standardCancelReasons = OrderCancellation::getReasons(); ?>
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label class="form-label"><?= htmlspecialchars(__('cancel_reason', 'Cancellation Reason')) ?> *</label>
+                    <select name="cancel_reason_code" id="cancel_reason_code" class="form-input" required onchange="toggleCancelOtherNote(this.value)">
+                        <option value="" disabled selected><?= htmlspecialchars(__('select_cancel_reason', '-- Select Standard Reason --')) ?></option>
+                        <?php foreach ($standardCancelReasons as $rCode => $rObj): ?>
+                            <option value="<?= htmlspecialchars($rCode) ?>">
+                                <?= htmlspecialchars($rObj['label']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="form-group" id="cancel_note_group" style="display: none; margin-bottom: 14px;">
+                    <label class="form-label" id="cancel_note_label">
+                        <?= htmlspecialchars(__('cancel_note', 'Explanation Note')) ?>
+                        <span id="cancel_note_req_mark" style="color: var(--danger); display: none;">*</span>
+                    </label>
+                    <textarea name="cancel_note" id="cancel_note" class="form-input" rows="2" placeholder="<?= htmlspecialchars(__('cancel_note_placeholder', 'Enter detailed explanation for cancellation...')) ?>" style="resize: vertical;"></textarea>
                 </div>
 
                 <!-- Manager PIN Confirmation for Paid Orders -->
@@ -1311,6 +1363,29 @@ let currentOrderPointsDiscount = 0.00;
 const REDEEM_RATE = <?= Loyalty::getRedeemRate() ?>;
 const EXCHANGE_RATE = <?= get_exchange_rate() ?>;
 
+function toggleCancelOtherNote(val) {
+    let group = document.getElementById('cancel_note_group');
+    let noteInp = document.getElementById('cancel_note');
+    let reqMark = document.getElementById('cancel_note_req_mark');
+    if (!group || !noteInp) return;
+    if (val === 'other') {
+        group.style.display = 'block';
+        noteInp.required = true;
+        if (reqMark) reqMark.style.display = 'inline';
+        noteInp.placeholder = '<?= htmlspecialchars(__('cancel_note_required_hint', 'Type mandatory explanation note for Other...')) ?>';
+        noteInp.focus();
+    } else if (val) {
+        group.style.display = 'block';
+        noteInp.required = false;
+        if (reqMark) reqMark.style.display = 'none';
+        noteInp.placeholder = '<?= htmlspecialchars(__('cancel_note_optional_hint', 'Optional note (e.g. details)...')) ?>';
+    } else {
+        group.style.display = 'none';
+        noteInp.required = false;
+        if (reqMark) reqMark.style.display = 'none';
+    }
+}
+
 function openCancelOrderModal(btnOrOrderId, orderNum, plate) {
     let orderId = btnOrOrderId;
     let isPaid = '0';
@@ -1322,7 +1397,12 @@ function openCancelOrderModal(btnOrOrderId, orderNum, plate) {
     }
     document.getElementById('cancel_order_id').value = orderId;
     document.getElementById('cancel_order_label').innerText = 'Cancel Order: ' + orderNum + ' (Plate: ' + plate + ')';
-    document.getElementById('cancel_reason').value = '';
+    
+    let reasonSelect = document.getElementById('cancel_reason_code');
+    if (reasonSelect) reasonSelect.value = '';
+    let noteInp = document.getElementById('cancel_note');
+    if (noteInp) noteInp.value = '';
+    toggleCancelOtherNote('');
 
     let pinBox = document.getElementById('cancel_manager_pin_box');
     let mgrPinInp = document.getElementById('cancel_manager_pin');
