@@ -20,6 +20,12 @@ require_once __DIR__ . '/migrate_pos_devices.php';
 require_once __DIR__ . '/migrate_order_cancel_audit.php';
 require_once __DIR__ . '/migrate_revoke_cashier_cancel.php';
 require_once __DIR__ . '/migrate_immutable_ledgers.php';
+require_once __DIR__ . '/migrate_cancel_reasons.php';
+require_once __DIR__ . '/migrate_drawer_events_compatibility.php';
+require_once __DIR__ . '/migrate_cashier_sessions_compatibility.php';
+require_once __DIR__ . '/migrate_profit_permission.php';
+require_once __DIR__ . '/migrate_oil_change_status.php';
+require_once __DIR__ . '/migrate_slip_print_tokens.php';
 
 /**
  * Run and verify all database schema migrations.
@@ -83,6 +89,12 @@ function runMigrations(bool $force = false): array {
         migrate_pos_devices();
         migrateOrderCancelAudit($force);
         migrateRevokeCashierCancel($force);
+        migrateCancelReasons($force);
+        migrateDrawerEventsCompatibility($force);
+        migrateCashierSessionsCompatibility($force);
+        migrateProfitPermission($force);
+        migrate_oil_change_status($pdo);
+        migrateSlipPrintTokens($force);
         $immSuccess = migrateImmutableLedgers($force, $pdo);
         if (!$immSuccess) {
             throw new RuntimeException("Immutable ledger triggers verification failed. Migration halted to prevent unprotected database operation.");
@@ -131,9 +143,47 @@ function runMigrations(bool $force = false): array {
 }
 
 if (php_sapi_name() === 'cli' && basename(__FILE__) === basename($_SERVER['SCRIPT_FILENAME'] ?? '')) {
+    $pdo = Database::getInstance();
+    $targetDb = $pdo->query("SELECT DATABASE()")->fetchColumn() ?: 'unknown';
+    echo "====================================================================\n";
+    echo "DATABASE MIGRATION RUNNER\n";
+    echo "Target Database: [{$targetDb}]\n";
+    echo "====================================================================\n";
+
+    // Detect waiting updates
+    $executed = [];
+    try {
+        $executed = $pdo->query("SELECT migration FROM schema_migrations")->fetchAll(PDO::FETCH_COLUMN) ?: [];
+    } catch (Throwable $e) {}
+
+    $allKnown = [
+        'migrate_cancel_reasons' => 'Order cancellation reason codes & indexes',
+        'migrate_drawer_events_compatibility' => 'Drawer events cash movement columns & indexes',
+        'migrate_cashier_sessions_compatibility' => 'Cashier shifts needs_review & review_reason',
+        'migrate_profit_permission' => 'Profit viewing permission (reports.view_profit)',
+        'migrate_oil_change_status' => 'Oil change logs status column & vehicle indexes',
+        'migrate_slip_print_tokens' => 'One-time slip print tickets table (hashed tokens)',
+    ];
+
+    $pending = [];
+    foreach ($allKnown as $migKey => $desc) {
+        if (!in_array($migKey, $executed, true)) {
+            $pending[] = "  * [PENDING] {$migKey} ({$desc})";
+        }
+    }
+
+    if (!empty($pending)) {
+        echo "Waiting updates detected (" . count($pending) . "):\n";
+        echo implode("\n", $pending) . "\n\n";
+    } else {
+        echo "No waiting updates detected. Verifying all schemas are up to date...\n\n";
+    }
+
     $res = runMigrations();
     if (!$res['success']) {
+        echo "\n[ERROR] Migration failed: " . ($res['error'] ?? 'Unknown error') . "\n";
         exit(1);
     }
+    echo "\n[SUCCESS] {$res['message']}\n";
     exit(0);
 }

@@ -568,6 +568,7 @@ $ACTION_PERMISSIONS = [
     'get_open_shift_slip' => ['pos.access'],
     'get_end_shift_slip' => ['pos.access'],
     'get_close_day_slip' => ['pos.access', 'daily_close.view', 'reports.view'],
+    'get_slip_print_token' => ['pos.access'],
 
     // Workshop & Mechanics
     'save_repair_note' => ['mechanic_jobs.notes'],
@@ -5122,6 +5123,64 @@ if ($action === 'get_close_day_slip') {
         echo json_encode(['success' => true, 'slip' => $slip]);
     } catch (Exception $e) {
         http_response_code(404);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// ========================================================
+// 28F. ACTION: get_slip_print_token (Generate 2-min one-time print link)
+// ========================================================
+if ($action === 'get_slip_print_token') {
+    $slipType = trim((string)($inputData['slip_type'] ?? $_GET['slip_type'] ?? $_POST['slip_type'] ?? ''));
+    $slipRef = trim((string)($inputData['slip_ref'] ?? $inputData['id'] ?? $_GET['slip_ref'] ?? $_GET['id'] ?? ''));
+
+    if (!in_array($slipType, ['open', 'end', 'close_day'], true) || $slipRef === '') {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Missing or invalid slip_type or slip_ref']);
+        exit;
+    }
+
+    $callerRole = strtolower((string)($sessionUser['role'] ?? ''));
+    $callerUserId = (int)($sessionUser['id'] ?? 0);
+
+    // Ownership & permission verification:
+    // Owner and manager can request any slip.
+    // Cashier can request only their own shift slip or the day close they performed.
+    $isAuthorized = false;
+    if (in_array($callerRole, ['owner', 'admin', 'system_admin', 'manager'], true)) {
+        $isAuthorized = true;
+    } elseif ($callerRole === 'cashier') {
+        if ($slipType === 'open' || $slipType === 'end') {
+            $shiftOwnerId = (int)$pdo->query("SELECT cashier_id FROM cashier_shifts WHERE id = " . (int)$slipRef)->fetchColumn();
+            if ($shiftOwnerId === $callerUserId) {
+                $isAuthorized = true;
+            }
+        } elseif ($slipType === 'close_day') {
+            $closerId = (int)$pdo->query("SELECT closed_by_user_id FROM pos_daily_closes WHERE id = " . (int)$slipRef . " OR z_report_number = " . $pdo->quote($slipRef) . " OR close_date = " . $pdo->quote($slipRef))->fetchColumn();
+            if ($closerId === $callerUserId) {
+                $isAuthorized = true;
+            }
+        }
+    }
+
+    if (!$isAuthorized) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'Access Denied: You do not have permission to generate print link for this slip.']);
+        exit;
+    }
+
+    try {
+        $rawToken = CashierControl::createSlipPrintToken($slipType, $slipRef, $callerUserId);
+        $url = "views/cashier/slip.php?type=" . urlencode($slipType) . "&id=" . urlencode($slipRef) . "&otk=" . urlencode($rawToken) . "&autoprint=1";
+        echo json_encode([
+            'success'    => true,
+            'token'      => $rawToken,
+            'url'        => $url,
+            'expires_in' => 120
+        ]);
+    } catch (Exception $e) {
+        http_response_code(500);
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
     }
     exit;

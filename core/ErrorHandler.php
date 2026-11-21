@@ -64,6 +64,10 @@ class ErrorHandler {
         self::log($level, "{$message} in {$file}:{$line}");
 
         if ($severity === E_ERROR || $severity === E_USER_ERROR) {
+            if (php_sapi_name() === 'cli') {
+                fwrite(STDERR, "[ERROR] {$message} in {$file}:{$line}" . PHP_EOL);
+                exit(1);
+            }
             self::renderFriendlyError("A system processing error occurred.");
             exit;
         }
@@ -82,6 +86,10 @@ class ErrorHandler {
         );
 
         self::log('CRITICAL', $message);
+        if (php_sapi_name() === 'cli') {
+            fwrite(STDERR, $e->getMessage() . PHP_EOL);
+            exit(1);
+        }
         self::renderFriendlyError();
         exit;
     }
@@ -90,6 +98,10 @@ class ErrorHandler {
         $error = error_get_last();
         if ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
             self::log('FATAL', "Fatal error: {$error['message']} in {$error['file']}:{$error['line']}");
+            if (php_sapi_name() === 'cli') {
+                fwrite(STDERR, "[FATAL] {$error['message']} in {$error['file']}:{$error['line']}" . PHP_EOL);
+                exit(1);
+            }
             self::renderFriendlyError();
         }
     }

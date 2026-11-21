@@ -782,16 +782,21 @@ class SmartQueueEngine {
         $buffer = (int)get_setting('estimate_buffer_percent', '10');
         $bufferedWait = (int)ceil($estimatedWait * (1 + ($buffer / 100)));
 
-        // If wait over 45 minutes, notify Supervisor
-        if ($bufferedWait > 45) {
+        // Long wait warning settings (graceful defaults: enabled = 1, threshold = 45 min)
+        $enableWarning = (int)get_setting('enable_long_wait_warning', '1');
+        $thresholdMinutes = max(5, (int)get_setting('long_wait_threshold_minutes', '45'));
+        $isOver = ($enableWarning === 1 && $bufferedWait > $thresholdMinutes);
+
+        // If wait over threshold and enabled, notify Supervisor
+        if ($isOver) {
             require_once __DIR__ . '/NotificationManager.php';
             NotificationManager::ensureTables($pdo);
             NotificationManager::notify($pdo, [
                 'target_role' => 'wash_supervisor',
                 'category' => 'long_wait',
-                'reference_id' => 'WAIT-45-' . date('Ymd-H'),
-                'title_en' => 'Wait time over 45 minutes',
-                'title_km' => 'រយៈពេលរង់ចាំលើសពី ៤៥ នាទី',
+                'reference_id' => 'WAIT-' . $thresholdMinutes . '-' . date('Ymd-H'),
+                'title_en' => "Wait time over {$thresholdMinutes} minutes",
+                'title_km' => "រយៈពេលរង់ចាំលើសពី {$thresholdMinutes} នាទី",
                 'message_en' => "Current estimated customer wait is {$bufferedWait} minutes ({$waitingCount} cars in queue).",
                 'message_km' => "ការប៉ាន់ស្មានការរង់ចាំបច្ចុប្បន្នគឺ {$bufferedWait} នាទី ({$waitingCount} គ្រឿងក្នុងជួរ)។",
                 'action_url' => 'index.php?view=bays_queue',
@@ -804,7 +809,10 @@ class SmartQueueEngine {
             'waiting_cars_count' => $waitingCount,
             'active_bays_count' => $activeBayCount,
             'new_service_duration_minutes' => $newJobDuration,
-            'is_over_45' => ($bufferedWait > 45)
+            'is_over_45' => $isOver,
+            'is_over_threshold' => $isOver,
+            'threshold_minutes' => $thresholdMinutes,
+            'enable_warning' => (bool)$enableWarning
         ];
     }
 }

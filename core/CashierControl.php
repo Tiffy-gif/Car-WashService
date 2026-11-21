@@ -2122,6 +2122,11 @@ class CashierControl {
         $shiftsJson = json_encode($shiftsSummary);
         $reopenJson = json_encode($reopenHistory);
 
+        // Server-side requirement: Count all unfinished orders from any date and append note to closing report
+        $unfCount = (int)$pdo->query("SELECT COUNT(*) FROM orders WHERE status IN ('waiting', 'washing', 'in_progress')")->fetchColumn();
+        $unfNote = "[Unfinished orders at close: {$unfCount}]";
+        $notes = ($notes === null || trim((string)$notes) === '') ? $unfNote : (trim((string)$notes) . " | " . $unfNote);
+
         if ($exist) {
             $upd = $pdo->prepare("
                 UPDATE pos_daily_closes SET
@@ -2332,6 +2337,19 @@ class CashierControl {
             'close_date'   => $closeDate,
             'manager_name' => $mgr['manager_name'],
             'message'      => "Day {$closeDate} has been reopened successfully."
+        ];
+    }
+
+    /**
+     * Get Shop Header Settings for Slips
+     */
+    public static function getShopSettings(?PDO $pdo = null): array {
+        return [
+            'shop_name_en' => get_setting('shop_name_en', 'My Car Wash'),
+            'shop_name_km' => get_setting('shop_name_km', 'សេវាកម្មលាងរថយន្ត និងម៉ូតូ'),
+            'shop_phone'   => get_setting('shop_phone', '012 334 556'),
+            'shop_address' => get_setting('shop_address', 'Phnom Penh, Cambodia'),
+            'shop_logo'    => get_setting('shop_logo', '')
         ];
     }
 
@@ -2595,20 +2613,96 @@ class CashierControl {
     }
 
     /**
-     * Helper to load shop settings for receipt and slip headers
+     * Generate a short-lived (2-minute) one-time ticket for browser slip printing.
+     * The raw token is returned to caller, while its SHA-256 hash is safely stored in database.
+     * Also opportunistically cleans up expired/used tokens older than 1 day.
      */
-    private static function getShopSettings(PDO $pdo): array {
-        $settings = [];
-        $stmt = $pdo->query("SELECT setting_key, setting_value FROM settings");
-        while ($r = $stmt->fetch()) {
-            $settings[$r['setting_key']] = $r['setting_value'];
+    public static function createSlipPrintToken(string $slipType, string $slipRef, int $userId): string {
+        $pdo = Database::getInstance();
+        $rawToken = bin2hex(random_bytes(16));
+        $tokenHash = hash('sha256', $rawToken);
+        $expiresAt = date('Y-m-d H:i:s', time() + 120); // 2 minutes
+
+        // 1. Opportunistic cleanup (~1 in 20 requests): remove tokens used or expired > 1 day ago
+        if (random_int(1, 20) === 1) {
+            try {
+                $driver = Database::getDriver();
+                if ($driver === 'sqlite') {
+                    $pdo->exec("DELETE FROM slip_print_tokens WHERE (used_at IS NOT NULL AND datetime(used_at) < datetime('now', '-1 day')) OR datetime(expires_at) < datetime('now', '-1 day')");
+                } else {
+                    $pdo->exec("DELETE FROM slip_print_tokens WHERE (used_at IS NOT NULL AND used_at < NOW() - INTERVAL 1 DAY) OR expires_at < NOW() - INTERVAL 1 DAY");
+                }
+            } catch (Throwable $e) {}
         }
+
+        // 2. Insert new token hash
+        try {
+            $stmt = $pdo->prepare("
+                INSERT INTO slip_print_tokens (token_hash, slip_type, slip_ref, user_id, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([$tokenHash, $slipType, $slipRef, $userId, $expiresAt]);
+        } catch (Throwable $e) {
+            error_log("Failed to insert slip_print_token: " . $e->getMessage());
+            throw new Exception("Printing authorization service is currently unavailable.");
+        }
+
+        return $rawToken;
+    }
+
+    /**
+     * Validate and consume a one-time slip print token.
+     * Tokens are valid for one print only, must match slip type/ref, and expire in 2 minutes.
+     * Graceful fallback if table is missing.
+     */
+    public static function validateAndConsumeSlipPrintToken(string $rawToken, string $slipType, string $slipRef): array {
+        $rawToken = trim($rawToken);
+        if ($rawToken === '') {
+            return ['valid' => false, 'error' => 'empty_token'];
+        }
+
+        $pdo = Database::getInstance();
+        $tokenHash = hash('sha256', $rawToken);
+
+        try {
+            $stmt = $pdo->prepare("
+                SELECT id, token_hash, slip_type, slip_ref, user_id, expires_at, used_at
+                FROM slip_print_tokens
+                WHERE token_hash = ?
+                LIMIT 1
+            ");
+            $stmt->execute([$tokenHash]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            // Table does not exist or schema issue
+            error_log("slip_print_tokens query error: " . $e->getMessage());
+            return ['valid' => false, 'error' => 'table_missing'];
+        }
+
+        if (!$row) {
+            return ['valid' => false, 'error' => 'invalid_token'];
+        }
+
+        if (!empty($row['used_at'])) {
+            return ['valid' => false, 'error' => 'already_used'];
+        }
+
+        if (strtotime($row['expires_at']) < time()) {
+            return ['valid' => false, 'error' => 'expired'];
+        }
+
+        if ($row['slip_type'] !== $slipType || (string)$row['slip_ref'] !== (string)$slipRef) {
+            return ['valid' => false, 'error' => 'mismatch'];
+        }
+
+        // Mark consumed immediately
+        try {
+            $pdo->prepare("UPDATE slip_print_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = ?")->execute([$row['id']]);
+        } catch (Throwable $e) {}
+
         return [
-            'shop_name_en' => $settings['shop_name_en'] ?? 'My Car Wash',
-            'shop_name_km' => $settings['shop_name_km'] ?? 'សេវាកម្មលាងរថយន្ត និងម៉ូតូ',
-            'shop_phone'   => $settings['shop_phone'] ?? '012 334 556',
-            'shop_address' => $settings['shop_address'] ?? 'Phnom Penh, Cambodia',
-            'shop_logo'    => $settings['shop_logo'] ?? '',
+            'valid'   => true,
+            'user_id' => (int)$row['user_id']
         ];
     }
 }

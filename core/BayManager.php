@@ -847,9 +847,35 @@ class BayManager {
     }
 
     /**
-     * Get waiting queue for wash and technical orders, ordered strictly by priority and FIFO.
+     * Get the start of today in the shop's timezone (defaults to Asia/Phnom_Penh).
      */
-    public static function getQueues(PDO $pdo): array {
+    public static function getShopTodayStart(PDO $pdo): string {
+        $tzName = 'Asia/Phnom_Penh';
+        try {
+            $stmtTz = $pdo->prepare("SELECT setting_value FROM settings WHERE setting_key = 'app_timezone'");
+            $stmtTz->execute();
+            $foundTz = $stmtTz->fetchColumn();
+            if (!empty($foundTz) && is_string($foundTz) && in_array(trim($foundTz), DateTimeZone::listIdentifiers(), true)) {
+                $tzName = trim($foundTz);
+            }
+        } catch (Throwable $e) {}
+
+        try {
+            $shopTz = new DateTimeZone($tzName);
+            $dt = new DateTime('now', $shopTz);
+            return $dt->format('Y-m-d 00:00:00');
+        } catch (Throwable $e) {
+            return date('Y-m-d 00:00:00');
+        }
+    }
+
+    /**
+     * Get waiting queue for wash and technical orders, ordered strictly by priority and FIFO.
+     * When $includeStaleWaiting is false (default), excludes stale waiting orders from previous
+     * days that are not in a bay (status='waiting' AND bay_id IS NULL/0 AND created_at < todayStart).
+     * Orders currently in a bay or with status 'washing' from any date are NEVER excluded.
+     */
+    public static function getQueues(PDO $pdo, bool $includeStaleWaiting = false): array {
         self::ensureTables($pdo);
 
         try {
@@ -859,6 +885,9 @@ class BayManager {
         }
         $isSqlite = ($driver === 'sqlite');
         $groupConcat = $isSqlite ? "GROUP_CONCAT(DISTINCT oi.service_name)" : "GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ')";
+
+        $todayStart = self::getShopTodayStart($pdo);
+        $staleClause = $includeStaleWaiting ? "" : " AND NOT (o.status = 'waiting' AND (o.bay_id IS NULL OR o.bay_id = 0) AND o.created_at < :today_start) ";
 
         // Fetch all waiting orders joined with customer membership
         $sql = "
@@ -871,11 +900,18 @@ class BayManager {
             LEFT JOIN order_items oi ON o.id = oi.order_id
             WHERE (o.status IN ('waiting', 'washing') OR (o.status = 'paid' AND (o.bay_id IS NULL OR o.bay_id = 0) AND o.finished_at IS NULL AND EXISTS (SELECT 1 FROM order_tasks ot WHERE ot.order_id = o.id AND ot.status IN ('waiting', 'ready_for_tech', 'in_progress'))))
               AND (o.bay_id IS NULL OR o.bay_id = 0) AND (o.is_active = 1 OR o.is_active IS NULL)
+              {$staleClause}
             GROUP BY o.id
             ORDER BY CASE WHEN o.queue_priority > 0 THEN o.queue_priority ELSE 999999 END ASC, COALESCE(o.arrived_at, o.created_at) ASC, o.id ASC
         ";
 
-        $orders = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+        if ($includeStaleWaiting) {
+            $orders = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(['today_start' => $todayStart]);
+            $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
 
         $now = time();
         $processedOrders = [];
@@ -3061,6 +3097,138 @@ class BayManager {
             'ready_total' => count($readyCars),
             'server_time' => date('h:i:s A'),
             'server_date' => date('l, d M Y'),
+        ];
+    }
+
+    /**
+     * Get stale waiting orders from previous days that are not in a bay.
+     * These orders are excluded from wait time estimates and must be reviewed.
+     * Orders with payment_status = 'paid' have can_complete = 1.
+     * Unpaid orders have can_complete = 0 and must only be cancelled with a reason.
+     */
+    public static function getStaleWaitingOrders(PDO $pdo): array {
+        self::ensureTables($pdo);
+        $todayStart = self::getShopTodayStart($pdo);
+
+        try {
+            $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        } catch (Throwable $t) {
+            $driver = Database::getDriver();
+        }
+        $isSqlite = ($driver === 'sqlite');
+        $groupConcat = $isSqlite ? "GROUP_CONCAT(DISTINCT oi.service_name)" : "GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ')";
+
+        $sql = "
+            SELECT o.id, o.order_number, o.created_at, o.status, o.payment_status,
+                   o.total_usd, o.vehicle_type, o.plate_number, o.bay_id,
+                   c.name as customer_name, c.phone as customer_phone,
+                   (CASE WHEN o.payment_status = 'paid' THEN 1 ELSE 0 END) as can_complete,
+                   {$groupConcat} as service_names
+            FROM orders o
+            LEFT JOIN customers c ON o.customer_id = c.id
+            LEFT JOIN order_items oi ON o.id = oi.order_id
+            WHERE o.status = 'waiting'
+              AND (o.bay_id IS NULL OR o.bay_id = 0)
+              AND (o.is_active = 1 OR o.is_active IS NULL)
+              AND o.created_at < :today_start
+            GROUP BY o.id
+            ORDER BY o.created_at ASC
+        ";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(['today_start' => $todayStart]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Mark a stale waiting order as completed.
+     * Strict rules:
+     * - ONLY orders with payment_status === 'paid' can be completed.
+     * - Unpaid old orders CANNOT be completed; they must be cancelled with a reason.
+     * - Completing NEVER mutates or touches payment fields (total_usd, paid_at, payment_status).
+     * - Must be recorded in audit_logs with the authorized manager's name.
+     * - Operates on ONE order at a time (no bulk complete).
+     */
+    public static function completeStaleOrder(
+        PDO $pdo,
+        int $orderId,
+        int $managerUserId,
+        string $managerName,
+        string $managerRole = 'manager'
+    ): array {
+        if ($orderId <= 0) {
+            throw new InvalidArgumentException("Invalid order ID.");
+        }
+
+        $stmt = $pdo->prepare("SELECT id, order_number, status, payment_status, total_usd FROM orders WHERE id = ?");
+        $stmt->execute([$orderId]);
+        $order = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$order) {
+            throw new RuntimeException("Order #{$orderId} not found.");
+        }
+
+        if (in_array($order['status'], ['completed', 'cancelled'], true)) {
+            throw new RuntimeException("Order #{$order['order_number']} is already {$order['status']}.");
+        }
+
+        // Strict requirement: Mark Complete only allowed for orders that are already paid!
+        if ($order['payment_status'] !== 'paid') {
+            throw new RuntimeException("Cannot mark complete: Order #{$order['order_number']} is unpaid. Unpaid old orders can only be cancelled with a reason.");
+        }
+
+        // Completing must NEVER change payment. Payment fields remain untouched.
+        $upd = $pdo->prepare("
+            UPDATE orders SET
+                status = 'completed',
+                finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP)
+            WHERE id = ? AND payment_status = 'paid'
+        ");
+        $upd->execute([$orderId]);
+
+        // Complete any remaining order tasks
+        try {
+            $pdo->prepare("UPDATE order_tasks SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE order_id = ? AND status != 'completed'")->execute([$orderId]);
+        } catch (Throwable $e) {}
+
+        // Log in audit log with manager's name
+        require_once dirname(__DIR__) . '/core/AuditLogger.php';
+        if (class_exists('AuditLogger')) {
+            AuditLogger::log(
+                'STALE_ORDER_COMPLETED',
+                "Manager {$managerName} marked stale waiting order #{$order['order_number']} (ID: {$orderId}) as complete. Payment untouched (\${$order['total_usd']}, status: paid).",
+                'order',
+                (string)$orderId,
+                $managerUserId,
+                $managerName,
+                $managerRole
+            );
+        } else {
+            $logUid = 'AUD-' . bin2hex(random_bytes(8));
+            $stmtAudit = $pdo->prepare("
+                INSERT INTO audit_logs (
+                    log_uid, user_id, username, role, action,
+                    entity_type, entity_id, details, created_at
+                ) VALUES (
+                    ?, ?, ?, ?, 'STALE_ORDER_COMPLETED',
+                    'order', ?, ?, CURRENT_TIMESTAMP
+                )
+            ");
+            $stmtAudit->execute([
+                $logUid,
+                $managerUserId,
+                $managerName,
+                $managerRole,
+                (string)$orderId,
+                "Manager {$managerName} marked stale waiting order #{$order['order_number']} (ID: {$orderId}) as complete. Payment untouched (\${$order['total_usd']}, status: paid)."
+            ]);
+        }
+
+        return [
+            'success' => true,
+            'order_id' => $orderId,
+            'order_number' => $order['order_number'],
+            'manager_name' => $managerName,
+            'message' => "Order #{$order['order_number']} marked complete by {$managerName}."
         ];
     }
 }

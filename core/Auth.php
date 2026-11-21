@@ -407,6 +407,27 @@ class Auth {
         return in_array($permission, $perms, true);
     }
 
+    /**
+     * Check if a specific user has permission to view profit, cost, and operating expense figures.
+     * Owner and System Admin have it by default.
+     * Managers and other roles require the explicit 'reports.view_profit' permission.
+     * Cashiers, washers, mechanics, customers never see profit figures.
+     */
+    public static function userCanViewProfit(int $userId): bool {
+        $u = self::getUserRoleDetails($userId);
+        if (!$u) {
+            return false;
+        }
+        $role = $u['role'] ?? '';
+        if ($role === 'owner' || $role === 'system_admin') {
+            return true;
+        }
+        if (in_array($role, ['cashier', 'washer', 'mechanic', 'customer'], true)) {
+            return false;
+        }
+        return self::userHasPermission($userId, 'reports.view_profit');
+    }
+
     public static function getUserRoleDetails(int $userId): ?array {
         $pdo = Database::getInstance();
         $stmt = $pdo->prepare("
@@ -482,6 +503,31 @@ class Auth {
             self::loadPermissions();
         }
         return in_array($permission, $_SESSION['permissions'] ?? [], true);
+    }
+
+    /**
+     * Check if the current user has permission to view profit, cost, and operating expense figures.
+     * Owner and System Admin have it by default.
+     * Managers and other roles require the explicit 'reports.view_profit' permission.
+     * If the permission does not exist yet in the database, falls back to owner and system_admin only without crashing.
+     */
+    public static function canViewProfit(): bool {
+        self::startSession();
+        if (!self::check()) {
+            return false;
+        }
+
+        $role = self::getRole();
+        if ($role === 'owner' || $role === 'system_admin') {
+            return true;
+        }
+
+        // Cashiers, washers, mechanics, customers never see profit figures
+        if (in_array($role, ['cashier', 'washer', 'mechanic', 'customer'], true)) {
+            return false;
+        }
+
+        return self::can('reports.view_profit');
     }
 
     public static function canAny(array $permissions): bool {
