@@ -281,7 +281,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $newStatus = $_POST['new_status'] ?? '';
             if ($newStatus === 'finished') {
                 $fRes = BayManager::finishCar($pdo, $orderId, (int)Auth::getUserId(), Auth::getFullName() ?? 'Staff', Auth::getRole() ?? 'cashier');
-                $message = $fRes['message'] ?? 'Order marked as Ready to pay and bay freed.';
+                $message = $fRes['message'] ?? 'Order marked as Finished and bay freed.';
                 $messageType = !empty($fRes['success']) ? 'success' : 'danger';
             } elseif (in_array($newStatus, ['waiting', 'washing', 'paid', 'cancelled'], true)) {
                 $extraSql = "";
@@ -521,7 +521,65 @@ while ($r = $setStmt->fetch()) {
 // Filter status tab
 $selectedTab = $_GET['tab'] ?? 'all';
 
+// Date filter resolution
+$datePreset = $_GET['date_preset'] ?? 'today';
+$todayDate = date('Y-m-d');
+
+if ($datePreset === 'yesterday') {
+    $startDate = date('Y-m-d', strtotime('-1 day'));
+    $endDate = $startDate;
+    $dateLabel = 'Yesterday';
+} elseif ($datePreset === 'this_week') {
+    $startDate = date('Y-m-d', strtotime('-6 days'));
+    $endDate = $todayDate;
+    $dateLabel = 'Last 7 Days';
+} elseif ($datePreset === 'all') {
+    $startDate = '';
+    $endDate = '';
+    $dateLabel = 'All Time';
+} elseif ($datePreset === 'custom') {
+    $startDate = !empty($_GET['start_date']) ? trim($_GET['start_date']) : $todayDate;
+    $endDate = !empty($_GET['end_date']) ? trim($_GET['end_date']) : $todayDate;
+    $dateLabel = date('d M Y', strtotime($startDate)) . ' - ' . date('d M Y', strtotime($endDate));
+} else {
+    // Default: today
+    $datePreset = 'today';
+    $startDate = $todayDate;
+    $endDate = $todayDate;
+    $dateLabel = 'Today (' . date('d M Y') . ')';
+}
+
+function getOrderTabUrl(string $tab, string $preset, string $sDate, string $eDate): string {
+    $p = ['view' => 'orders', 'tab' => $tab];
+    if ($preset !== 'today') {
+        $p['date_preset'] = $preset;
+    }
+    if ($preset === 'custom' || ($preset !== 'all' && $preset !== 'today')) {
+        $p['start_date'] = $sDate;
+        $p['end_date'] = $eDate;
+    }
+    return '?' . http_build_query($p);
+}
+
 // Fetch orders with items, washers, mechanics, and customer loyalty info
+$whereClauses = [];
+$params = [];
+
+if ($datePreset !== 'all' && $startDate !== '' && $endDate !== '') {
+    $whereClauses[] = "DATE(o.created_at) BETWEEN :start_date AND :end_date";
+    $params[':start_date'] = $startDate;
+    $params[':end_date'] = $endDate;
+}
+
+if ($selectedTab === 'pending_transfers') {
+    $whereClauses[] = "o.payment_status = 'pending_verification'";
+} elseif ($selectedTab !== 'all') {
+    $whereClauses[] = "o.status = :tab_status";
+    $params[':tab_status'] = $selectedTab;
+}
+
+$whereSql = !empty($whereClauses) ? " WHERE " . implode(" AND ", $whereClauses) : "";
+
 $sql = "
     SELECT o.*,
            b.bay_name,
@@ -533,47 +591,193 @@ $sql = "
     LEFT JOIN bays b ON o.bay_id = b.id
     LEFT JOIN customers c ON o.customer_id = c.id
     LEFT JOIN order_items oi ON o.id = oi.order_id
+    {$whereSql}
+    GROUP BY o.id 
+    ORDER BY CASE o.status 
+        WHEN 'washing' THEN 1
+        WHEN 'waiting' THEN 2
+        WHEN 'finished' THEN 3
+        WHEN 'paid' THEN 4
+        ELSE 5 END, o.id DESC
 ";
 
-if ($selectedTab === 'pending_transfers') {
-    $sql .= " WHERE o.payment_status = 'pending_verification'";
-} elseif ($selectedTab !== 'all') {
-    $sql .= " WHERE o.status = " . $pdo->quote($selectedTab);
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Counts per status synchronized with active date filter
+$countWhere = [];
+$countParams = [];
+
+if ($datePreset !== 'all' && $startDate !== '' && $endDate !== '') {
+    $countWhere[] = "DATE(created_at) BETWEEN :c_start_date AND :c_end_date";
+    $countParams[':c_start_date'] = $startDate;
+    $countParams[':c_end_date'] = $endDate;
 }
 
-$sql .= " GROUP BY o.id ORDER BY CASE o.status 
-            WHEN 'washing' THEN 1
-            WHEN 'waiting' THEN 2
-            WHEN 'finished' THEN 3
-            WHEN 'paid' THEN 4
-            ELSE 5 END, o.id DESC";
+$countWhereSql = !empty($countWhere) ? " WHERE " . implode(" AND ", $countWhere) : "";
 
-$orders = $pdo->query($sql)->fetchAll();
+$countsStmt = $pdo->prepare("SELECT status, COUNT(*) as cnt FROM orders {$countWhereSql} GROUP BY status");
+$countsStmt->execute($countParams);
 
-// Counts per status
-$countsStmt = $pdo->query("SELECT status, COUNT(*) as cnt FROM orders WHERE DATE(created_at) = CURDATE() GROUP BY status");
 $tabCounts = ['all' => 0, 'waiting' => 0, 'washing' => 0, 'finished' => 0, 'paid' => 0, 'cancelled' => 0, 'pending_transfers' => 0];
-while ($row = $countsStmt->fetch()) {
+while ($row = $countsStmt->fetch(PDO::FETCH_ASSOC)) {
     $tabCounts[$row['status']] = (int)$row['cnt'];
     $tabCounts['all'] += (int)$row['cnt'];
 }
-$pendingCntStmt = $pdo->query("SELECT COUNT(*) FROM orders WHERE payment_status = 'pending_verification'");
-$tabCounts['pending_transfers'] = (int)$pendingCntStmt->fetchColumn();
+
+$pendingSql = "SELECT COUNT(*) FROM orders WHERE payment_status = 'pending_verification'";
+if ($datePreset !== 'all' && $startDate !== '' && $endDate !== '') {
+    $pendingSql .= " AND DATE(created_at) BETWEEN :p_start_date AND :p_end_date";
+    $pendingStmt = $pdo->prepare($pendingSql);
+    $pendingStmt->execute([':p_start_date' => $startDate, ':p_end_date' => $endDate]);
+} else {
+    $pendingStmt = $pdo->query($pendingSql);
+}
+$tabCounts['pending_transfers'] = (int)$pendingStmt->fetchColumn();
 
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
+<style>
+/* Preset Date Picker Popover Styles (Matches Shadcn / React Component) */
+.dp-preset-btn {
+    display: block;
+    width: 100%;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #a1a1aa;
+    text-decoration: none;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+    text-align: left;
+}
+.dp-preset-btn:hover {
+    background: #27272a;
+    color: #f4f4f5;
+}
+.dp-preset-btn.active {
+    background: rgba(2, 132, 199, 0.25);
+    color: #38bdf8;
+    font-weight: 600;
+}
+.dp-nav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: transparent;
+    border: none;
+    color: #a1a1aa;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.15s;
+}
+.dp-nav-btn:hover {
+    background: #27272a;
+    color: #f4f4f5;
+}
+.dp-weekday {
+    font-size: 11px;
+    font-weight: 600;
+    color: #71717a;
+    padding: 4px 0;
+}
+.dp-day-cell {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 30px;
+    font-size: 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    color: #f4f4f5;
+    transition: all 0.15s;
+    text-decoration: none;
+}
+.dp-day-cell:hover:not(.empty) {
+    background: #27272a;
+    color: #fff;
+}
+.dp-day-cell.selected {
+    background: var(--primary, #0284c7) !important;
+    color: #fff !important;
+    font-weight: 700;
+}
+.dp-day-cell.today-marker {
+    border: 1px solid rgba(56, 189, 248, 0.45);
+}
+.dp-day-cell.empty {
+    cursor: default;
+}
+</style>
+
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
     <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
         <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
-            <i class="fa-solid fa-receipt mr-1"></i> <?= $tabCounts['all'] ?> Orders Today
+            <i class="fa-solid fa-receipt mr-1"></i> <?= $tabCounts['all'] ?> Orders (<?= htmlspecialchars($dateLabel) ?>)
         </span>
         <span style="font-size: 13px; color: var(--text-muted);">
             Real-time Sales &amp; Wash Order Management
         </span>
     </div>
-    <div>
-        <a href="<?= get_pos_url() ?>" class="btn btn-primary">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <!-- Preset Date Picker Popover (beside + New Wash Order) -->
+        <div class="date-picker-preset-wrapper" style="position: relative; display: inline-block;">
+            <button type="button" id="datePickerTriggerBtn" class="form-input" style="display: inline-flex; align-items: center; gap: 10px; justify-content: space-between; height: 38px; min-width: 200px; cursor: pointer; padding: 6px 14px; font-size: 13px; font-weight: 500; background: var(--card-bg, #fff); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                <span id="datePickerLabelText" style="display: inline-flex; align-items: center; gap: 8px;">
+                    <i class="fa-regular fa-calendar text-muted"></i>
+                    <span style="font-weight: 600;"><?= htmlspecialchars($dateLabel) ?></span>
+                </span>
+                <i class="fa-solid fa-chevron-down" style="font-size: 10px; color: var(--text-muted);"></i>
+            </button>
+
+            <!-- Floating Popover Panel matching user React component & screenshot -->
+            <div id="datePickerPopover" style="display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 1050; width: 370px; background: #18181b; color: #f4f4f5; border: 1px solid #27272a; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5), 0 8px 10px -6px rgba(0,0,0,0.5); padding: 12px;">
+                <div style="display: flex; gap: 12px;">
+                    <!-- Left: Quick Presets Column -->
+                    <div style="width: 105px; flex-shrink: 0; border-right: 1px solid #27272a; padding-right: 8px; display: flex; flex-direction: column; gap: 4px;">
+                        <div style="font-size: 10px; font-weight: 700; letter-spacing: 0.05em; color: #a1a1aa; text-transform: uppercase; padding: 2px 8px 6px;">
+                            QUICK
+                        </div>
+                        <a href="<?= getOrderTabUrl($selectedTab, 'today', '', '') ?>" class="dp-preset-btn <?= ($datePreset === 'today') ? 'active' : '' ?>">Today</a>
+                        <a href="<?= getOrderTabUrl($selectedTab, 'yesterday', '', '') ?>" class="dp-preset-btn <?= ($datePreset === 'yesterday') ? 'active' : '' ?>">Yesterday</a>
+                        <a href="<?= getOrderTabUrl($selectedTab, 'this_week', '', '') ?>" class="dp-preset-btn <?= ($datePreset === 'this_week') ? 'active' : '' ?>">Last 7 Days</a>
+                        <a href="<?= getOrderTabUrl($selectedTab, 'all', '', '') ?>" class="dp-preset-btn <?= ($datePreset === 'all') ? 'active' : '' ?>">All Time</a>
+                    </div>
+
+                    <!-- Right: Interactive Month Grid -->
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 0 4px;">
+                            <button type="button" id="dpPrevMonthBtn" class="dp-nav-btn" title="Previous Month"><i class="fa-solid fa-chevron-left"></i></button>
+                            <div id="dpMonthTitle" style="font-size: 13px; font-weight: 600; color: #fff;"></div>
+                            <button type="button" id="dpNextMonthBtn" class="dp-nav-btn" title="Next Month"><i class="fa-solid fa-chevron-right"></i></button>
+                        </div>
+
+                        <!-- Weekday Headers -->
+                        <div style="display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; margin-bottom: 4px;">
+                            <div class="dp-weekday">Su</div>
+                            <div class="dp-weekday">Mo</div>
+                            <div class="dp-weekday">Tu</div>
+                            <div class="dp-weekday">We</div>
+                            <div class="dp-weekday">Th</div>
+                            <div class="dp-weekday">Fr</div>
+                            <div class="dp-weekday">Sa</div>
+                        </div>
+
+                        <!-- Days Grid -->
+                        <div id="dpDaysGrid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <a href="<?= get_pos_url() ?>" class="btn btn-primary" style="height: 38px; display: inline-flex; align-items: center;">
             <i class="fa-solid fa-plus mr-1"></i> New Wash Order
         </a>
     </div>
@@ -617,25 +821,25 @@ include dirname(__DIR__) . '/layouts/header.php';
 <!-- Status Filter Tabs & Search -->
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 16px;">
     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-        <a href="?view=orders&tab=all" class="btn btn-sm <?= ($selectedTab === 'all') ? 'btn-primary' : 'btn-secondary' ?>">
+        <a href="<?= getOrderTabUrl('all', $datePreset, $startDate, $endDate) ?>" class="btn btn-sm <?= ($selectedTab === 'all') ? 'btn-primary' : 'btn-secondary' ?>">
             All Orders (<?= $tabCounts['all'] ?>)
         </a>
-        <a href="?view=orders&tab=waiting" class="btn btn-sm <?= ($selectedTab === 'waiting') ? 'btn-primary' : 'btn-secondary' ?>">
+        <a href="<?= getOrderTabUrl('waiting', $datePreset, $startDate, $endDate) ?>" class="btn btn-sm <?= ($selectedTab === 'waiting') ? 'btn-primary' : 'btn-secondary' ?>">
             <i class="fa-solid fa-clock mr-1" style="color: var(--warning);"></i> <?= htmlspecialchars(__('status_waiting')) ?> (<?= $tabCounts['waiting'] ?>)
         </a>
-        <a href="?view=orders&tab=washing" class="btn btn-sm <?= ($selectedTab === 'washing') ? 'btn-primary' : 'btn-secondary' ?>">
+        <a href="<?= getOrderTabUrl('washing', $datePreset, $startDate, $endDate) ?>" class="btn btn-sm <?= ($selectedTab === 'washing') ? 'btn-primary' : 'btn-secondary' ?>">
             <i class="fa-solid fa-soap mr-1" style="color: var(--info);"></i> <?= htmlspecialchars(__('status_washing')) ?> (<?= $tabCounts['washing'] ?>)
         </a>
-        <a href="?view=orders&tab=finished" class="btn btn-sm <?= ($selectedTab === 'finished') ? 'btn-primary' : 'btn-secondary' ?>">
+        <a href="<?= getOrderTabUrl('finished', $datePreset, $startDate, $endDate) ?>" class="btn btn-sm <?= ($selectedTab === 'finished') ? 'btn-primary' : 'btn-secondary' ?>">
             <i class="fa-solid fa-circle-check mr-1" style="color: var(--success);"></i> <?= htmlspecialchars(__('status_finished')) ?> (<?= $tabCounts['finished'] ?>)
         </a>
-        <a href="?view=orders&tab=paid" class="btn btn-sm <?= ($selectedTab === 'paid') ? 'btn-primary' : 'btn-secondary' ?>">
+        <a href="<?= getOrderTabUrl('paid', $datePreset, $startDate, $endDate) ?>" class="btn btn-sm <?= ($selectedTab === 'paid') ? 'btn-primary' : 'btn-secondary' ?>">
             <i class="fa-solid fa-receipt mr-1"></i> <?= htmlspecialchars(__('status_paid')) ?> (<?= $tabCounts['paid'] ?>)
         </a>
-        <a href="?view=orders&tab=pending_transfers" class="btn btn-sm <?= ($selectedTab === 'pending_transfers') ? 'btn-primary' : 'btn-secondary' ?>" style="<?= $tabCounts['pending_transfers'] > 0 ? 'border-color: #f59e0b; color: #b45309; font-weight: 700;' : '' ?>">
+        <a href="<?= getOrderTabUrl('pending_transfers', $datePreset, $startDate, $endDate) ?>" class="btn btn-sm <?= ($selectedTab === 'pending_transfers') ? 'btn-primary' : 'btn-secondary' ?>" style="<?= $tabCounts['pending_transfers'] > 0 ? 'border-color: #f59e0b; color: #b45309; font-weight: 700;' : '' ?>">
             <i class="fa-solid fa-clock-rotate-left mr-1" style="color: #f59e0b;"></i> Pending Transfers (<?= $tabCounts['pending_transfers'] ?>)
         </a>
-        <a href="?view=orders&tab=cancelled" class="btn btn-sm <?= ($selectedTab === 'cancelled') ? 'btn-primary' : 'btn-secondary' ?>">
+        <a href="<?= getOrderTabUrl('cancelled', $datePreset, $startDate, $endDate) ?>" class="btn btn-sm <?= ($selectedTab === 'cancelled') ? 'btn-primary' : 'btn-secondary' ?>">
             <i class="fa-solid fa-ban mr-1" style="color: var(--danger);"></i> Cancelled (<?= $tabCounts['cancelled'] ?? 0 ?>)
         </a>
     </div>
@@ -735,9 +939,9 @@ include dirname(__DIR__) . '/layouts/header.php';
                                 </div>
                             <?php else: ?>
                                 <?= statusBadge($ord['status']) ?>
-                                <?php if ($ord['status'] === 'paid'): ?>
+                                <?php if (($ord['payment_status'] ?? '') === 'paid'): ?>
                                     <div class="text-xs text-muted" style="text-transform: uppercase; font-weight: 600; margin-top: 2px;">
-                                        <i class="fa-solid fa-wallet mr-1"></i> <?= htmlspecialchars((string)($ord['payment_method'] ?? 'unpaid')) ?>
+                                        <i class="fa-solid fa-circle-check text-success mr-1"></i> <?= htmlspecialchars((string)($ord['payment_method'] ?? 'paid')) ?>
                                         <?php if (!empty($ord['paper_receipt_fallback'])): ?>
                                             <span class="badge" style="background: #fef3c7; color: #b45309; font-size: 10px; margin-left: 2px;" title="Manual Paper Receipt Fallback">Paper</span>
                                         <?php endif; ?>
@@ -801,8 +1005,8 @@ include dirname(__DIR__) . '/layouts/header.php';
                                                 <i class="fa-solid fa-hourglass-half mr-1"></i> Awaiting Mgr
                                             </span>
                                         <?php endif; ?>
-                                    <?php elseif ($ord['status'] !== 'paid'): ?>
-                                        <!-- Checkout / Pay Button -->
+                                    <?php elseif (($ord['payment_status'] ?? '') !== 'paid'): ?>
+                                        <!-- Checkout / Pay Button (Only shown if truly unpaid) -->
                                         <button type="button" class="btn btn-primary btn-sm" style="background: #16a34a; border-color: #16a34a;"
                                                 data-order="<?= htmlspecialchars(json_encode($ord, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>"
                                                 onclick="openCheckoutModal(this)">
@@ -1667,6 +1871,129 @@ function calcChange() {
     document.getElementById('changeUsd').innerText = '$' + change.toFixed(2);
     document.getElementById('changeKhr').innerText = changeKhr.toLocaleString() + ' ៛';
 }
+
+// ==========================================
+// Preset Date Picker Engine (Beside New Wash Order)
+// ==========================================
+(function() {
+    const triggerBtn = document.getElementById('datePickerTriggerBtn');
+    const popover = document.getElementById('datePickerPopover');
+    const prevBtn = document.getElementById('dpPrevMonthBtn');
+    const nextBtn = document.getElementById('dpNextMonthBtn');
+    const monthTitle = document.getElementById('dpMonthTitle');
+    const daysGrid = document.getElementById('dpDaysGrid');
+
+    if (!triggerBtn || !popover || !daysGrid) return;
+
+    const serverStartDate = '<?= addslashes($startDate) ?>';
+    const activeTab = '<?= addslashes($selectedTab) ?>';
+
+    const monthNames = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ];
+
+    let selectedDate = null;
+    if (serverStartDate) {
+        const parts = serverStartDate.split('-');
+        if (parts.length === 3) {
+            selectedDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        }
+    }
+
+    let viewYear = selectedDate ? selectedDate.getFullYear() : new Date().getFullYear();
+    let viewMonth = selectedDate ? selectedDate.getMonth() : new Date().getMonth();
+
+    function renderCalendar() {
+        monthTitle.textContent = `${monthNames[viewMonth]} ${viewYear}`;
+        daysGrid.innerHTML = '';
+
+        const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay(); // 0 is Sunday
+        const totalDays = new Date(viewYear, viewMonth + 1, 0).getDate();
+
+        // Leading empty cells
+        for (let i = 0; i < firstDayOfWeek; i++) {
+            const emptySpan = document.createElement('span');
+            emptySpan.className = 'dp-day-cell empty';
+            daysGrid.appendChild(emptySpan);
+        }
+
+        const now = new Date();
+        const isCurrentMonthNow = (now.getFullYear() === viewYear && now.getMonth() === viewMonth);
+
+        for (let d = 1; d <= totalDays; d++) {
+            const dayBtn = document.createElement('button');
+            dayBtn.type = 'button';
+            dayBtn.className = 'dp-day-cell';
+            dayBtn.textContent = d;
+
+            const cellDateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
+            if (selectedDate && selectedDate.getFullYear() === viewYear && selectedDate.getMonth() === viewMonth && selectedDate.getDate() === d) {
+                dayBtn.classList.add('selected');
+            } else if (isCurrentMonthNow && now.getDate() === d) {
+                dayBtn.classList.add('today-marker');
+            }
+
+            dayBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const params = new URLSearchParams(window.location.search);
+                params.set('view', 'orders');
+                params.set('tab', activeTab);
+                params.set('date_preset', 'custom');
+                params.set('start_date', cellDateStr);
+                params.set('end_date', cellDateStr);
+                window.location.href = '?' + params.toString();
+            });
+
+            daysGrid.appendChild(dayBtn);
+        }
+    }
+
+    triggerBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        const isHidden = (popover.style.display === 'none' || !popover.style.display);
+        popover.style.display = isHidden ? 'block' : 'none';
+        if (isHidden) renderCalendar();
+    });
+
+    if (prevBtn) {
+        prevBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            viewMonth--;
+            if (viewMonth < 0) {
+                viewMonth = 11;
+                viewYear--;
+            }
+            renderCalendar();
+        });
+    }
+
+    if (nextBtn) {
+        nextBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            viewMonth++;
+            if (viewMonth > 11) {
+                viewMonth = 0;
+                viewYear++;
+            }
+            renderCalendar();
+        });
+    }
+
+    document.addEventListener('pointerdown', function(e) {
+        if (!popover.contains(e.target) && !triggerBtn.contains(e.target)) {
+            popover.style.display = 'none';
+        }
+    });
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && popover.style.display === 'block') {
+            popover.style.display = 'none';
+            triggerBtn.focus();
+        }
+    });
+})();
 </script>
 
 <?php include dirname(__DIR__) . '/layouts/footer.php'; ?>

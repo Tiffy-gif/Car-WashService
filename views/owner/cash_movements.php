@@ -148,6 +148,7 @@ $totalCashOutKhr = 0;
 $totalNoSaleCount = 0;
 
 $cashierSummary = [];
+$shiftGroups = [];
 
 foreach ($allEvents as $ev) {
     $cid = (int)$ev['cashier_id'];
@@ -159,6 +160,40 @@ foreach ($allEvents as $ev) {
     if ($khr <= 0 && $usd > 0) {
         $khr = (int)round($usd * $curRate);
     }
+
+    // Build Shift-Grouped Accordion Data
+    $rawKey = $ev['shift_uid'] ?: ($ev['shift_id'] ? 'SHIFT_' . $ev['shift_id'] : 'UNASSIGNED');
+    $cleanKey = preg_replace('/[^a-zA-Z0-9_-]/', '_', $rawKey);
+    if (!isset($shiftGroups[$cleanKey])) {
+        $shiftGroups[$cleanKey] = [
+            'key'          => $cleanKey,
+            'shift_uid'    => $ev['shift_uid'] ?: ($ev['shift_id'] ? '#' . $ev['shift_id'] : 'Unassigned / Direct'),
+            'shift_id'     => $ev['shift_id'],
+            'date'         => date('d M Y, h:i A', strtotime($ev['created_at'])),
+            'cashier'      => $cname,
+            'username'     => $cuser,
+            'device'       => $ev['device_name'] ? "{$ev['device_name']} ({$ev['device_uid']})" : 'Back Office Web',
+            'events'       => [],
+            'net_usd'      => 0.00,
+            'net_khr'      => 0,
+            'no_sale_count'=> 0,
+            'cash_in_usd'  => 0.00,
+            'cash_out_usd' => 0.00,
+        ];
+    }
+
+    if ($type === 'cash_in') {
+        $shiftGroups[$cleanKey]['net_usd'] += $usd;
+        $shiftGroups[$cleanKey]['net_khr'] += $khr;
+        $shiftGroups[$cleanKey]['cash_in_usd'] += $usd;
+    } elseif ($type === 'cash_out') {
+        $shiftGroups[$cleanKey]['net_usd'] -= $usd;
+        $shiftGroups[$cleanKey]['net_khr'] -= $khr;
+        $shiftGroups[$cleanKey]['cash_out_usd'] += $usd;
+    } elseif ($type === 'no_sale' || $type === 'no_sale_open') {
+        $shiftGroups[$cleanKey]['no_sale_count']++;
+    }
+    $shiftGroups[$cleanKey]['events'][] = $ev;
 
     if (!isset($cashierSummary[$cid])) {
         $cashierSummary[$cid] = [
@@ -590,130 +625,270 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 </div>
 
-<!-- Detailed Drawer Events Table -->
-<div class="card">
-    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-        <div>
-            <h2 class="card-title" style="font-size: 16px; display: flex; align-items: center; gap: 8px;">
-                <i class="fa-solid fa-list-ol" style="color: var(--primary);"></i>
-                Detailed Drawer Events Log
-            </h2>
-            <p class="text-xs text-muted" style="margin: 2px 0 0 0;">
-                Showing <?= count($allEvents) ?> events matching selected filters.
-            </p>
-        </div>
+<!-- ================================================================= -->
+<!-- CONCEPT 2: SHIFT-GROUPED ACCORDION DRAWER ACTIVITY                -->
+<!-- ================================================================= -->
+<div class="card" style="margin-bottom: 16px; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg);">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span class="badge" style="background: rgba(37, 99, 235, 0.1); color: #2563eb; font-weight: 700; padding: 5px 12px; border-radius: 9999px; font-size: 12px; border: 1px solid rgba(37, 99, 235, 0.2);">
+            <i class="fa-solid fa-layer-group mr-1"></i> <?= count($shiftGroups) ?> Shift<?= count($shiftGroups) !== 1 ? 's' : '' ?> • <?= count($allEvents) ?> Event<?= count($allEvents) !== 1 ? 's' : '' ?>
+        </span>
+        <h2 class="card-title" style="font-size: 17px; font-weight: 800; margin: 0; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+            <?= htmlspecialchars(__('shift_grouped_drawer_activity', 'Shift-Grouped Drawer Activity')) ?>
+        </h2>
     </div>
-
-    <div class="table-responsive">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th style="min-width: 140px;">Date &amp; Time</th>
-                    <th style="min-width: 130px;">Event UID</th>
-                    <th style="min-width: 150px;"><?= htmlspecialchars(__('filter_type', 'Event Type')) ?></th>
-                    <th class="table-num" style="min-width: 140px;">Amount</th>
-                    <th style="min-width: 160px;"><?= htmlspecialchars(__('filter_cashier', 'Cashier')) ?></th>
-                    <th style="min-width: 160px;"><?= htmlspecialchars(__('authorized_manager', 'Authorized Manager')) ?></th>
-                    <th style="min-width: 200px;">Reason</th>
-                    <th style="min-width: 120px;"><?= htmlspecialchars(__('shift_uid', 'Shift')) ?></th>
-                    <th style="min-width: 140px;"><?= htmlspecialchars(__('filter_device', 'POS Device')) ?></th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if (empty($allEvents)): ?>
-                    <tr>
-                        <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 32px;">
-                            <i class="fa-solid fa-inbox" style="font-size: 24px; color: var(--border); display: block; margin-bottom: 8px;"></i>
-                            No drawer events match the selected filters.
-                        </td>
-                    </tr>
-                <?php else: ?>
-                    <?php foreach ($allEvents as $ev): 
-                        $type = $ev['event_type'];
-                        $isCashIn = ($type === 'cash_in');
-                        $isCashOut = ($type === 'cash_out');
-                        $isNoSale = ($type === 'no_sale' || $type === 'no_sale_open');
-                        $devStr = $ev['device_name'] ? "{$ev['device_name']}" : 'Back Office Web';
-                    ?>
-                        <tr>
-                            <td class="text-xs" style="font-family: var(--font-mono); white-space: nowrap;">
-                                <?= date('d M Y, h:i A', strtotime($ev['created_at'])) ?>
-                            </td>
-                            <td>
-                                <span style="font-family: var(--font-mono); font-weight: 700; font-size: 12px; background: var(--bg-subtle); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border);">
-                                    <?= htmlspecialchars($ev['event_uid']) ?>
-                                </span>
-                            </td>
-                            <td>
-                                <?php if ($isCashIn): ?>
-                                    <span class="badge badge-success" style="background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; display: inline-flex; align-items: center; gap: 5px;">
-                                        <i class="fa-solid fa-arrow-down-long"></i> <?= htmlspecialchars(__('event_type_cash_in', 'Cash In')) ?>
-                                    </span>
-                                <?php elseif ($isCashOut): ?>
-                                    <span class="badge badge-warning" style="background: #fff7ed; color: #ea580c; border: 1px solid #fed7aa; display: inline-flex; align-items: center; gap: 5px;">
-                                        <i class="fa-solid fa-arrow-up-long"></i> <?= htmlspecialchars(__('event_type_cash_out', 'Cash Out')) ?>
-                                    </span>
-                                <?php elseif ($isNoSale): ?>
-                                    <span class="badge badge-danger" style="background: #fdf4ff; color: #9333ea; border: 1px solid #f0abfc; display: inline-flex; align-items: center; gap: 5px;">
-                                        <i class="fa-solid fa-unlock-keyhole"></i> <?= htmlspecialchars(__('event_type_no_sale', 'No-Sale Open')) ?>
-                                    </span>
-                                <?php else: ?>
-                                    <span class="badge badge-secondary"><?= htmlspecialchars(ucfirst($type)) ?></span>
-                                <?php endif; ?>
-                            </td>
-                            <td class="table-num">
-                                <?php if ($isNoSale): ?>
-                                    <span class="text-muted text-xs">- (No Sale)</span>
-                                <?php else: ?>
-                                    <strong style="color: <?= $isCashIn ? '#16a34a' : '#ea580c' ?>;">
-                                        <?= ($isCashIn ? '+' : '-') . formatUSD((float)$ev['amount_usd']) ?>
-                                    </strong>
-                                    <div class="text-xs text-muted"><?= formatKHR((int)$ev['amount_khr']) ?></div>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <strong><?= htmlspecialchars($ev['cashier_name']) ?></strong>
-                                <?php if ($ev['cashier_username']): ?>
-                                    <div class="text-xs text-muted">@<?= htmlspecialchars($ev['cashier_username']) ?></div>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <?php if ($ev['manager_name']): ?>
-                                    <div style="display: flex; align-items: center; gap: 6px;">
-                                        <i class="fa-solid fa-user-check text-xs" style="color: #2563eb;"></i>
-                                        <strong><?= htmlspecialchars($ev['manager_name']) ?></strong>
-                                    </div>
-                                    <?php if ($ev['manager_username']): ?>
-                                        <div class="text-xs text-muted">@<?= htmlspecialchars($ev['manager_username']) ?></div>
-                                    <?php endif; ?>
-                                <?php else: ?>
-                                    <span class="text-muted">-</span>
-                                <?php endif; ?>
-                            </td>
-                            <td style="font-size: 12.5px; line-height: 1.4;">
-                                <?= htmlspecialchars($ev['reason'] ?: '-') ?>
-                            </td>
-                            <td>
-                                <?php if ($ev['shift_uid']): ?>
-                                    <a href="?view=shift#shift_<?= (int)$ev['shift_id'] ?>" style="font-family: var(--font-mono); font-weight: 700; font-size: 12px; color: var(--primary);">
-                                        <?= htmlspecialchars($ev['shift_uid']) ?>
-                                    </a>
-                                <?php elseif ($ev['shift_id']): ?>
-                                    <span style="font-family: var(--font-mono); font-size: 12px;">#<?= (int)$ev['shift_id'] ?></span>
-                                <?php else: ?>
-                                    <span class="text-muted">-</span>
-                                <?php endif; ?>
-                            </td>
-                            <td class="text-xs text-muted">
-                                <i class="fa-solid fa-tablet-screen-button mr-1"></i>
-                                <?= htmlspecialchars($devStr) ?>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-            </tbody>
-        </table>
+    <div style="display: flex; gap: 8px; align-items: center;">
+        <button type="button" onclick="expandAllShifts(true)" class="btn btn-secondary btn-sm" style="font-size: 12px; font-weight: 600;">
+            <i class="fa-solid fa-angles-down mr-1"></i> Expand All Shifts
+        </button>
+        <button type="button" onclick="expandAllShifts(false)" class="btn btn-secondary btn-sm" style="font-size: 12px; font-weight: 600;">
+            <i class="fa-solid fa-angles-up mr-1"></i> Collapse All
+        </button>
     </div>
 </div>
+
+<?php if (empty($shiftGroups)): ?>
+    <div class="card" style="padding: 48px; text-align: center; color: var(--text-muted); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg);">
+        <i class="fa-solid fa-inbox" style="font-size: 32px; opacity: 0.3; margin-bottom: 12px; display: block;"></i>
+        <div style="font-size: 15px; font-weight: 700; color: var(--text-main); margin-bottom: 4px;">No matching drawer events</div>
+        <p style="font-size: 13px; margin: 0;">Try adjusting your period, event type, or cashier filters above.</p>
+    </div>
+<?php else: ?>
+    <div id="shiftAccordionContainer" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px;">
+        <?php 
+        $shiftIdx = 0;
+        foreach ($shiftGroups as $sKey => $grp): 
+            $shiftIdx++;
+            $isDefaultOpen = ($shiftIdx <= 2); // First 2 shifts open by default
+            $net = $grp['net_usd'];
+            $netColor = ($net > 0) ? '#16a34a' : (($net < 0) ? '#ea580c' : 'var(--text-muted)');
+            $netFormatted = ($net === 0.0) ? '$0.00' : (($net > 0 ? '+' : '-') . '$' . number_format(abs($net), 2));
+            $netKhrFormatted = ($net === 0.0) ? '0 ៛' : (($net > 0 ? '+' : '-') . number_format(abs($grp['net_khr'])) . ' ៛');
+        ?>
+            <div class="shift-accordion-card card" style="padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); background: var(--bg-card);">
+                <!-- Collapsible Shift Header -->
+                <button type="button" class="shift-accordion-header" onclick="toggleShiftAccordion('<?= htmlspecialchars($sKey) ?>')" style="width: 100%; padding: 14px 18px; background: var(--bg-surface); border: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; text-align: left; transition: background 0.15s ease;" onmouseover="this.style.background='var(--bg-subtle)';" onmouseout="this.style.background='var(--bg-surface)';">
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <i id="chevron_<?= htmlspecialchars($sKey) ?>" class="fa-solid fa-chevron-right shift-chevron" style="color: var(--text-muted); font-size: 12px; transition: transform 0.2s ease; transform: <?= $isDefaultOpen ? 'rotate(90deg)' : 'rotate(0deg)' ?>;"></i>
+                        
+                        <span style="font-family: var(--font-mono); font-size: 12.5px; font-weight: 800; background: rgba(2, 132, 199, 0.08); color: var(--primary); padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(2, 132, 199, 0.25);">
+                            <?= htmlspecialchars($grp['shift_uid']) ?>
+                        </span>
+
+                        <span style="font-size: 13px; color: var(--text-muted); font-weight: 500;">
+                            <?= htmlspecialchars($grp['date']) ?>
+                        </span>
+
+                        <span class="badge badge-secondary" style="font-size: 11px; padding: 3px 8px; font-weight: 600;">
+                            <?= count($grp['events']) ?> Event<?= count($grp['events']) > 1 ? 's' : '' ?>
+                        </span>
+
+                        <?php if ($grp['no_sale_count'] > 0): ?>
+                            <span class="badge" style="background: #fdf4ff; color: #9333ea; border: 1px solid #f0abfc; font-size: 11px; padding: 2px 8px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                                <i class="fa-solid fa-unlock-keyhole" style="font-size: 10px;"></i>
+                                <?= $grp['no_sale_count'] ?> No-Sale
+                            </span>
+                        <?php endif; ?>
+
+                        <span style="font-size: 12.5px; color: var(--text-muted);">
+                            Cashier: <strong style="color: var(--text-main);"><?= htmlspecialchars($grp['cashier']) ?></strong>
+                            <?php if (!empty($grp['username'])): ?>
+                                <span style="color: var(--text-muted); font-weight: normal;">(@<?= htmlspecialchars($grp['username']) ?>)</span>
+                            <?php endif; ?>
+                        </span>
+                    </div>
+
+                    <!-- Right side: Shift Net Movement -->
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <div style="text-align: right;">
+                            <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Shift Net Movement</div>
+                            <div style="font-size: 14px; font-weight: 800; color: <?= $netColor ?>; font-family: var(--font-mono);">
+                                <?= $netFormatted ?>
+                                <span style="font-size: 11px; font-weight: 500; color: var(--text-muted);">(<?= $netKhrFormatted ?>)</span>
+                            </div>
+                        </div>
+                    </div>
+                </button>
+
+                <!-- Expanded Shift Events Table -->
+                <div id="body_<?= htmlspecialchars($sKey) ?>" class="shift-accordion-body" style="display: <?= $isDefaultOpen ? 'block' : 'none' ?>; border-top: 1px solid var(--border); background: var(--bg-surface);">
+                    <div class="table-responsive">
+                        <table class="table" style="margin: 0; font-size: 12.5px;">
+                            <thead style="background: var(--bg-subtle);">
+                                <tr>
+                                    <th style="min-width: 170px;">Event UID</th>
+                                    <th style="min-width: 140px;">Event Type</th>
+                                    <th>Reason / Memo</th>
+                                    <th style="min-width: 160px;">Authorized Manager</th>
+                                    <th style="min-width: 140px;">POS Device</th>
+                                    <th class="table-num" style="min-width: 140px; text-align: right;">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                <?php foreach ($grp['events'] as $ev): 
+                                    $type = $ev['event_type'];
+                                    $isCashIn = ($type === 'cash_in');
+                                    $isCashOut = ($type === 'cash_out');
+                                    $isNoSale = ($type === 'no_sale' || $type === 'no_sale_open');
+                                    $devStr = $ev['device_name'] ? "{$ev['device_name']}" : 'Back Office Web';
+                                ?>
+                                    <tr style="transition: background 0.15s ease;">
+                                        <!-- Event UID + Copy Button -->
+                                        <td style="white-space: nowrap;">
+                                            <div style="display: inline-flex; align-items: center; gap: 6px;">
+                                                <span style="font-family: var(--font-mono); font-weight: 700; font-size: 11.5px; background: var(--bg-subtle); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-main);">
+                                                    <?= htmlspecialchars($ev['event_uid']) ?>
+                                                </span>
+                                                <button type="button" onclick="copyToClipboard('<?= htmlspecialchars($ev['event_uid']) ?>', 'Event UID')" style="background: transparent; border: none; cursor: pointer; color: var(--text-muted); padding: 2px 4px; font-size: 11px;" title="Copy Event UID" onmouseover="this.style.color='var(--primary)';" onmouseout="this.style.color='var(--text-muted)';">
+                                                    <i class="fa-solid fa-copy"></i>
+                                                </button>
+                                            </div>
+                                            <div class="text-xs text-muted" style="margin-top: 2px; font-family: var(--font-mono); font-size: 11px;">
+                                                <?= date('h:i A', strtotime($ev['created_at'])) ?>
+                                            </div>
+                                        </td>
+
+                                        <!-- Event Type -->
+                                        <td style="white-space: nowrap;">
+                                            <?php if ($isCashIn): ?>
+                                                <span class="badge badge-success" style="background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; display: inline-flex; align-items: center; gap: 5px; font-weight: 700; font-size: 11px;">
+                                                    <i class="fa-solid fa-arrow-down-long"></i> <?= htmlspecialchars(__('event_type_cash_in', 'Cash In')) ?>
+                                                </span>
+                                            <?php elseif ($isCashOut): ?>
+                                                <span class="badge badge-warning" style="background: #fff7ed; color: #ea580c; border: 1px solid #fed7aa; display: inline-flex; align-items: center; gap: 5px; font-weight: 700; font-size: 11px;">
+                                                    <i class="fa-solid fa-arrow-up-long"></i> <?= htmlspecialchars(__('event_type_cash_out', 'Cash Out')) ?>
+                                                </span>
+                                            <?php elseif ($isNoSale): ?>
+                                                <span class="badge badge-danger" style="background: #fdf4ff; color: #9333ea; border: 1px solid #f0abfc; display: inline-flex; align-items: center; gap: 5px; font-weight: 700; font-size: 11px;">
+                                                    <i class="fa-solid fa-unlock-keyhole"></i> <?= htmlspecialchars(__('event_type_no_sale', 'No-Sale Open')) ?>
+                                                </span>
+                                            <?php else: ?>
+                                                <span class="badge badge-secondary"><?= htmlspecialchars(ucfirst($type)) ?></span>
+                                            <?php endif; ?>
+                                        </td>
+
+                                        <!-- Reason / Memo -->
+                                        <td style="font-weight: 600; color: var(--text-main); line-height: 1.4;">
+                                            <?= htmlspecialchars($ev['reason'] ?: '-') ?>
+                                        </td>
+
+                                        <!-- Authorized Manager -->
+                                        <td>
+                                            <?php if ($ev['manager_name']): ?>
+                                                <div style="display: flex; align-items: center; gap: 5px; font-weight: 600; color: #1d4ed8;">
+                                                    <i class="fa-solid fa-shield-check text-xs"></i>
+                                                    <?= htmlspecialchars($ev['manager_name']) ?>
+                                                </div>
+                                                <?php if ($ev['manager_username']): ?>
+                                                    <div class="text-xs text-muted">@<?= htmlspecialchars($ev['manager_username']) ?></div>
+                                                <?php endif; ?>
+                                            <?php else: ?>
+                                                <span class="text-muted" style="font-style: italic; font-size: 12px;">Not required</span>
+                                            <?php endif; ?>
+                                        </td>
+
+                                        <!-- POS Device -->
+                                        <td class="text-xs text-muted" style="white-space: nowrap;">
+                                            <i class="fa-solid fa-desktop mr-1" style="color: var(--text-muted);"></i>
+                                            <?= htmlspecialchars($devStr) ?>
+                                        </td>
+
+                                        <!-- Amount -->
+                                        <td class="table-num" style="text-align: right; white-space: nowrap;">
+                                            <?php if ($isNoSale): ?>
+                                                <span class="text-muted text-xs font-semibold">— (No Sale)</span>
+                                            <?php else: ?>
+                                                <strong style="color: <?= $isCashIn ? '#16a34a' : '#ea580c' ?>; font-size: 13.5px; font-family: var(--font-mono);">
+                                                    <?= ($isCashIn ? '+' : '-') . formatUSD((float)$ev['amount_usd']) ?>
+                                                </strong>
+                                                <div class="text-xs text-muted" style="font-weight: 500; font-family: var(--font-mono);"><?= formatKHR((int)$ev['amount_khr']) ?></div>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        <?php endforeach; ?>
+    </div>
+<?php endif; ?>
+
+<script>
+function toggleShiftAccordion(key) {
+    const body = document.getElementById('body_' + key);
+    const chevron = document.getElementById('chevron_' + key);
+    if (!body || !chevron) return;
+    
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        chevron.style.transform = 'rotate(90deg)';
+    } else {
+        body.style.display = 'none';
+        chevron.style.transform = 'rotate(0deg)';
+    }
+}
+
+function expandAllShifts(expand) {
+    document.querySelectorAll('.shift-accordion-body').forEach(el => {
+        el.style.display = expand ? 'block' : 'none';
+    });
+    document.querySelectorAll('.shift-chevron').forEach(el => {
+        el.style.transform = expand ? 'rotate(90deg)' : 'rotate(0deg)';
+    });
+}
+
+function copyToClipboard(text, label) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('Copied ' + label + ': ' + text);
+        }).catch(() => {
+            copyFallback(text, label);
+        });
+    } else {
+        copyFallback(text, label);
+    }
+}
+
+function copyFallback(text, label) {
+    const temp = document.createElement('input');
+    temp.value = text;
+    document.body.appendChild(temp);
+    temp.select();
+    document.execCommand('copy');
+    document.body.removeChild(temp);
+    showToast('Copied ' + label + ': ' + text);
+}
+
+function showToast(msg) {
+    let toast = document.getElementById('cmToast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'cmToast';
+        toast.style.position = 'fixed';
+        toast.style.bottom = '24px';
+        toast.style.right = '24px';
+        toast.style.zIndex = '99999';
+        toast.style.background = '#0f172a';
+        toast.style.color = '#ffffff';
+        toast.style.padding = '10px 18px';
+        toast.style.borderRadius = '8px';
+        toast.style.fontSize = '13px';
+        toast.style.fontWeight = '600';
+        toast.style.boxShadow = '0 10px 25px rgba(0,0,0,0.2)';
+        toast.style.transition = 'all 0.2s ease';
+        toast.style.pointerEvents = 'none';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = msg;
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateY(0)';
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(10px)';
+    }, 2200);
+}
+</script>
 
 <?php include dirname(__DIR__) . '/layouts/footer.php'; ?>
