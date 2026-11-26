@@ -1064,7 +1064,7 @@ include dirname(__DIR__) . '/layouts/header.php';
             </div>
         <?php else: ?>
             <div style="max-height: 280px; overflow-y: auto;">
-                <table class="table-clean" style="width: 100%; font-size: 12px;">
+                <table class="table-clean js-paginated-table" style="width: 100%; font-size: 12px;">
                     <thead>
                         <tr>
                             <th>Staff Member</th>
@@ -1116,7 +1116,7 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 
     <div style="overflow-x: auto;">
-        <table class="table-clean" style="width: 100%; font-size: 13px;">
+        <table class="table-clean js-paginated-table" style="width: 100%; font-size: 13px;">
             <thead>
                 <tr>
                     <th style="width: 140px;">Timestamp</th>

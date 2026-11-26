@@ -19,7 +19,7 @@ $navNameKm = get_setting('shop_name_km', 'អាខ្វាហ្គ្លី�
 $navTitle = (Language::current() === 'km') ? ($navNameKm ?: $navNameEn ?: __('app_name')) : ($navNameEn ?: $navNameKm ?: __('app_name'));
 $navSubtitle = (Language::current() === 'km') ? ($navNameEn ?: __('app_subtitle')) : ($navNameKm ?: __('app_subtitle'));
 
-// Menu definition: 6 structured groups with icons and permissions
+// Menu definition: structured groups with icons and permissions
 $rawMenuGroups = [
     [
         'id'    => 'dashboard',
@@ -99,16 +99,10 @@ $rawMenuGroups = [
         ],
     ],
     [
-        'id'    => 'catalog_stock',
-        'title' => __('nav_group_catalog_stock'),
-        'icon'  => 'fa-boxes-stacked',
+        'id'    => 'services_catalog',
+        'title' => __('nav_group_services', 'Services'),
+        'icon'  => 'fa-soap',
         'items' => [
-            [
-                'view'       => 'categories',
-                'label'      => __('nav_categories', 'Categories'),
-                'icon'       => 'fa-tags',
-                'permission' => 'categories.list',
-            ],
             [
                 'view'       => 'services',
                 'label'      => __('nav_services', 'Services & Pricing'),
@@ -116,12 +110,74 @@ $rawMenuGroups = [
                 'permission' => 'services.list',
             ],
             [
-                'view'       => 'products',
-                'label'      => __('nav_products_stock', 'Products & Stock'),
+                'view'       => 'service_categories',
+                'label'      => __('nav_service_categories', 'Service Categories'),
+                'icon'       => 'fa-tags',
+                'permission' => 'categories.list',
+            ],
+        ],
+    ],
+    [
+        'id'    => 'products',
+        'title' => __('nav_group_products', 'Products'),
+        'icon'  => 'fa-box',
+        'items' => [
+            [
+                'view'       => 'product_catalog',
+                'label'      => __('nav_product_list', 'Product List'),
+                'icon'       => 'fa-box',
+                'permission' => 'oil_care.list',
+            ],
+            [
+                'view'       => 'product_categories',
+                'label'      => __('nav_product_categories', 'Product Categories'),
+                'icon'       => 'fa-tags',
+                'permission' => 'categories.list',
+            ],
+        ],
+    ],
+    [
+        'id'    => 'stock',
+        'title' => __('nav_group_stock', 'Stock'),
+        'icon'  => 'fa-boxes-stacked',
+        'items' => [
+            [
+                'view'       => 'stock_manage',
+                'label'      => __('nav_manage_stock', 'Manage Stock'),
                 'icon'       => 'fa-boxes-stacked',
+                'permission' => 'oil_care.list',
+            ],
+            [
+                'view'       => 'low_stock',
+                'label'      => __('nav_low_stock', 'Low Stock'),
+                'icon'       => 'fa-arrow-down-short-wide',
+                'permission' => 'oil_care.list',
+            ],
+            [
+                'view'       => 'stock_requests',
+                'label'      => __('nav_technician_requests', 'Technician Requests'),
+                'icon'       => 'fa-dolly',
                 'permission' => 'oil_care.list',
                 'badge'      => $navPendingParts > 0 ? (string)$navPendingParts : null,
                 'badge_class'=> 'badge-amber',
+            ],
+            [
+                'view'       => 'stock_movements',
+                'label'      => __('nav_stock_movements', 'Stock Movements'),
+                'icon'       => 'fa-arrow-right-arrow-left',
+                'permission' => 'oil_care.list',
+            ],
+            [
+                'view'       => 'stock_supplies',
+                'label'      => __('nav_washing_supplies', 'Washing Supplies'),
+                'icon'       => 'fa-flask',
+                'permission' => 'oil_care.list',
+            ],
+            [
+                'view'       => 'stock_counts',
+                'label'      => __('nav_physical_counts', 'Physical Counts'),
+                'icon'       => 'fa-scale-unbalanced',
+                'permission' => 'oil_care.list',
             ],
         ],
     ],
@@ -136,6 +192,12 @@ $rawMenuGroups = [
                 'icon'       => 'fa-wallet',
                 'permission' => 'expenses.list',
                 'allow_roles' => ['manager'],
+            ],
+            [
+                'view'       => 'expense_categories',
+                'label'      => __('nav_expense_categories', 'Expense Categories'),
+                'icon'       => 'fa-tags',
+                'permission' => 'categories.list',
             ],
             [
                 'view'       => 'reports',
@@ -258,8 +320,16 @@ foreach ($rawMenuGroups as $grp) {
     <?php
     // Determine effective view for sub-tab alias matching
     $effectiveView = $currentView;
-    if ($currentView === 'oil_care' || $currentView === 'parts_dispatch') {
-        $effectiveView = 'products';
+    if (in_array($currentView, ['oil_care', 'parts_dispatch', 'products', 'supplies'], true)) {
+        $legacyTab = $_GET['tab'] ?? (($navPendingParts > 0 || in_array($role, ['stock_control', 'warehouse'], true)) ? 'requests' : 'products');
+        $tabViewMap = [
+            'products' => 'stock_manage',
+            'requests' => 'stock_requests',
+            'ledger' => 'stock_movements',
+            'supplies' => 'stock_supplies',
+            'discrepancies' => 'stock_counts',
+        ];
+        $effectiveView = $tabViewMap[$legacyTab] ?? 'stock_manage';
     } elseif ($currentView === 'extras' && ($_GET['tab'] ?? '') === 'appointments') {
         $effectiveView = 'appointments';
     }

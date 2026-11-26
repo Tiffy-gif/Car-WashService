@@ -40,9 +40,10 @@ $needsReviewOnly = (isset($_GET['needs_review']) && ($_GET['needs_review'] === '
 
 // Pagination parameters
 $page = max(1, (int)($_GET['page'] ?? 1));
-$limit = (int)($_GET['limit'] ?? 25);
-if ($limit <= 0 || $limit > 200) {
-    $limit = 25;
+$allowedLimits = [8, 15, 25, 50];
+$limit = (int)($_GET['limit'] ?? 8);
+if (!in_array($limit, $allowedLimits, true)) {
+    $limit = 8;
 }
 
 // Date where clause
@@ -517,7 +518,7 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
         </div>
 
         <div class="table-responsive">
-            <table class="table">
+            <table class="table js-server-paginated">
                 <thead>
                     <tr>
                         <th style="min-width: 200px;">Cashier</th>
@@ -940,7 +941,14 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
             <?= sprintf(htmlspecialchars(__('showing_shifts_paged', 'Showing %d to %d of %d shifts')), ($totalShifts > 0 ? $offset + 1 : 0), min($offset + $limit, $totalShifts), $totalShifts) ?>
         </div>
 
-        <div style="display: flex; gap: 4px; align-items: center;">
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <label style="font-size:13px;color:var(--text-muted);">Rows
+                <select aria-label="Rows per page" class="form-input" style="width:auto;min-height:34px;padding:5px 28px 5px 10px;" onchange="window.location.href=this.value">
+                    <?php foreach ($allowedLimits as $pageLimit): ?>
+                    <option value="<?= htmlspecialchars(buildSessionsUrl(['page' => 1, 'limit' => $pageLimit])) ?>" <?= $limit === $pageLimit ? 'selected' : '' ?>><?= $pageLimit ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
             <!-- First Page -->
             <?php if ($page > 1): ?>
             <a href="<?= htmlspecialchars(buildSessionsUrl(['page' => 1])) ?>" class="btn btn-xs btn-secondary" title="First Page">

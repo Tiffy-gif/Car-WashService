@@ -19,7 +19,26 @@ $messageType = 'success';
 
 $pendingReqCount = (int)$pdo->query("SELECT COUNT(*) FROM parts_requests WHERE status = 'pending'")->fetchColumn();
 $activeTab = $_GET['tab'] ?? ($pendingReqCount > 0 ? 'requests' : (in_array($currentRole, ['stock_control', 'warehouse'], true) ? 'requests' : 'products'));
-$pageTitle = __('nav_products_warehouse', 'Products & Warehouse');
+$currentView = $_GET['view'] ?? 'products';
+$isProductCatalogView = $currentView === 'product_catalog';
+$isLowStockView = $currentView === 'low_stock' || ($_GET['stock_filter'] ?? '') === 'low';
+$validStockTabs = ['products', 'requests', 'ledger', 'supplies', 'discrepancies', 'reminders'];
+if (!in_array($activeTab, $validStockTabs, true)) {
+    $activeTab = 'products';
+}
+$workspaceHeadings = [
+    'products' => $isProductCatalogView ? 'Products' : ($isLowStockView ? 'Low Stock' : 'Manage Stock'),
+    'requests' => 'Technician Requests',
+    'ledger' => 'Stock Movement History',
+    'supplies' => 'Washing Supplies',
+    'discrepancies' => 'Physical Count Audits',
+    'reminders' => 'Oil Change Reminders',
+];
+$pageTitle = $workspaceHeadings[$activeTab] ?? __('nav_products_warehouse', 'Products & Warehouse');
+$showReceiveDelivery = $activeTab === 'products' && !$isProductCatalogView;
+$showAddProduct = $activeTab === 'products'
+    && ($isProductCatalogView || !in_array($currentView, ['stock_manage', 'low_stock'], true))
+    && Auth::can('oil_care.add');
 
 if (isset($csrfError)) {
     $message = $csrfError;
@@ -64,21 +83,31 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         $removeImage = (($_POST['remove_image'] ?? '0') === '1');
 
         // Resolve category_id and category slug
+        $categoryError = false;
         if ($categoryId) {
-            $catLookup = $pdo->prepare("SELECT id, code FROM categories WHERE id = ?");
+            $catLookup = $pdo->prepare("SELECT id, code FROM categories WHERE id = ? AND type = 'product'");
             $catLookup->execute([$categoryId]);
             if ($cRow = $catLookup->fetch()) {
                 $category = $cRow['code'];
+            } else {
+                $message = 'Please select a valid product category.';
+                $messageType = 'danger';
+                $categoryError = true;
             }
         } elseif ($category !== '') {
             $catLookup = $pdo->prepare("SELECT id, code FROM categories WHERE type = 'product' AND code = ?");
             $catLookup->execute([$category]);
             if ($cRow = $catLookup->fetch()) {
                 $categoryId = (int)$cRow['id'];
+                $category = $cRow['code'];
+            } else {
+                $message = 'Please select a valid product category.';
+                $messageType = 'danger';
+                $categoryError = true;
             }
         }
 
-        if (!$categoryId && empty($category)) {
+        if (!$categoryError && !$categoryId && empty($category)) {
             $catLookup = $pdo->query("SELECT id, code FROM categories WHERE type = 'product' ORDER BY sort_order ASC LIMIT 1");
             if ($cRow = $catLookup->fetch()) {
                 $categoryId = (int)$cRow['id'];
@@ -88,7 +117,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             }
         }
 
-        if ($nameEn === '' || $sellPrice <= 0) {
+        if ($categoryError) {
+            $activeTab = 'products';
+        } elseif ($nameEn === '' || $sellPrice <= 0) {
             $message = 'Product name and selling price are required.';
             $messageType = 'danger';
             $activeTab = 'products';
@@ -454,23 +485,16 @@ foreach ($productCategories as $pc) {
     $prodCatMap['code_' . $pc['code']] = $pc;
 }
 
-// Fetch All Products & Compute Category & KPI Counts
-$catCounts = [
-    'all' => (int)$pdo->query("SELECT COUNT(*) FROM products WHERE is_active = 1")->fetchColumn(),
-];
-$pCountsStmt = $pdo->query("SELECT category_id, category, COUNT(*) as cnt FROM products WHERE is_active = 1 GROUP BY category_id, category");
-while ($r = $pCountsStmt->fetch()) {
-    if (!empty($r['category_id'])) {
-        $catCounts['id_' . $r['category_id']] = ($catCounts['id_' . $r['category_id']] ?? 0) + (int)$r['cnt'];
-    }
-    if (!empty($r['category'])) {
-        $catCounts['code_' . $r['category']] = ($catCounts['code_' . $r['category']] ?? 0) + (int)$r['cnt'];
-    }
-}
-
 // Fetch all active products for client-side search, filtering, and instant pagination
 $allActiveProducts = $pdo->query("SELECT * FROM products WHERE is_active = 1 ORDER BY category_id ASC, category ASC, name_en ASC")->fetchAll(PDO::FETCH_ASSOC);
-
+$productBrands = [];
+foreach ($allActiveProducts as $activeProduct) {
+    $brandName = trim((string)($activeProduct['brand'] ?? ''));
+    if ($brandName !== '') {
+        $productBrands[mb_strtolower($brandName, 'UTF-8')] = $brandName;
+    }
+}
+natcasesort($productBrands);
 // Calculate KPI Counts
 $kpiCounts = [
     'all' => count($allActiveProducts),
@@ -552,39 +576,92 @@ include dirname(__DIR__) . '/layouts/header.php';
 
 <!-- Products & Warehouse UI Styles (Harmonized with Project Design System) -->
 <style>
-/* Page Header */
-.pw-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-    flex-wrap: wrap;
-    gap: 16px;
-}
-.pw-title {
-    font-size: 24px;
-    font-weight: 800;
-    color: var(--text-main);
-    margin: 0 0 4px 0;
-    letter-spacing: -0.01em;
-}
-.pw-subtitle {
-    font-size: 13px;
-    color: var(--text-muted);
-    margin: 0;
-}
-.pw-header-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
+/* Navigation Tabs Bar (Clean button-pill style matching Services & Prices) */
+/* Catalog and stock are separate destinations; keep stock controls off the catalog view. */
+.pw-product-catalog .pw-kpi-grid,
+.pw-product-catalog .pw-page-actions,
+.pw-product-catalog #pwBulkBar,
+.pw-product-catalog #pwProductsTable .pw-select-col,
+.pw-product-catalog #pwProductsTable .pw-status-col,
+.pw-product-catalog .pw-stock-action {
+    display: none !important;
 }
 
-/* Navigation Tabs Bar (Clean button-pill style matching Services & Prices) */
-.pw-tabs-nav {
+.pw-product-filters {
     display: flex;
+    align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
-    margin-bottom: 24px;
+}
+.pw-product-filters .pw-sort-select {
+    min-height: 46px;
+    box-sizing: border-box;
+    padding: 12px 16px;
+    font-size: 14px;
+}
+#pwCategoryFilter { min-width: 200px; }
+#pwBrandFilter { min-width: 160px; }
+.pw-product-catalog .pw-table th,
+.pw-product-catalog .pw-table td { padding: 13px 12px; }
+.pw-view-product { color: var(--primary); }
+.pw-view-product:hover { background: var(--primary-light); }
+.pw-product-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+.pw-product-detail-grid > div {
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+.pw-product-detail-grid span {
+    display: block;
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-bottom: 5px;
+}
+.pw-product-detail-grid strong { font-size: 14px; color: var(--text-main); }
+@media (max-width: 560px) { .pw-product-detail-grid { grid-template-columns: 1fr; } }
+
+.pw-page-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+/* A wider layout gives product details, stock, and image controls more room. */
+.product-modal {
+    width: min(920px, calc(100vw - 32px));
+    max-width: 920px;
+    max-height: calc(100dvh - 32px);
+}
+.product-modal .modal-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-surface);
+}
+.product-modal .modal-body {
+    padding: 30px 34px;
+}
+.product-modal .modal-body > .grid {
+    column-gap: 22px !important;
+    row-gap: 8px;
+}
+.product-modal .form-input,
+.product-modal .form-select {
+    min-height: 46px;
+    font-size: 15px;
+}
+.product-modal .modal-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+}
+@media (max-width: 768px) {
+    .product-modal .modal-body { padding: 20px; }
 }
 
 /* 4 KPI Summary Cards Grid */
@@ -668,9 +745,11 @@ include dirname(__DIR__) . '/layouts/header.php';
 }
 .pw-search-input {
     width: 100%;
+    min-height: 46px;
+    box-sizing: border-box;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 10px 14px 10px 38px;
+    padding: 12px 16px 12px 40px;
     font-size: 14px;
     background: var(--bg-surface);
     color: var(--text-main);
@@ -720,22 +799,6 @@ include dirname(__DIR__) . '/layouts/header.php';
     color: var(--text-main);
     outline: none;
     cursor: pointer;
-}
-
-/* Category Filter Pills (Button pills matching Services & Prices) */
-.pw-cat-pills {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-}
-.pw-cat-label {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-muted);
-    white-space: nowrap;
-    margin-right: 4px;
 }
 
 /* Products Table Card */
@@ -808,18 +871,6 @@ include dirname(__DIR__) . '/layouts/header.php';
     font-size: 12px;
     color: var(--text-light);
     margin-top: 2px;
-}
-
-/* Category Pill */
-.cat-pill {
-    display: inline-block;
-    padding: 4px 12px;
-    border-radius: var(--radius-full);
-    font-size: 12px;
-    font-weight: 600;
-    text-align: center;
-    white-space: nowrap;
-    border: 1px solid var(--border);
 }
 
 /* Price Cell */
@@ -1041,43 +1092,6 @@ include dirname(__DIR__) . '/layouts/header.php';
     }
 }
 </style>
-<!-- Page Header (Unified Products & Stock Hub) -->
-<div class="pw-header">
-    <div>
-        <h1 class="pw-title"><?= htmlspecialchars(__('nav_products_stock', 'Products & Stock')) ?></h1>
-        <p class="pw-subtitle">Manage catalog items, live stock levels, supplier receiving, and bay parts requests.</p>
-    </div>
-    <div class="pw-header-actions">
-        <button type="button" class="btn btn-secondary" onclick="openReceiveStockModal()">
-            <i class="fa-solid fa-truck-ramp-box mr-1"></i> Receive Delivery
-        </button>
-        <?php if (Auth::can('oil_care.add')): ?>
-            <button type="button" class="btn btn-primary" onclick="openNewProductModal()">
-                <i class="fa-solid fa-plus mr-1"></i> Add Product
-            </button>
-        <?php endif; ?>
-    </div>
-</div>
-
-<!-- Tabs Navigation Bar (Matching Services & Prices Tab Style) -->
-<div class="pw-tabs-nav">
-    <button type="button" data-tab-target="products" class="btn btn-sm <?= ($activeTab === 'products') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('products')">
-        <i class="fa-solid fa-boxes-stacked mr-1"></i> Products &amp; Stock (<?= $kpiCounts['all'] ?>)
-    </button>
-    <button type="button" data-tab-target="requests" class="btn btn-sm <?= ($activeTab === 'requests') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('requests')">
-        <i class="fa-solid fa-dolly mr-1" data-color="#ea580c" style="<?= $activeTab !== 'requests' ? 'color: #ea580c;' : '' ?>"></i> Technician Bay Requests (<?= $pendingReqCount ?>)
-    </button>
-    <button type="button" data-tab-target="ledger" class="btn btn-sm <?= ($activeTab === 'ledger') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('ledger')">
-        <i class="fa-solid fa-clipboard-list mr-1" data-color="#0284c7" style="<?= $activeTab !== 'ledger' ? 'color: #0284c7;' : '' ?>"></i> Stock Movement History (<?= $totalMovementsCount ?>)
-    </button>
-    <button type="button" data-tab-target="supplies" class="btn btn-sm <?= ($activeTab === 'supplies') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('supplies')">
-        <i class="fa-solid fa-flask mr-1" data-color="#0284c7" style="<?= $activeTab !== 'supplies' ? 'color: #0284c7;' : '' ?>"></i> Chemicals &amp; Washing Supplies (<?= count($supplies) ?>)
-    </button>
-    <button type="button" data-tab-target="discrepancies" class="btn btn-sm <?= ($activeTab === 'discrepancies') ? 'btn-primary' : 'btn-secondary' ?>" onclick="switchTab('discrepancies')">
-        <i class="fa-solid fa-scale-unbalanced mr-1" data-color="#8b5cf6" style="<?= $activeTab !== 'discrepancies' ? 'color: #8b5cf6;' : '' ?>"></i> Physical Count Audits (<?= count($discrepancies) ?>)
-    </button>
-</div>
-
 <!-- ========================================== -->
 <!-- TAB: PARTS REQUESTS (WAREHOUSE LIVE FEED) -->
 <!-- ========================================== -->
@@ -1113,7 +1127,7 @@ include dirname(__DIR__) . '/layouts/header.php';
         </div>
 
         <div class="table-responsive">
-            <table class="table">
+            <table class="table js-paginated-table">
                 <thead>
                     <tr>
                         <th>Request UID</th>
@@ -1239,7 +1253,7 @@ include dirname(__DIR__) . '/layouts/header.php';
         </div>
 
         <div class="table-responsive">
-            <table class="table" style="font-size: 13px;">
+            <table class="table js-paginated-table" style="font-size: 13px;">
                 <thead>
                     <tr>
                         <th>Movement UID</th>
@@ -1323,7 +1337,7 @@ include dirname(__DIR__) . '/layouts/header.php';
         </div>
 
         <div class="table-responsive">
-            <table class="table">
+            <table class="table js-paginated-table">
                 <thead>
                     <tr>
                         <th>Discrepancy UID</th>
@@ -1450,7 +1464,7 @@ include dirname(__DIR__) . '/layouts/header.php';
     <!-- Reminders Table -->
     <div class="card">
         <div class="table-responsive">
-            <table class="table searchable-table">
+            <table class="table searchable-table js-paginated-table">
                 <thead>
                     <tr>
                         <th style="width: 140px;">Plate Number</th>
@@ -1547,11 +1561,32 @@ include dirname(__DIR__) . '/layouts/header.php';
 <!-- ========================================== -->
 <!-- TAB 2: PRODUCTS & STOCK CATALOG (PICTURE MATCH) -->
 <!-- ========================================== -->
-<div id="tab_products" class="tab-pane" style="display: <?= ($activeTab === 'products') ? 'block' : 'none' ?>;">
-    
+<div id="tab_products" class="tab-pane <?= $isProductCatalogView ? 'pw-product-catalog' : '' ?>" style="display: <?= ($activeTab === 'products') ? 'block' : 'none' ?>;">
+
+    <?php if ($isProductCatalogView): ?>
+    <div class="page-content-heading">
+        <div>
+            <h2>Products</h2>
+            <p>Manage products used for vehicle maintenance and car care.</p>
+        </div>
+        <?php if ($showAddProduct): ?>
+        <button type="button" class="btn btn-primary" onclick="openNewProductModal()"><i class="fa-solid fa-plus mr-1"></i> Add Product</button>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+
+    <div class="pw-page-actions">
+    <?php if ($showReceiveDelivery): ?>
+        <button type="button" class="btn btn-secondary" onclick="openReceiveStockModal()"><i class="fa-solid fa-truck-ramp-box mr-1"></i> Receive Delivery</button>
+    <?php endif; ?>
+    <?php if ($showAddProduct && !$isProductCatalogView): ?>
+        <button type="button" class="btn btn-primary" onclick="openNewProductModal()"><i class="fa-solid fa-plus mr-1"></i> Add Product</button>
+    <?php endif; ?>
+</div>
+
     <!-- 1. KPI Summary Cards Grid -->
     <div class="pw-kpi-grid">
-        <div class="pw-kpi-card active" data-kpi="all" onclick="filterByKpi('all')">
+        <div class="pw-kpi-card <?= $isLowStockView ? '' : 'active' ?>" data-kpi="all" onclick="filterByKpi('all')">
             <div class="pw-kpi-title">All products</div>
             <div class="pw-kpi-num"><?= $kpiCounts['all'] ?></div>
             <div class="pw-kpi-sub">Everything in the catalog</div>
@@ -1561,7 +1596,7 @@ include dirname(__DIR__) . '/layouts/header.php';
             <div class="pw-kpi-num" style="color: #16a34a;"><?= $kpiCounts['in_stock'] ?></div>
             <div class="pw-kpi-sub">More than 10 units</div>
         </div>
-        <div class="pw-kpi-card" data-kpi="low_stock" onclick="filterByKpi('low_stock')">
+        <div class="pw-kpi-card <?= $isLowStockView ? 'active' : '' ?>" data-kpi="low_stock" onclick="filterByKpi('low_stock')">
             <div class="pw-kpi-title"><span class="kpi-dot low-stock"></span> Low stock</div>
             <div class="pw-kpi-num" style="color: #d97706;"><?= $kpiCounts['low_stock'] ?></div>
             <div class="pw-kpi-sub">10 units or fewer</div>
@@ -1574,47 +1609,45 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 
     <!-- 2. Search & Filter Controls Toolbar -->
-    <div class="pw-toolbar">
+    <div class="pw-toolbar table-toolbar">
         <div class="pw-search-wrap">
             <i class="fa-solid fa-magnifying-glass pw-search-icon"></i>
-            <input type="text" id="pwSearchInput" class="pw-search-input" placeholder="Search by name, brand or barcode" oninput="handleSearch(this.value)">
+            <input type="text" id="pwSearchInput" class="pw-search-input" placeholder="Search by name or brand" oninput="handleSearch(this.value)">
         </div>
         <div class="pw-toolbar-right">
-            <label class="pw-checkbox-label">
-                <input type="checkbox" id="pwHideOutOfStock" onchange="toggleHideOutOfStock(this.checked)">
-                <span>Hide out of stock</span>
-            </label>
-            <div class="pw-sort-wrap">
-                <span>Sort</span>
-                <select id="pwSortSelect" class="pw-sort-select" onchange="handleSort(this.value)">
-                    <option value="name_asc" selected>Name A to Z</option>
-                    <option value="name_desc">Name Z to A</option>
-                    <option value="price_asc">Price: Low to High</option>
-                    <option value="price_desc">Price: High to Low</option>
-                    <option value="stock_desc">Stock: High to Low</option>
-                    <option value="stock_asc">Stock: Low to High</option>
-                </select>
-            </div>
+            <?php if ($isProductCatalogView): ?>
+                <div class="pw-product-filters">
+                    <select id="pwCategoryFilter" class="pw-sort-select" aria-label="Filter by category" onchange="filterByCategory(this.value)">
+                        <option value="all">All categories</option>
+                        <?php foreach ($productCategories as $pc): ?>
+                            <option value="<?= htmlspecialchars($pc['code'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars((Language::current() === 'km') ? $pc['name_km'] : $pc['name_en']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <select id="pwBrandFilter" class="pw-sort-select" aria-label="Filter by brand" onchange="filterByBrand(this.value)">
+                        <option value="all">All brands</option>
+                        <?php foreach ($productBrands as $brandKey => $brandName): ?>
+                            <option value="<?= htmlspecialchars($brandKey, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($brandName) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            <?php else: ?>
+                <label class="pw-checkbox-label">
+                    <input type="checkbox" id="pwHideOutOfStock" onchange="toggleHideOutOfStock(this.checked)">
+                    <span>Hide out of stock</span>
+                </label>
+                <div class="pw-sort-wrap">
+                    <span>Sort</span>
+                    <select id="pwSortSelect" class="pw-sort-select" onchange="handleSort(this.value)">
+                        <option value="name_asc" selected>Name A to Z</option>
+                        <option value="name_desc">Name Z to A</option>
+                        <option value="price_asc">Price: Low to High</option>
+                        <option value="price_desc">Price: High to Low</option>
+                        <option value="stock_desc">Stock: High to Low</option>
+                        <option value="stock_asc">Stock: Low to High</option>
+                    </select>
+                </div>
+            <?php endif; ?>
         </div>
-    </div>
-
-    <!-- 3. Category Filter Pills (Matching Services & Prices Tab Style) -->
-    <div class="pw-cat-pills">
-        <span class="pw-cat-label">Category:</span>
-        <button type="button" class="btn btn-sm btn-primary" data-cat="all" onclick="filterByCategory('all')">
-            All (<?= $catCounts['all'] ?>)
-        </button>
-        <?php foreach ($productCategories as $pc): 
-            $cnt = max($catCounts['id_' . $pc['id']] ?? 0, $catCounts['code_' . $pc['code']] ?? 0);
-            $pcIcon = !empty($pc['icon']) ? $pc['icon'] : 'fa-tag';
-            $pcColor = !empty($pc['color']) ? $pc['color'] : '#0284c7';
-            $pcName = (Language::current() === 'km') ? $pc['name_km'] : $pc['name_en'];
-        ?>
-            <button type="button" class="btn btn-sm btn-secondary" data-cat="<?= htmlspecialchars($pc['code']) ?>" onclick="filterByCategory('<?= htmlspecialchars($pc['code']) ?>')">
-                <i class="fa-solid <?= htmlspecialchars($pcIcon) ?> mr-1" data-color="<?= htmlspecialchars($pcColor) ?>" style="color: <?= htmlspecialchars($pcColor) ?>;"></i>
-                <?= htmlspecialchars($pcName) ?> (<?= $cnt ?>)
-            </button>
-        <?php endforeach; ?>
     </div>
 
     <!-- 4. Bulk Action Floating Bar -->
@@ -1631,19 +1664,21 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 
     <!-- 5. Products Table Card -->
-    <div class="pw-table-card">
+    <div class="pw-table-card table-card">
         <div class="table-responsive">
             <table class="pw-table" id="pwProductsTable">
                 <thead>
                     <tr>
-                        <th style="width: 44px; text-align: center;">
+                        <th class="pw-select-col" style="width: 44px; text-align: center;">
                             <input type="checkbox" id="pwSelectAll" class="pw-row-checkbox" onchange="toggleSelectAll(this.checked)">
                         </th>
                         <th>PRODUCT</th>
                         <th>CATEGORY</th>
+                        <th>BRAND</th>
                         <th>PRICE</th>
-                        <th>STOCK AVAILABLE</th>
-                        <th>STATUS</th>
+                        <th>UNIT</th>
+                        <th>QTY</th>
+                        <th class="pw-status-col">STATUS</th>
                         <th style="text-align: right; width: 170px;">ACTIONS</th>
                     </tr>
                 </thead>
@@ -1698,16 +1733,22 @@ include dirname(__DIR__) . '/layouts/header.php';
                         }
 
                         $hasImg = !empty($p['thumb_path']) && file_exists(dirname(__DIR__, 2) . '/' . $p['thumb_path']);
+                        $pRowData = $p;
+                        if (!Auth::canViewProfit()) {
+                            unset($pRowData['cost_price_usd']);
+                        }
+                        $productJson = htmlspecialchars(json_encode($pRowData, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8');
                     ?>
                     <tr class="pw-row" 
                         data-id="<?= $p['id'] ?>"
                         data-name="<?= htmlspecialchars(strtolower($p['name_en'] . ' ' . ($p['name_km'] ?? '') . ' ' . ($p['brand'] ?? ''))) ?>"
                         data-cat="<?= htmlspecialchars($catCode) ?>"
+                        data-brand="<?= htmlspecialchars(mb_strtolower(trim((string)($p['brand'] ?? '')), 'UTF-8'), ENT_QUOTES, 'UTF-8') ?>"
                         data-stock="<?= $avail ?>"
                         data-stock-status="<?= $isOut ? 'out_of_stock' : ($isLow ? 'low_stock' : 'in_stock') ?>"
                         data-price="<?= (float)$p['price_usd'] ?>"
                         data-name-sort="<?= htmlspecialchars(strtolower($p['name_en'])) ?>">
-                        <td style="text-align: center;">
+                        <td class="pw-select-col" style="text-align: center;">
                             <input type="checkbox" class="pw-row-checkbox" value="<?= $p['id'] ?>" onchange="handleRowCheckbox(this)">
                         </td>
                         <td>
@@ -1724,22 +1765,22 @@ include dirname(__DIR__) . '/layouts/header.php';
                                     <?php if (!empty($p['name_km'])): ?>
                                         <div class="product-name-km"><?= htmlspecialchars($p['name_km']) ?></div>
                                     <?php endif; ?>
-                                    <div class="product-meta">
-                                        <?= htmlspecialchars($p['brand'] ?: 'Generic') ?> · <?= htmlspecialchars($p['unit'] ?: 'unit') ?>
-                                    </div>
                                 </div>
                             </div>
                         </td>
                         <td>
-                            <span class="cat-pill" style="background: <?= $catBg ?>; color: <?= $catTextColor ?>;">
-                                <?= htmlspecialchars($catName) ?>
-                            </span>
+                            <?= htmlspecialchars($catName) ?>
                         </td>
+                        <td><?= htmlspecialchars($p['brand'] ?: '—') ?></td>
                         <td>
                             <div class="price-main">$<?= number_format((float)$p['price_usd'], 2) ?></div>
-                            <div class="price-sub">៛<?= number_format((int)$p['price_khr']) ?></div>
+                            <div class="price-sub">&#6107;<?= number_format((int)$p['price_khr']) ?></div>
                         </td>
+                        <td><?= htmlspecialchars($p['unit'] ?: 'unit') ?></td>
                         <td>
+                            <?php if ($isProductCatalogView): ?>
+                                <span class="stock-num"><?= $physical ?></span>
+                            <?php else: ?>
                             <div style="display: flex; align-items: baseline;">
                                 <span class="stock-num <?= $isOut ? 'out-of-stock' : ($isLow ? 'low-stock' : 'in-stock') ?>"><?= $avail ?></span>
                                 <span class="stock-sub"><?= $physical ?> on hand · <?= $reserved ?> reserved</span>
@@ -1747,8 +1788,9 @@ include dirname(__DIR__) . '/layouts/header.php';
                             <div class="stock-track">
                                 <div class="stock-bar <?= $isOut ? 'out-of-stock' : ($isLow ? 'low-stock' : 'in-stock') ?>" style="width: <?= $barPercent ?>%;"></div>
                             </div>
+                            <?php endif; ?>
                         </td>
-                        <td>
+                        <td class="pw-status-col">
                             <?php if ($isOut): ?>
                                 <span class="status-pill out-of-stock"><span class="dot"></span> Out of stock</span>
                             <?php elseif ($isLow): ?>
@@ -1759,19 +1801,16 @@ include dirname(__DIR__) . '/layouts/header.php';
                         </td>
                         <td style="text-align: right;">
                             <div style="display: inline-flex; align-items: center; gap: 6px;">
-                                <button type="button" class="btn-stock-plus" onclick="openQuickRestock(<?= $p['id'] ?>, '<?= htmlspecialchars($p['name_en'], ENT_QUOTES) ?>', <?= $physical ?>)">
+                                <button type="button" class="btn-stock-plus pw-stock-action" onclick="openQuickRestock(<?= $p['id'] ?>, '<?= htmlspecialchars($p['name_en'], ENT_QUOTES) ?>', <?= $physical ?>)">
                                     + Stock
                                 </button>
-                                <?php 
-                                $pRowData = $p; 
-                                if (!Auth::canViewProfit()) { 
-                                    unset($pRowData['cost_price_usd']); 
-                                } 
-                                ?>
-                                <button type="button" class="btn-icon-sq" data-product="<?= htmlspecialchars(json_encode($pRowData, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>" onclick="openEditProductModal(this)" title="Edit Product">
+                                <button type="button" class="btn-icon-sq pw-view-product" data-product="<?= $productJson ?>" data-category-name="<?= htmlspecialchars($catName, ENT_QUOTES, 'UTF-8') ?>" onclick="openProductDetails(this)" title="View Product" aria-label="View <?= htmlspecialchars($p['name_en'], ENT_QUOTES, 'UTF-8') ?>">
+                                    <i class="fa-solid fa-eye"></i>
+                                </button>
+                                <button type="button" class="btn-icon-sq" data-product="<?= $productJson ?>" onclick="openEditProductModal(this)" title="Edit Product" aria-label="Edit <?= htmlspecialchars($p['name_en'], ENT_QUOTES, 'UTF-8') ?>">
                                     <i class="fa-solid fa-pencil"></i>
                                 </button>
-                                <div style="position: relative; display: inline-block;">
+                                <div class="pw-stock-action" style="position: relative; display: inline-block;">
                                     <button type="button" class="btn-icon-sq" onclick="toggleRowMenu(event, this)" title="More options">
                                         <i class="fa-solid fa-ellipsis-vertical"></i>
                                     </button>
@@ -1844,7 +1883,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 
     <div class="card">
         <div class="table-responsive">
-            <table class="table">
+            <table class="table js-paginated-table">
                 <thead>
                     <tr>
                         <th>Supply Name</th>
@@ -2076,7 +2115,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 </div>
 
 <div class="modal-backdrop" id="productModal">
-    <div class="modal" style="max-width: 600px;">
+    <div class="modal product-modal">
         <div class="modal-header">
             <h3 class="modal-title" id="pModalTitle">Add Product to Catalog</h3>
             <button type="button" class="modal-close" onclick="closeModal('productModal')">&times;</button>
@@ -2102,7 +2141,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                     <div class="form-group">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                             <label class="form-label" style="margin-bottom: 0;">Category *</label>
-                            <a href="?view=categories&tab=product" target="_blank" style="font-size: 11px; font-weight: 600; color: var(--primary); text-decoration: none;">
+                            <a href="?view=product_categories" target="_blank" style="font-size: 11px; font-weight: 600; color: var(--primary); text-decoration: none;">
                                 <i class="fa-solid fa-plus-circle mr-1"></i> New
                             </a>
                         </div>
@@ -2191,6 +2230,40 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 </div>
 
+<div class="modal-backdrop" id="productDetailsModal">
+    <div class="modal" style="max-width: 640px;">
+        <div class="modal-header">
+            <h3 class="modal-title">Product Details</h3>
+            <button type="button" class="modal-close" onclick="closeModal('productDetailsModal')" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="product-flex" style="margin-bottom: 18px;">
+                <div class="product-icon-sq" id="productDetailIcon"><i class="fa-solid fa-box"></i></div>
+                <div>
+                    <div class="product-name-en" id="productDetailName"></div>
+                    <div class="product-name-km" id="productDetailNameKm"></div>
+                </div>
+            </div>
+            <div class="pw-product-detail-grid">
+                <div><span>Category</span><strong id="productDetailCategory"></strong></div>
+                <div><span>Brand</span><strong id="productDetailBrand"></strong></div>
+                <div><span>Unit</span><strong id="productDetailUnit"></strong></div>
+                <div><span>Selling price</span><strong id="productDetailPrice"></strong></div>
+                <?php if (Auth::canViewProfit()): ?>
+                    <div><span>Cost price</span><strong id="productDetailCost"></strong></div>
+                <?php endif; ?>
+                <div><span>Quantity on hand</span><strong id="productDetailQuantity"></strong></div>
+                <div><span>Minimum stock alert</span><strong id="productDetailMinimum"></strong></div>
+                <div><span>Status</span><strong id="productDetailStatus"></strong></div>
+            </div>
+            <p class="text-xs text-muted" style="margin: 16px 0 0;">Stock changes are managed in the Stock section.</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('productDetailsModal')">Close</button>
+        </div>
+    </div>
+</div>
+
 <!-- Modal 2: Send Reminder Message Preview -->
 <div class="modal-backdrop" id="reminderAlertModal">
     <div class="modal" style="max-width: 480px;">
@@ -2214,37 +2287,12 @@ include dirname(__DIR__) . '/layouts/header.php';
 </div>
 
 <script>
-function switchTab(tabId) {
-    document.querySelectorAll('.tab-pane').forEach(el => el.style.display = 'none');
-    const targetPane = document.getElementById('tab_' + tabId);
-    if (targetPane) targetPane.style.display = 'block';
-
-    document.querySelectorAll('[data-tab-target]').forEach(btn => {
-        const isTarget = (btn.getAttribute('data-tab-target') === tabId);
-        btn.classList.toggle('active', isTarget);
-        if (btn.classList.contains('btn')) {
-            btn.classList.toggle('btn-primary', isTarget);
-            btn.classList.toggle('btn-secondary', !isTarget);
-        }
-        const icon = btn.querySelector('i');
-        if (icon) {
-            const defaultColor = icon.getAttribute('data-color');
-            if (defaultColor) {
-                icon.style.color = isTarget ? '#ffffff' : defaultColor;
-            }
-        }
-    });
-
-    const url = new URL(window.location);
-    url.searchParams.set('tab', tabId);
-    window.history.pushState({}, '', url);
-}
-
 // Client-Side Products Table Controller (Pixel-matched interactivity)
 let pwState = {
     search: '',
     category: 'all',
-    kpi: 'all',
+    brand: 'all',
+    kpi: <?= json_encode($isLowStockView ? 'low_stock' : 'all') ?>,
     hideOutOfStock: false,
     sort: 'name_asc',
     rowsPerPage: 8,
@@ -2262,23 +2310,14 @@ function filterByKpi(kpiType) {
 }
 
 function filterByCategory(catCode) {
-    pwState.category = catCode;
+    pwState.category = catCode || 'all';
     pwState.currentPage = 1;
-    document.querySelectorAll('.pw-cat-pills button[data-cat]').forEach(p => {
-        const isTarget = (p.getAttribute('data-cat') === catCode);
-        p.classList.toggle('active', isTarget);
-        if (p.classList.contains('btn')) {
-            p.classList.toggle('btn-primary', isTarget);
-            p.classList.toggle('btn-secondary', !isTarget);
-        }
-        const icon = p.querySelector('i');
-        if (icon) {
-            const defaultColor = icon.getAttribute('data-color');
-            if (defaultColor) {
-                icon.style.color = isTarget ? '#ffffff' : defaultColor;
-            }
-        }
-    });
+    applyPwFilters();
+}
+
+function filterByBrand(brandName) {
+    pwState.brand = brandName || 'all';
+    pwState.currentPage = 1;
     applyPwFilters();
 }
 
@@ -2310,11 +2349,13 @@ function applyPwFilters() {
     let matched = rows.filter(row => {
         const name = row.getAttribute('data-name') || '';
         const cat = row.getAttribute('data-cat') || '';
+        const brand = row.getAttribute('data-brand') || '';
         const stockStatus = row.getAttribute('data-stock-status') || '';
         const stock = parseFloat(row.getAttribute('data-stock') || '0');
 
         if (pwState.search && !name.includes(pwState.search)) return false;
         if (pwState.category !== 'all' && cat !== pwState.category) return false;
+        if (pwState.brand !== 'all' && brand !== pwState.brand) return false;
         if (pwState.kpi !== 'all' && stockStatus !== pwState.kpi) return false;
         if (pwState.hideOutOfStock && stock <= 0) return false;
 
@@ -2587,6 +2628,49 @@ function openNewProductModal() {
     document.getElementById('prod_min_alert').value = '4';
     resetProductImageUI();
     openModal('productModal');
+}
+
+function openProductDetails(button) {
+    let product;
+    try {
+        product = JSON.parse(button.getAttribute('data-product') || '{}');
+    } catch (error) {
+        console.error('Unable to read product details:', error);
+        return;
+    }
+    if (!product.id) return;
+
+    const setText = (id, value) => {
+        const element = document.getElementById(id);
+        if (element) element.textContent = value || '—';
+    };
+    const unit = product.unit || 'unit';
+    setText('productDetailName', product.name_en);
+    setText('productDetailNameKm', product.name_km);
+    setText('productDetailCategory', button.getAttribute('data-category-name'));
+    setText('productDetailBrand', product.brand);
+    setText('productDetailUnit', unit);
+    setText('productDetailPrice', `$${Number(product.price_usd || 0).toFixed(2)} · ៛${Number(product.price_khr || 0).toLocaleString()}`);
+    setText('productDetailCost', product.cost_price_usd === undefined ? '' : `$${Number(product.cost_price_usd || 0).toFixed(2)}`);
+    setText('productDetailQuantity', `${Number(product.stock_qty || 0)} ${unit}`);
+    setText('productDetailMinimum', `${Number(product.min_stock_alert || 0)} ${unit}`);
+    setText('productDetailStatus', Number(product.is_active) === 1 ? 'Active' : 'Inactive');
+
+    const icon = document.getElementById('productDetailIcon');
+    icon.replaceChildren();
+    const imagePath = product.thumb_path || product.image_path;
+    if (imagePath) {
+        const image = document.createElement('img');
+        image.src = `<?= APP_URL ?>/` + imagePath + '?v=' + encodeURIComponent(product.image_updated_at || '');
+        image.alt = '';
+        image.style.cssText = 'width:100%;height:100%;object-fit:contain;border-radius:8px';
+        icon.appendChild(image);
+    } else {
+        const fallbackIcon = document.createElement('i');
+        fallbackIcon.className = 'fa-solid fa-box';
+        icon.appendChild(fallbackIcon);
+    }
+    openModal('productDetailsModal');
 }
 
 function openEditProductModal(btnOrP) {

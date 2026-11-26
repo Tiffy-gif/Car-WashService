@@ -81,6 +81,105 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Shared 8-row client-side pagination for long management lists.
+    function initDefaultTablePagination() {
+        document.querySelectorAll('table.table:not(.js-server-paginated), table.table-clean:not(.js-server-paginated)').forEach((table) => {
+            const tbody = table.tBodies[0];
+            if (!tbody || table.dataset.paginationReady === 'true') return;
+
+            table.dataset.paginationReady = 'true';
+            const rows = Array.from(tbody.rows).filter((row) =>
+                !row.hasAttribute('data-pagination-ignore') && !row.querySelector('td[colspan]')
+            );
+            if (rows.length <= 8 && !table.classList.contains('js-paginated-table')) return;
+            const wrapper = table.closest('.table-responsive') || table.parentElement;
+            const pager = document.createElement('div');
+            pager.className = 'table-pagination';
+            pager.innerHTML = '<div class="table-pagination-info" aria-live="polite"></div>' +
+                '<div class="table-pagination-controls"><label class="table-pagination-rows"><span>Rows</span><select aria-label="Rows per page">' +
+                '<option value="8">8</option><option value="15">15</option><option value="25">25</option><option value="50">50</option><option value="all">All</option></select></label>' +
+                '<div class="table-pagination-pages"><button type="button" class="table-pagination-button" data-page-step="-1" aria-label="Previous page"><i class="fa-solid fa-chevron-left"></i></button>' +
+                '<span class="table-pagination-page-list"></span>' +
+                '<button type="button" class="table-pagination-button" data-page-step="1" aria-label="Next page"><i class="fa-solid fa-chevron-right"></i></button></div></div>';
+            wrapper.insertAdjacentElement('afterend', pager);
+
+            const info = pager.querySelector('.table-pagination-info');
+            const pageSizeSelect = pager.querySelector('select');
+            const pageList = pager.querySelector('.table-pagination-page-list');
+            const pageNav = pager.querySelector('.table-pagination-pages');
+            const previousButton = pager.querySelector('[data-page-step="-1"]');
+            const nextButton = pager.querySelector('[data-page-step="1"]');
+            const state = { page: 1, pageSize: 8 };
+
+            function render(resetPage) {
+                if (resetPage) state.page = 1;
+                const filteredRows = rows.filter((row) => !row.hidden && row.style.display !== 'none');
+                const pageSize = state.pageSize === 'all' ? Math.max(filteredRows.length, 1) : state.pageSize;
+                const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+                state.page = Math.min(state.page, pageCount);
+                const startIndex = (state.page - 1) * pageSize;
+                const endIndex = Math.min(startIndex + pageSize, filteredRows.length);
+                const pageRows = new Set(filteredRows.slice(startIndex, endIndex));
+
+                rows.forEach((row) => {
+                    const filteredOut = row.hidden || row.style.display === 'none';
+                    row.classList.toggle('table-page-hidden', !filteredOut && !pageRows.has(row));
+                });
+
+                info.textContent = `Showing ${filteredRows.length ? startIndex + 1 : 0} to ${endIndex} of ${filteredRows.length} rows`;
+                pageList.replaceChildren();
+                pageNav.style.display = pageCount > 1 ? 'flex' : 'none';
+                if (pageCount > 1) {
+                    for (let page = 1; page <= pageCount; page++) {
+                        const pageButton = document.createElement('button');
+                        pageButton.type = 'button';
+                        pageButton.className = 'table-pagination-button' + (page === state.page ? ' active' : '');
+                        pageButton.textContent = String(page);
+                        pageButton.setAttribute('aria-label', `Page ${page}`);
+                        if (page === state.page) pageButton.setAttribute('aria-current', 'page');
+                        pageButton.addEventListener('click', () => { state.page = page; render(false); });
+                        pageList.appendChild(pageButton);
+                    }
+                }
+                previousButton.disabled = state.page <= 1;
+                nextButton.disabled = state.page >= pageCount;
+            }
+
+            pageSizeSelect.addEventListener('change', () => {
+                state.pageSize = pageSizeSelect.value === 'all' ? 'all' : (parseInt(pageSizeSelect.value, 10) || 8);
+                render(true);
+            });
+            previousButton.addEventListener('click', () => { state.page--; render(false); });
+            nextButton.addEventListener('click', () => { state.page++; render(false); });
+            table._refreshPagination = () => render(true);
+            render(false);
+
+            new MutationObserver(() => render(true)).observe(tbody, {
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['style', 'hidden']
+            });
+        });
+    }
+
+    initDefaultTablePagination();
+    document.addEventListener('input', (event) => {
+        if (event.target instanceof HTMLElement && event.target.matches('input[type="search"], input[type="text"]')) {
+            window.setTimeout(() => {
+                document.querySelectorAll('table.table:not(.js-server-paginated), table.table-clean:not(.js-server-paginated)')
+                    .forEach((table) => table._refreshPagination?.());
+            }, 0);
+        }
+    });
+    document.addEventListener('change', (event) => {
+        if (event.target instanceof HTMLElement && event.target.matches('select')) {
+            window.setTimeout(() => {
+                document.querySelectorAll('table.table:not(.js-server-paginated), table.table-clean:not(.js-server-paginated)')
+                    .forEach((table) => table._refreshPagination?.());
+            }, 0);
+        }
+    });
+
     // ==========================================================
     // 4. Sidebar Navigation: Categories, Collapse & Flyout Panel
     // ==========================================================

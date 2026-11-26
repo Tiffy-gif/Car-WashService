@@ -852,7 +852,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 <!-- Orders Table -->
 <div class="card">
     <div class="table-responsive">
-        <table class="table searchable-table">
+        <table class="table searchable-table js-paginated-table">
             <thead>
                 <tr>
                     <th style="width: 140px;">Order #</th>

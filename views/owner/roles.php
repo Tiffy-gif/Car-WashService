@@ -850,7 +850,7 @@ include dirname(__DIR__) . '/layouts/header.php';
     <!-- Roles Table Card -->
     <div class="card" style="border-radius: var(--radius-lg); overflow: hidden;">
         <div class="table-responsive">
-            <table class="table" style="margin-bottom: 0;">
+            <table class="table js-paginated-table" style="margin-bottom: 0;">
                 <thead>
                     <tr>
                         <th style="min-width: 280px; width: 300px;">Role Name</th>

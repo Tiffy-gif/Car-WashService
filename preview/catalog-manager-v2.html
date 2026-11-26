@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Catalog &amp; Stock — Workspace Preview</title>
+<style>
+/* ============ tokens (mirrors public/css/style.css) ============ */
+:root{
+  --bg-body:#f8fafc; --bg-surface:#fff; --bg-subtle:#f1f5f9; --bg-sunken:#f6f8fc;
+  --primary:#0284c7; --primary-600:#0369a1; --primary-soft:#e0f2fe;
+  --text-main:#0f172a; --text-muted:#64748b; --text-light:#94a3b8;
+  --border:#e2e8f0; --border-strong:#cbd5e1;
+  --success:#16a34a; --success-bg:#dcfce7;
+  --warning:#d97706; --warning-bg:#fef3c7;
+  --danger:#dc2626; --danger-bg:#fee2e2;
+  --violet:#7c3aed; --violet-bg:#ede9fe;
+  --r-sm:8px; --r:12px; --r-lg:16px; --r-full:999px;
+  --sh-sm:0 1px 2px rgba(15,23,42,.06);
+  --sh-md:0 10px 26px -14px rgba(15,23,42,.28);
+  --sh-lg:0 30px 70px -24px rgba(15,23,42,.45);
+  --side-w:236px;
+  --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+[data-theme="dark"]{
+  --bg-body:#0b1120; --bg-surface:#131d31; --bg-subtle:#1e293b; --bg-sunken:#0f1a2c;
+  --primary:#38bdf8; --primary-600:#0ea5e9; --primary-soft:#0c2942;
+  --text-main:#f8fafc; --text-muted:#94a3b8; --text-light:#64748b;
+  --border:#243048; --border-strong:#334155;
+  --success:#4ade80; --success-bg:#123524;
+  --warning:#fbbf24; --warning-bg:#3a2a0a;
+  --danger:#f87171; --danger-bg:#3d1616;
+  --violet:#a78bfa; --violet-bg:#241a45;
+  --sh-sm:0 1px 2px rgba(0,0,0,.35);
+  --sh-md:0 12px 30px -14px rgba(0,0,0,.7);
+  --sh-lg:0 30px 70px -20px rgba(0,0,0,.85);
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;font-family:var(--font);background:var(--bg-body);color:var(--text-main);
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,p{margin:0}
+button{font:inherit;color:inherit;cursor:pointer}
+a{color:inherit;text-decoration:none}
+input,select,textarea{font:inherit;color:inherit}
+.hidden{display:none !important}
+.sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* ============ shell ============ */
+.app{display:flex;min-height:100vh}
+
+/* ---------- sidebar ---------- */
+.side{
+  width:var(--side-w);flex:0 0 var(--side-w);background:var(--bg-surface);
+  border-right:1px solid var(--border);display:flex;flex-direction:column;
+  position:sticky;top:0;height:100vh;
+}
+.brand{display:flex;align-items:center;gap:10px;padding:18px 16px 14px}
+.brand-mark{
+  width:32px;height:32px;border-radius:10px;display:grid;place-items:center;
+  background:linear-gradient(140deg,var(--primary),#0ea5e9);color:#fff;font-weight:800;font-size:14px;
+  box-shadow:0 6px 14px -6px var(--primary);
+}
+.brand-txt strong{display:block;font-size:13.5px;letter-spacing:-.01em}
+.brand-txt span{font-size:11px;color:var(--text-light)}
+.side-scroll{flex:1;overflow-y:auto;padding:4px 10px 12px}
+.nav-sec{
+  font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--text-light);padding:14px 10px 6px;
+}
+.nav-item,.nav-group-btn{
+  display:flex;align-items:center;gap:10px;width:100%;
+  padding:8px 10px;border-radius:var(--r-sm);border:0;background:none;
+  font-size:13.5px;font-weight:500;color:var(--text-muted);text-align:left;
+  transition:background .14s,color .14s;
+}
+.nav-item:hover,.nav-group-btn:hover{background:var(--bg-subtle);color:var(--text-main)}
+.nav-item.active{background:var(--primary-soft);color:var(--primary-600);font-weight:600}
+[data-theme="dark"] .nav-item.active{color:var(--primary)}
+.nav-item .ico,.nav-group-btn .ico{width:17px;height:17px;flex:0 0 17px;opacity:.9}
+.nav-group-btn .chev{margin-left:auto;width:14px;height:14px;transition:transform .18s;opacity:.55}
+.nav-group.open .nav-group-btn{color:var(--text-main);font-weight:600}
+.nav-group.open .nav-group-btn .chev{transform:rotate(90deg)}
+.nav-sub{display:none;margin:2px 0 6px 19px;padding-left:12px;border-left:1px solid var(--border)}
+.nav-group.open .nav-sub{display:block}
+.nav-sub-item{
+  display:flex;align-items:center;gap:8px;padding:6.5px 10px;border-radius:var(--r-sm);
+  font-size:13px;color:var(--text-muted);transition:background .14s,color .14s;
+}
+.nav-sub-item:hover{background:var(--bg-subtle);color:var(--text-main)}
+.nav-sub-item.active{background:var(--bg-subtle);color:var(--text-main);font-weight:600}
+.nav-sub-item .dot{width:5px;height:5px;border-radius:50%;background:var(--border-strong)}
+.nav-sub-item.active .dot{background:var(--primary)}
+.nav-sub-item .count{margin-left:auto;font-size:11px;color:var(--text-light);font-variant-numeric:tabular-nums}
+.nav-sub-item .pill{
+  margin-left:auto;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:var(--r-full);
+  background:var(--danger);color:#fff;
+}
+.side-foot{border-top:1px solid var(--border);padding:10px 12px;display:flex;align-items:center;gap:9px}
+.avatar{
+  width:29px;height:29px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:700;
+  background:var(--primary-soft);color:var(--primary-600);flex:0 0 29px;
+}
+[data-theme="dark"] .avatar{color:var(--primary)}
+.side-foot .who{min-width:0}
+.side-foot .who b{display:block;font-size:12.5px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.side-foot .who span{font-size:11px;color:var(--text-light)}
+
+/* ---------- main ---------- */
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{
+  position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;
+  padding:11px 22px;background:color-mix(in srgb,var(--bg-body) 88%,transparent);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--border);
+}
+.crumb{font-size:12.5px;color:var(--text-light);white-space:nowrap}
+.crumb b{color:var(--text-main);font-weight:600}
+.top-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+.search{position:relative}
+.search svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text-light)}
+.search input{
+  width:230px;padding:8px 10px 8px 29px;border:1px solid var(--border);border-radius:var(--r-sm);
+  background:var(--bg-surface);font-size:13px;outline:none;transition:border .15s,box-shadow .15s;
+}
+.search input:focus{border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 18%,transparent)}
+.icon-btn{
+  width:33px;height:33px;display:grid;place-items:center;border-radius:var(--r-sm);
+  border:1px solid var(--border);background:var(--bg-surface);color:var(--text-muted);
+}
+.icon-btn:hover{color:var(--text-main);background:var(--bg-subtle)}
+.icon-btn svg{width:15px;height:15px}
+
+/* ---------- buttons ---------- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  padding:8px 13px;border-radius:var(--r-sm);border:1px solid transparent;
+  font-size:13px;font-weight:600;white-space:nowrap;transition:background .14s,border-color .14s,transform .06s;
+}
+.btn:active{transform:translateY(1px)}
+.btn svg{width:14px;height:14px}
+.btn-primary{background:var(--primary);color:#fff;box-shadow:0 6px 14px -8px var(--primary)}
+.btn-primary:hover{background:var(--primary-600)}
+[data-theme="dark"] .btn-primary{color:#06121f}
+.btn-ghost{background:var(--bg-surface);border-color:var(--border);color:var(--text-muted)}
+.btn-ghost:hover{background:var(--bg-subtle);color:var(--text-main)}
+.btn-quiet{background:transparent;border-color:transparent;color:var(--text-muted)}
+.btn-quiet:hover{background:var(--bg-subtle);color:var(--text-main)}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-block{width:100%}
+
+/* ---------- page ---------- */
+.page{padding:20px 22px 40px;max-width:1440px;width:100%;margin:0 auto}
+.page-head{display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;margin-bottom:16px}
+.page-head h1{font-size:21px;letter-spacing:-.02em;line-height:1.25}
+.page-head p{font-size:13px;color:var(--text-muted);margin-top:3px;max-width:56ch}
+.kpis{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.kpi{
+  display:flex;align-items:baseline;gap:7px;padding:7px 11px;border-radius:var(--r-sm);
+  background:var(--bg-surface);border:1px solid var(--border);box-shadow:var(--sh-sm);
+}
+.kpi b{font-size:15px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.kpi span{font-size:11.5px;color:var(--text-muted)}
+.kpi.is-warn b{color:var(--warning)}
+.kpi.is-danger b{color:var(--danger)}
+
+/* ---------- workspace ---------- */
+.workspace{
+  display:grid;grid-template-columns:276px minmax(0,1fr);gap:14px;align-items:start;
+}
+.rail{
+  background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r);
+  box-shadow:var(--sh-sm);overflow:hidden;position:sticky;top:64px;
+}
+.rail-head{padding:10px;border-bottom:1px solid var(--border);display:grid;gap:8px}
+.seg{display:flex;gap:2px;background:var(--bg-subtle);padding:3px;border-radius:var(--r-sm)}
+.seg-btn{
+  flex:1;padding:5px 4px;border:0;border-radius:6px;background:transparent;
+  font-size:11.5px;font-weight:600;color:var(--text-muted);transition:background .14s,color .14s;
+}
+.seg-btn:hover{color:var(--text-main)}
+.seg-btn.is-on{background:var(--bg-surface);color:var(--text-main);box-shadow:var(--sh-sm)}
+.cat-list{list-style:none;margin:0;padding:6px;max-height:min(58vh,520px);overflow-y:auto}
+.cat-row{
+  display:flex;align-items:center;gap:9px;width:100%;padding:8px 9px;border:0;border-radius:var(--r-sm);
+  background:transparent;text-align:left;transition:background .13s;
+}
+.cat-row:hover{background:var(--bg-subtle)}
+.cat-row.is-on{background:var(--primary-soft)}
+.cat-row .swatch{
+  width:22px;height:22px;border-radius:7px;flex:0 0 22px;display:grid;place-items:center;
+  font-size:10.5px;font-weight:800;color:#fff;letter-spacing:-.02em;
+}
+.cat-row .txt{min-width:0;flex:1}
+.cat-row .txt b{
+  display:block;font-size:13px;font-weight:600;line-height:1.25;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+[data-theme="dark"] .cat-row.is-on .txt b{color:var(--primary)}
+.cat-row .txt span{font-size:11px;color:var(--text-light)}
+.cat-row .n{font-size:11.5px;font-weight:600;color:var(--text-light);font-variant-numeric:tabular-nums}
+.cat-row .warn{width:6px;height:6px;border-radius:50%;background:var(--warning);flex:0 0 6px}
+.rail-foot{padding:9px 12px;border-top:1px solid var(--border);font-size:11.5px;color:var(--text-light);line-height:1.45}
+
+/* ---------- panel ---------- */
+.panel{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh-sm);min-width:0}
+.panel-head{padding:14px 16px;border-bottom:1px solid var(--border);display:grid;gap:12px}
+.panel-title{display:flex;align-items:center;gap:10px}
+.cat-disc{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:13px;font-weight:800;color:#fff;flex:0 0 34px}
+.panel-title h2{font-size:15.5px;letter-spacing:-.01em;line-height:1.2}
+.panel-title p{font-size:12px;color:var(--text-muted);margin-top:1px}
+.panel-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.field-search{position:relative;flex:1;min-width:170px}
+.field-search svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text-light)}
+.field-search input{width:100%;padding:8px 10px 8px 30px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--bg-body);font-size:13px;outline:none}
+.field-search input:focus{border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 16%,transparent);background:var(--bg-surface)}
+select.mini{
+  padding:8px 26px 8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);
+  background:var(--bg-body) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 8l3-3.5' fill='none' stroke='%2364748b' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 8px center/12px;
+  font-size:12.5px;outline:none;appearance:none;
+}
+select.mini:focus{border-color:var(--primary)}
+
+/* ---------- table ---------- */
+.table-wrap{overflow-x:auto}
+.grid{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.grid thead th{
+  position:sticky;top:0;background:var(--bg-sunken);text-align:left;
+  font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text-light);
+  padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap;
+}
+.grid td{padding:11px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+.grid tbody tr:hover td{background:color-mix(in srgb,var(--bg-subtle) 55%,transparent)}
+.grid tbody tr:last-child td{border-bottom:0}
+.cell-prod{display:flex;align-items:center;gap:10px;min-width:190px}
+.thumb{
+  width:34px;height:34px;border-radius:9px;flex:0 0 34px;display:grid;place-items:center;
+  font-size:13px;font-weight:800;color:#fff;position:relative;
+}
+.thumb.oos::after{
+  content:"";position:absolute;inset:0;border-radius:9px;background:rgba(15,23,42,.45);
+}
+.cell-prod b{display:block;font-size:13px;font-weight:600;line-height:1.25}
+.cell-prod span{font-size:11.5px;color:var(--text-light)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;color:var(--text-muted)}
+.badge{
+  display:inline-flex;align-items:center;gap:4px;padding:2.5px 7px;border-radius:var(--r-full);
+  font-size:11px;font-weight:600;white-space:nowrap;
+}
+.b-success{background:var(--success-bg);color:var(--success)}
+.b-warning{background:var(--warning-bg);color:var(--warning)}
+.b-danger{background:var(--danger-bg);color:var(--danger)}
+.b-muted{background:var(--bg-subtle);color:var(--text-muted)}
+.b-violet{background:var(--violet-bg);color:var(--violet)}
+.stockbar{display:flex;align-items:center;gap:8px;min-width:120px}
+.stockbar .track{flex:1;height:5px;border-radius:var(--r-full);background:var(--bg-subtle);overflow:hidden;max-width:74px}
+.stockbar .fill{height:100%;border-radius:var(--r-full);background:var(--success)}
+.stockbar .fill.warn{background:var(--warning)}
+.stockbar .fill.bad{background:var(--danger)}
+.stockbar b{font-size:12px;font-variant-numeric:tabular-nums;min-width:36px}
+.row-actions{display:flex;gap:2px;justify-content:flex-end;opacity:.35;transition:opacity .14s}
+tr:hover .row-actions{opacity:1}
+.act{
+  width:28px;height:28px;display:grid;place-items:center;border:0;border-radius:7px;
+  background:transparent;color:var(--text-muted);
+}
+.act:hover{background:var(--bg-subtle);color:var(--text-main)}
+.act svg{width:14px;height:14px}
+.empty{padding:38px 20px;text-align:center;color:var(--text-muted);font-size:13px}
+.empty b{display:block;color:var(--text-main);font-size:14px;margin-bottom:3px}
+
+/* ---------- flow banner ---------- */
+.flow{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  margin-top:14px;padding:11px 14px;border-radius:var(--r);
+  background:var(--bg-surface);border:1px dashed var(--border-strong);font-size:12.5px;color:var(--text-muted);
+}
+.flow b{color:var(--text-main);font-weight:600}
+.flow .step{display:flex;align-items:center;gap:6px}
+.flow .num{
+  width:18px;height:18px;border-radius:50%;display:grid;place-items:center;
+  background:var(--primary-soft);color:var(--primary-600);font-size:10.5px;font-weight:800;
+}
+[data-theme="dark"] .flow .num{color:var(--primary)}
+.flow .arrow{color:var(--text-light)}
+
+/* ---------- overlay / drawer ---------- */
+.scrim{
+  position:fixed;inset:0;background:rgba(15,23,42,.42);backdrop-filter:blur(2px);
+  opacity:0;pointer-events:none;transition:opacity .2s;z-index:60;
+}
+.scrim.on{opacity:1;pointer-events:auto}
+.drawer{
+  position:fixed;top:0;right:0;height:100vh;width:min(430px,100vw);z-index:61;
+  background:var(--bg-surface);border-left:1px solid var(--border);box-shadow:var(--sh-lg);
+  display:flex;flex-direction:column;transform:translateX(102%);transition:transform .26s cubic-bezier(.32,.72,0,1);
+}
+.drawer.on{transform:none}
+.drawer-head{display:flex;align-items:flex-start;gap:12px;padding:16px 18px;border-bottom:1px solid var(--border)}
+.drawer-head h2{font-size:16px;letter-spacing:-.01em}
+.drawer-head p{font-size:12px;color:var(--text-muted);margin-top:2px}
+.drawer-head .x{margin-left:auto}
+.drawer-body{flex:1;overflow-y:auto;padding:16px 18px;display:grid;gap:16px;align-content:start}
+.drawer-foot{padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;background:var(--bg-sunken)}
+.drawer-foot .btn{flex:1}
+.x{width:30px;height:30px;display:grid;place-items:center;border:0;border-radius:8px;background:transparent;color:var(--text-muted)}
+.x:hover{background:var(--bg-subtle);color:var(--text-main)}
+.x svg{width:15px;height:15px}
+
+/* form bits */
+.fset{display:grid;gap:6px}
+.fset > label,.flabel{font-size:12px;font-weight:600;color:var(--text-main)}
+.hintx{font-size:11.5px;color:var(--text-light)}
+.inp,textarea.inp{
+  width:100%;padding:9px 11px;border:1px solid var(--border-strong);border-radius:var(--r-sm);
+  background:var(--bg-body);font-size:13px;outline:none;transition:border .15s,box-shadow .15s;
+}
+.inp:focus{border-color:var(--primary);background:var(--bg-surface);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 16%,transparent)}
+.inp[readonly]{background:var(--bg-subtle);color:var(--text-muted);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cat-chip{
+  display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:var(--r-sm);
+  border:1px solid var(--border);background:var(--bg-subtle);
+}
+.cat-chip .swatch{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:800;flex:0 0 26px}
+.cat-chip .txt{flex:1;min-width:0}
+.cat-chip .txt b{display:block;font-size:12.5px;line-height:1.25}
+.cat-chip .txt span{font-size:11px;color:var(--text-light)}
+.cat-chip select{
+  max-width:132px;padding:6px 24px 6px 8px;border:1px solid var(--border);border-radius:7px;
+  background:var(--bg-surface) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 8l3-3.5' fill='none' stroke='%2364748b' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 7px center/11px;
+  font-size:11.5px;font-weight:600;outline:none;appearance:none;
+}
+.swatches{display:flex;gap:6px;flex-wrap:wrap}
+.sw-btn{width:24px;height:24px;border-radius:50%;border:2px solid transparent;position:relative}
+.sw-btn[aria-pressed="true"]{border-color:var(--text-main);outline:2px solid var(--bg-surface);outline-offset:-4px}
+.switch{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--text-muted)}
+.switch input{appearance:none;width:34px;height:19px;border-radius:var(--r-full);background:var(--border-strong);position:relative;transition:background .16s;cursor:pointer;flex:0 0 34px}
+.switch input::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff;transition:transform .16s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.switch input:checked{background:var(--primary)}
+.switch input:checked::after{transform:translateX(15px)}
+.divider{height:1px;background:var(--border);margin:2px 0}
+.fine{font-size:11.5px;color:var(--text-light);line-height:1.5}
+
+/* ---------- modal ---------- */
+.modal{
+  position:fixed;z-index:62;top:50%;left:50%;transform:translate(-50%,-46%) scale(.97);
+  width:min(430px,calc(100vw - 32px));background:var(--bg-surface);border-radius:var(--r-lg);
+  box-shadow:var(--sh-lg);opacity:0;pointer-events:none;transition:opacity .18s,transform .2s;
+  border:1px solid var(--border);max-height:calc(100vh - 40px);display:flex;flex-direction:column;
+}
+.modal.on{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+.modal-head{padding:15px 16px 11px;display:flex;align-items:flex-start;gap:10px}
+.modal-head h3{font-size:15px;letter-spacing:-.01em}
+.modal-head p{font-size:12px;color:var(--text-muted);margin-top:2px}
+.modal-body{padding:0 16px 4px;overflow-y:auto;display:grid;gap:13px}
+.modal-foot{padding:13px 16px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--border);margin-top:6px}
+.type-seg{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;background:var(--bg-subtle);padding:3px;border-radius:var(--r-sm)}
+.type-seg button{border:0;background:transparent;padding:7px 4px;border-radius:6px;font-size:12px;font-weight:600;color:var(--text-muted)}
+.type-seg button.is-on{background:var(--bg-surface);color:var(--text-main);box-shadow:var(--sh-sm)}
+.type-seg button:hover{color:var(--text-main)}
+
+/* toast */
+.toast-wrap{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:80;display:grid;gap:8px;justify-items:center}
+.toast{
+  display:flex;align-items:center;gap:8px;padding:9px 14px;border-radius:var(--r-full);
+  background:#0f172a;color:#fff;font-size:12.5px;font-weight:500;box-shadow:var(--sh-lg);
+  animation:rise .22s ease both;
+}
+[data-theme="dark"] .toast{background:#e2e8f0;color:#0f172a}
+.toast svg{width:14px;height:14px;color:#4ade80}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* ---------- responsive ---------- */
+@media (max-width:1080px){
+  .workspace{grid-template-columns:1fr}
+  .rail{position:static}
+  .cat-list{max-height:230px}
+  .rail-foot{display:none}
+}
+@media (max-width:860px){
+  .side{display:none}
+  .page{padding:16px 14px 40px}
+  .topbar{padding:10px 14px}
+  .search input{width:150px}
+  .kpis{margin-left:0;width:100%}
+  .grid thead{display:none}
+  .grid tbody tr{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:11px 12px;border-bottom:1px solid var(--border)}
+  .grid tbody td{border:0;padding:2px 0}
+  .grid tbody td.cell-hide{display:none}
+  .row-actions{opacity:1}
+  .cell-prod{min-width:0}
+  .drawer{width:100vw}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="side">
+    <div class="brand">
+      <div class="brand-mark">CW</div>
+      <div class="brand-txt"><strong>Car Wash Pro</strong><span>Phnom Penh · Main</span></div>
+    </div>
+    <div class="side-scroll">
+      <div class="nav-sec">Operations</div>
+      <a class="nav-item" href="#">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+        Dashboard
+      </a>
+      <a class="nav-item" href="#">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3v3M16 3v3M3 9h18"/><rect x="3" y="5" width="18" height="16" rx="2"/></svg>
+        Bookings
+      </a>
+      <a class="nav-item" href="#">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 20h18"/><path d="M6 16V9M11 16V5M16 16v-4M21 16v-7"/></svg>
+        Reports
+      </a>
+
+      <div class="nav-sec">Catalog &amp; Stock</div>
+      <div class="nav-group open">
+        <button class="nav-group-btn" type="button" aria-expanded="true" aria-controls="grpCatalog">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
+          Catalog &amp; Stock
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>
+        </button>
+        <div class="nav-sub" id="grpCatalog">
+          <a class="nav-sub-item active" href="#" aria-current="page"><span class="dot"></span>Workspace</a>
+          <a class="nav-sub-item" href="#"><span class="dot"></span>Categories<span class="count" id="navCatCount">8</span></a>
+          <a class="nav-sub-item" href="#"><span class="dot"></span>Services<span class="count">6</span></a>
+          <a class="nav-sub-item" href="#"><span class="dot"></span>Stock ledger<span class="count">142</span></a>
+          <a class="nav-sub-item" href="#"><span class="dot"></span>Requests<span class="pill" id="navReq">5</span></a>
+        </div>
+      </div>
+
+      <div class="nav-sec">Team</div>
+      <a class="nav-item" href="#">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M17 11a3 3 0 1 0 0-6"/><path d="M18 20a6 6 0 0 0-2-4.5"/></svg>
+        Staff
+      </a>
+      <a class="nav-item" href="#">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.05A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.05A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.05a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.05a1.7 1.7 0 0 0-1.55 1Z"/></svg>
+        Settings
+      </a>
+    </div>
+    <div class="side-foot">
+      <div class="avatar">PH</div>
+      <div class="who"><b>Panha</b><span>Owner</span></div>
+    </div>
+  </aside>
+
+  <!-- ================= MAIN ================= -->
+  <main class="main">
+    <div class="topbar">
+      <div class="crumb">Catalog &amp; Stock / <b>Workspace</b></div>
+      <div class="top-actions">
+        <div class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input type="search" placeholder="Search everything…" aria-label="Search everything">
+        </div>
+        <button class="icon-btn" type="button" id="themeBtn" aria-label="Toggle dark mode" title="Toggle dark mode">
+          <svg id="themeIco" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+        </button>
+        <button class="btn btn-primary" type="button" data-open="product">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
+          New product
+        </button>
+      </div>
+    </div>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1>Catalog workspace</h1>
+          <p>Pick a category on the left, then add or edit its items on the right. No page hopping, no hidden tabs.</p>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><b id="kProducts">0</b><span>products</span></div>
+          <div class="kpi is-warn"><b id="kLow">0</b><span>low stock</span></div>
+          <div class="kpi is-danger"><b id="kOut">0</b><span>out of stock</span></div>
+          <div class="kpi"><b id="kValue">$0</b><span>stock value</span></div>
+        </div>
+      </div>
+
+      <div class="workspace">
+        <!-- ---------- category rail ---------- -->
+        <section class="rail" aria-label="Categories">
+          <div class="rail-head">
+            <div class="seg" role="tablist" aria-label="Filter categories by type">
+              <button class="seg-btn is-on" type="button" role="tab" aria-selected="true" data-type="all">All</button>
+              <button class="seg-btn" type="button" role="tab" aria-selected="false" data-type="product">Goods</button>
+              <button class="seg-btn" type="button" role="tab" aria-selected="false" data-type="service">Services</button>
+              <button class="seg-btn" type="button" role="tab" aria-selected="false" data-type="expense">Expenses</button>
+            </div>
+            <button class="btn btn-ghost btn-block" type="button" data-open="category">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
+              New category
+            </button>
+          </div>
+          <ul class="cat-list" id="catList"></ul>
+          <div class="rail-foot">Categories group your items. A category can be a product group, a service group, or an expense group.</div>
+        </section>
+
+        <!-- ---------- product panel ---------- -->
+        <section class="panel" aria-live="polite">
+          <div class="panel-head">
+            <div class="panel-title">
+              <div class="cat-disc" id="panelDisc">EO</div>
+              <div>
+                <h2 id="panelTitle">Engine Oil</h2>
+                <p id="panelMeta">0 items · 0 low stock</p>
+              </div>
+            </div>
+            <div class="panel-tools">
+              <div class="field-search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                <input type="search" id="prodSearch" placeholder="Search this category…" aria-label="Search products in this category">
+              </div>
+              <select class="mini" id="stockFilter" aria-label="Filter by stock status">
+                <option value="all">All stock</option>
+                <option value="low">Low stock</option>
+                <option value="out">Out of stock</option>
+              </select>
+              <button class="btn btn-ghost" type="button" data-open="product">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
+                Add item
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th scope="col">Item</th>
+                  <th scope="col">Code</th>
+                  <th scope="col">Price</th>
+                  <th scope="col">On hand</th>
+                  <th scope="col" class="cell-hide">Status</th>
+                  <th scope="col" style="text-align:right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="prodBody"></tbody>
+            </table>
+            <div class="empty hidden" id="emptyState">
+              <b>Nothing here yet</b>
+              <span id="emptyMsg">Add your first item to this category.</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="flow">
+        <span class="step"><span class="num">1</span><b>Pick a category</b></span>
+        <span class="arrow">→</span>
+        <span class="step"><span class="num">2</span><b>Add the item</b> <span>(category is pre-filled)</span></span>
+        <span class="arrow">→</span>
+        <span class="step"><span class="num">3</span><b>Set stock</b> <span>with a restock action on the row</span></span>
+        <span class="arrow">→</span>
+        <span class="step"><span class="num">4</span><b>Done</b> <span>everything stays on this screen</span></span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ================= SCRIM ================= -->
+<div class="scrim" id="scrim"></div>
+
+<!-- ================= PRODUCT DRAWER ================= -->
+<aside class="drawer" id="productDrawer" role="dialog" aria-modal="true" aria-labelledby="pdTitle">
+  <div class="drawer-head">
+    <div>
+      <h2 id="pdTitle">New product</h2>
+      <p id="pdSub">Add an item to a category</p>
+    </div>
+    <button class="x" type="button" data-close aria-label="Close panel">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
+  <div class="drawer-body">
+    <div class="fset">
+      <span class="flabel">Category</span>
+      <div class="cat-chip">
+        <div class="swatch" id="pdCatSwatch">EO</div>
+        <div class="txt"><b id="pdCatName">Engine Oil</b><span id="pdCatType">Product group</span></div>
+        <select id="pdCat" aria-label="Choose category"></select>
+      </div>
+      <span class="hintx">
+        The item inherits this category.
+        <button type="button" class="btn btn-quiet" id="pdNewCat" style="padding:0;font-size:11.5px;font-weight:600;color:var(--primary)">+ Create a new category</button>
+      </span>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="fset">
+      <label for="pdName">Item name</label>
+      <input class="inp" id="pdName" placeholder="e.g. Castrol GTX 10W-40" autocomplete="off">
+    </div>
+
+    <div class="two">
+      <div class="fset">
+        <label for="pdCode">Code / SKU</label>
+        <input class="inp" id="pdCode" readonly placeholder="auto-generated">
+      </div>
+      <div class="fset">
+        <label for="pdUnit">Unit</label>
+        <select class="inp" id="pdUnit">
+          <option>bottle</option><option>piece</option><option>litre</option>
+          <option>set</option><option>pack</option><option>service</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="two">
+      <div class="fset">
+        <label for="pdPrice" id="pdPriceLabel">Selling price (USD)</label>
+        <input class="inp" id="pdPrice" type="number" min="0" step="0.01" placeholder="0.00">
+      </div>
+      <div class="fset">
+        <label for="pdCost">Unit cost (USD)</label>
+        <input class="inp" id="pdCost" type="number" min="0" step="0.01" placeholder="0.00">
+      </div>
+    </div>
+
+    <div class="two" id="pdStockRow">
+      <div class="fset">
+        <label for="pdStock">Opening stock</label>
+        <input class="inp" id="pdStock" type="number" step="1" value="0">
+      </div>
+      <div class="fset">
+        <label for="pdMin">Low-stock alert at</label>
+        <input class="inp" id="pdMin" type="number" step="1" value="5">
+      </div>
+    </div>
+
+    <label class="switch"><input type="checkbox" id="pdActive" checked> Visible in catalog</label>
+    <p class="fine">Code is generated from the name. You can edit it before saving. Cost is hidden from staff without profit permission in the real app.</p>
+  </div>
+  <div class="drawer-foot">
+    <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+    <button class="btn btn-ghost hidden" type="button" id="pdSaveNew">Save &amp; new</button>
+    <button class="btn btn-primary" type="button" id="pdSave">Save item</button>
+  </div>
+</aside>
+
+<!-- ================= CATEGORY MODAL ================= -->
+<div class="modal" id="categoryModal" role="dialog" aria-modal="true" aria-labelledby="cmTitle">
+  <div class="modal-head">
+    <div>
+      <h3 id="cmTitle">New category</h3>
+      <p>Categories organise products, services and expenses.</p>
+    </div>
+    <button class="x" type="button" data-close aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
+  <div class="modal-body">
+    <div class="fset">
+      <span class="flabel">Category type</span>
+      <div class="type-seg" id="cmType" role="group" aria-label="Category type">
+        <button type="button" class="is-on" data-type="product">Product</button>
+        <button type="button" data-type="service">Service</button>
+        <button type="button" data-type="expense">Expense</button>
+      </div>
+      <span class="hintx" id="cmTypeHint">Tracked as stock. Counted in stock value.</span>
+    </div>
+    <div class="fset">
+      <label for="cmName">Name</label>
+      <input class="inp" id="cmName" placeholder="e.g. Brake Pads" autocomplete="off">
+    </div>
+    <div class="fset">
+      <label for="cmCode">Code</label>
+      <input class="inp" id="cmCode" readonly placeholder="auto-generated">
+    </div>
+    <div class="fset">
+      <span class="flabel">Colour</span>
+      <div class="swatches" id="cmColors">
+        <button type="button" class="sw-btn" style="background:#0284c7" data-color="#0284c7" aria-label="Blue"></button>
+        <button type="button" class="sw-btn" style="background:#14b8a6" data-color="#14b8a6" aria-label="Teal"></button>
+        <button type="button" class="sw-btn" style="background:#16a34a" data-color="#16a34a" aria-label="Green"></button>
+        <button type="button" class="sw-btn" style="background:#f59e0b" data-color="#f59e0b" aria-label="Amber"></button>
+        <button type="button" class="sw-btn" style="background:#ef4444" data-color="#ef4444" aria-label="Red"></button>
+        <button type="button" class="sw-btn" style="background:#8b5cf6" data-color="#8b5cf6" aria-label="Violet"></button>
+        <button type="button" class="sw-btn" style="background:#ec4899" data-color="#ec4899" aria-label="Pink"></button>
+        <button type="button" class="sw-btn" style="background:#64748b" data-color="#64748b" aria-label="Slate"></button>
+      </div>
+    </div>
+    <p class="fine" id="cmReturnNote"></p>
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+    <button class="btn btn-primary" type="button" id="cmSave">Create category</button>
+  </div>
+</div>
+
+<!-- ================= RESTOCK MODAL ================= -->
+<div class="modal" id="restockModal" role="dialog" aria-modal="true" aria-labelledby="rsTitle">
+  <div class="modal-head">
+    <div>
+      <h3 id="rsTitle">Restock item</h3>
+      <p>Adjust the physical count and keep a reason for the ledger.</p>
+    </div>
+    <button class="x" type="button" data-close aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
+  <div class="modal-body">
+    <div class="cat-chip">
+      <div class="swatch" id="rsSwatch">EO</div>
+      <div class="txt"><b id="rsName">Item</b><span id="rsCurrent">On hand: 0</span></div>
+    </div>
+    <div class="two">
+      <div class="fset">
+        <label for="rsDir">Movement</label>
+        <select class="inp" id="rsDir">
+          <option value="1">Add to stock</option>
+          <option value="-1">Remove from stock</option>
+        </select>
+      </div>
+      <div class="fset">
+        <label for="rsQty">Quantity</label>
+        <input class="inp" id="rsQty" type="number" min="1" step="1" value="1">
+      </div>
+    </div>
+    <div class="fset">
+      <label for="rsNote">Reason</label>
+      <input class="inp" id="rsNote" placeholder="e.g. Supplier delivery #1042" autocomplete="off">
+    </div>
+    <p class="fine" id="rsAfter">New balance: 0</p>
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+    <button class="btn btn-primary" type="button" id="rsSave">Confirm movement</button>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toasts" aria-live="polite"></div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ---------------- data ---------------- */
+  const CATS = [
+    {id:1, name:'Engine Oil',        type:'product', color:'#0ea5e9', prefix:'OIL'},
+    {id:2, name:'Oil Filters',       type:'product', color:'#6366f1', prefix:'FLT'},
+    {id:3, name:'Fluids & Coolants', type:'product', color:'#14b8a6', prefix:'FLD'},
+    {id:4, name:'Car Care',          type:'product', color:'#f59e0b', prefix:'CAR'},
+    {id:5, name:'Spare Parts',       type:'product', color:'#ef4444', prefix:'SPR'},
+    {id:6, name:'Washing Supplies',  type:'expense', color:'#8b5cf6', prefix:'SUP'},
+    {id:7, name:'Exterior Wash',     type:'service', color:'#0284c7', prefix:'SRV'},
+    {id:8, name:'Interior Detailing',type:'service', color:'#16a34a', prefix:'SRV'}
+  ];
+
+  const ITEMS = [
+    {id:101, catId:1, name:'Total Quartz 5W-30',    code:'OIL-5W30',  unit:'bottle', price:12.50, cost:8.20, stock:24, min:10, active:true},
+    {id:102, catId:1, name:'Castrol GTX 10W-40',    code:'OIL-10W40', unit:'bottle', price:10.00, cost:6.50, stock:6,  min:10, active:true},
+    {id:103, catId:1, name:'Shell Helix 5W-40',     code:'OIL-5W40',  unit:'bottle', price:14.00, cost:9.70, stock:0,  min:8,  active:true},
+    {id:104, catId:2, name:'Toyota OEM Oil Filter', code:'FLT-TOY01', unit:'piece',  price:6.50,  cost:3.90, stock:18, min:6,  active:true},
+    {id:105, catId:2, name:'Universal Oil Filter',  code:'FLT-UNI',   unit:'piece',  price:4.00,  cost:2.10, stock:4,  min:8,  active:true},
+    {id:106, catId:3, name:'Coolant Green 4L',      code:'FLD-COOL',  unit:'bottle', price:8.50,  cost:5.00, stock:12, min:5,  active:true},
+    {id:107, catId:3, name:'Brake Fluid DOT4',      code:'FLD-DOT4',  unit:'bottle', price:7.00,  cost:4.20, stock:3,  min:6,  active:true},
+    {id:108, catId:4, name:'Premium Wax',           code:'CAR-WAX',   unit:'pack',   price:15.00, cost:8.50, stock:9,  min:4,  active:true},
+    {id:109, catId:4, name:'Tyre Shine',            code:'CAR-TIRE',  unit:'bottle', price:9.00,  cost:4.80, stock:2,  min:5,  active:true},
+    {id:110, catId:5, name:'Wiper Blade 20"',       code:'SPR-WIP20', unit:'piece',  price:11.00, cost:6.00, stock:14, min:6,  active:true},
+    {id:111, catId:6, name:'Foam Shampoo 5L',       code:'SUP-FOAM',  unit:'litre',  price:18.00, cost:11.50,stock:7,  min:3,  active:true},
+    {id:112, catId:7, name:'Full Exterior Wash',    code:'SRV-WASH',  unit:'service',price:8.00,  cost:2.10, stock:null,min:null,active:true},
+    {id:113, catId:7, name:'Engine Bay Clean',      code:'SRV-ENG',   unit:'service',price:15.00, cost:3.40, stock:null,min:null,active:true},
+    {id:114, catId:8, name:'Interior Vacuum',       code:'SRV-VAC',   unit:'service',price:6.00,  cost:1.20, stock:null,min:null,active:true}
+  ];
+
+  const state = {
+    cats: CATS.slice(),
+    items: ITEMS.slice(),
+    selectedCat: 1,
+    typeFilter: 'all',
+    search: '',
+    stockFilter: 'all',
+    editingId: null,
+    editingCatId: null
+  };
+
+  /* ---------------- helpers ---------------- */
+  const $  = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const money = n => '$' + Number(n || 0).toFixed(2);
+  const catOf = id => state.cats.find(c => c.id === id) || null;
+  const initials = name => name.trim().split(/\s+/).map(w => w[0]).join('').slice(0,2).toUpperCase();
+  const esc = s => String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const typeLabel = t => t === 'service' ? 'Service group' : t === 'expense' ? 'Expense group' : 'Product group';
+
+  function slugCode(name, prefix){
+    const body = name.toUpperCase().replace(/[^A-Z0-9]+/g, '').slice(0, 7);
+    return (prefix ? prefix + '-' : '') + (body || 'NEW');
+  }
+
+  /* ---------------- KPIs ---------------- */
+  function goodsItems(){ return state.items.filter(i => catOf(i.catId) && catOf(i.catId).type !== 'service'); }
+
+  function renderKpis(){
+    const goods = goodsItems();
+    const low = goods.filter(i => i.stock > 0 && i.stock <= i.min).length;
+    const out = goods.filter(i => i.stock <= 0).length;
+    const val = goods.reduce((s, i) => s + (i.stock * i.cost), 0);
+    $('#kProducts').textContent = goods.length;
+    $('#kLow').textContent = low;
+    $('#kOut').textContent = out;
+    $('#kValue').textContent = '$' + Math.round(val).toLocaleString();
+    $('#navCatCount').textContent = state.cats.length;
+  }
+
+  /* ---------------- category rail ---------------- */
+  function visibleCats(){
+    return state.cats.filter(c => state.typeFilter === 'all' || c.type === state.typeFilter);
+  }
+
+  function renderCats(){
+    const list = visibleCats();
+    if (!list.some(c => c.id === state.selectedCat)) {
+      state.selectedCat = list.length ? list[0].id : null;
+    }
+
+    $('#catList').innerHTML = list.map(c => {
+      const items = state.items.filter(i => i.catId === c.id);
+      const low = items.some(i => i.stock !== null && i.stock > 0 && i.stock <= i.min);
+      const empty = items.length === 0;
+      return `
+        <li>
+          <button type="button" class="cat-row ${c.id === state.selectedCat ? 'is-on' : ''}" data-cat="${c.id}" aria-pressed="${c.id === state.selectedCat}">
+            <span class="swatch" style="background:${c.color}">${esc(initials(c.name))}</span>
+            <span class="txt">
+              <b>${esc(c.name)}</b>
+              <span>${typeLabel(c.type).replace(' group','')}${empty ? ' · empty' : ''}</span>
+            </span>
+            ${low ? '<span class="warn" title="Has low stock items"></span>' : ''}
+            <span class="n">${items.length}</span>
+          </button>
+        </li>`;
+    }).join('');
+
+    if (!list.length) {
+      $('#catList').innerHTML = '<li style="padding:22px 10px;text-align:center;color:var(--text-light);font-size:12.5px">No categories of this type yet.</li>';
+    }
+  }
+
+  /* ---------------- product table ---------------- */
+  function itemStatus(item, type){
+    if (type === 'service') return {cls:'b-violet', label:'Service', fill:'', pct:0};
+    if (item.stock <= 0)     return {cls:'b-danger',  label:'Out of stock', fill:'bad',  pct:0};
+    if (item.stock <= item.min) return {cls:'b-warning', label:'Low · reorder', fill:'warn', pct: Math.max(6, Math.min(100, item.stock / (item.min * 3) * 100))};
+    return {cls:'b-success', label:'In stock', fill:'', pct: Math.min(100, item.stock / (item.min * 4) * 100)};
+  }
+
+  function renderPanel(){
+    const cat = catOf(state.selectedCat);
+    const disc = $('#panelDisc');
+
+    if (!cat) {
+      disc.style.background = 'var(--border-strong)';
+      disc.textContent = '—';
+      $('#panelTitle').textContent = 'No category selected';
+      $('#panelMeta').textContent = 'Create a category to start adding items.';
+      $('#prodBody').innerHTML = '';
+      $('#emptyState').classList.remove('hidden');
+      $('#emptyMsg').textContent = 'Use “New category” on the left to create one.';
+      return;
+    }
+
+    disc.style.background = cat.color;
+    disc.textContent = initials(cat.name);
+    $('#panelTitle').textContent = cat.name;
+    $('#panelMeta').textContent = typeLabel(cat.type) + ' · ' + cat.prefix;
+
+    let rows = state.items.filter(i => i.catId === cat.id);
+    const q = state.search.trim().toLowerCase();
+    if (q) rows = rows.filter(i => (i.name + ' ' + i.code).toLowerCase().includes(q));
+    if (state.stockFilter === 'low') rows = rows.filter(i => i.stock !== null && i.stock > 0 && i.stock <= i.min);
+    if (state.stockFilter === 'out') rows = rows.filter(i => i.stock !== null && i.stock <= 0);
+
+    const low = state.items.filter(i => i.catId === cat.id && i.stock !== null && i.stock > 0 && i.stock <= i.min).length;
+    $('#panelMeta').textContent = [
+      rows.length + (rows.length === 1 ? ' item' : ' items'),
+      low ? low + ' low stock' : null,
+      typeLabel(cat.type)
+    ].filter(Boolean).join(' · ');
+
+    const body = $('#prodBody');
+    const empty = $('#emptyState');
+
+    if (!rows.length) {
+      body.innerHTML = '';
+      empty.classList.remove('hidden');
+      $('#emptyMsg').textContent = q || state.stockFilter !== 'all'
+        ? 'No items match this search or filter.'
+        : 'Add your first item to this category.';
+      return;
+    }
+    empty.classList.add('hidden');
+
+    body.innerHTML = rows.map(i => {
+      const s = itemStatus(i, cat.type);
+      const isService = cat.type === 'service';
+      return `
+        <tr>
+          <td>
+            <div class="cell-prod">
+              <div class="thumb ${i.stock === 0 ? 'oos' : ''}" style="background:${cat.color}">${esc(initials(i.name))}</div>
+              <div>
+                <b>${esc(i.name)}</b>
+                <span>${isService ? 'Service' : esc(i.unit)}${i.active ? '' : ' · hidden'}</span>
+              </div>
+            </div>
+          </td>
+          <td><span class="mono">${esc(i.code)}</span></td>
+          <td><strong style="font-variant-numeric:tabular-nums">${money(i.price)}</strong></td>
+          <td>
+            ${isService ? '<span style="color:var(--text-light)">—</span>' : `
+            <div class="stockbar">
+              <div class="track"><div class="fill ${s.fill}" style="width:${s.pct}%"></div></div>
+              <b>${i.stock}</b>
+            </div>`}
+          </td>
+          <td class="cell-hide"><span class="badge ${s.cls}">${s.label}</span></td>
+          <td>
+            <div class="row-actions">
+              ${isService ? '' : `
+              <button class="act" type="button" data-restock="${i.id}" title="Restock ${esc(i.name)}" aria-label="Restock ${esc(i.name)}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              </button>`}
+              <button class="act" type="button" data-edit="${i.id}" title="Edit ${esc(i.name)}" aria-label="Edit ${esc(i.name)}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 20h4l10-10a2.5 2.5 0 0 0-3.5-3.5L4 16.5V20Z"/><path d="M13.5 6.5 17 10"/></svg>
+              </button>
+            </div>
+          </td>
+        </tr>`;
+    }).join('');
+  }
+
+  function renderAll(){ renderCats(); renderPanel(); renderKpis(); }
+
+  function applyTypeFilter(t){
+    state.typeFilter = t;
+    $$('.seg-btn').forEach(b => {
+      b.classList.toggle('is-on', b.dataset.type === t);
+      b.setAttribute('aria-selected', String(b.dataset.type === t));
+    });
+  }
+  function revealType(t){
+    if (state.typeFilter !== 'all' && state.typeFilter !== t) applyTypeFilter(t);
+  }
+
+  /* ---------------- scrim / overlay ---------------- */
+  const scrim = $('#scrim');
+
+  function closeAll(){
+    $$('.drawer.on, .modal.on').forEach(el => el.classList.remove('on'));
+    scrim.classList.remove('on');
+  }
+  function openOverlay(el){
+    scrim.classList.add('on');
+    el.classList.add('on');
+  }
+  function hide(el){
+    el.classList.remove('on');
+    if (!$$('.drawer.on, .modal.on').length) scrim.classList.remove('on');
+  }
+  function closeCategory(){
+    hide(catModal);
+    if (newCatReturn && drawer.classList.contains('on')) {
+      openOverlay(drawer);
+      setTimeout(() => $('#pdName').focus(), 50);
+    }
+  }
+  function dismissTop(){
+    const modals = $$('.modal.on');
+    if (modals.length) {
+      const top = modals[modals.length - 1];
+      if (top === catModal) closeCategory(); else hide(top);
+      return;
+    }
+    if (drawer.classList.contains('on')) hide(drawer);
+  }
+
+  /* ---------------- product drawer ---------------- */
+  const drawer = $('#productDrawer');
+  let newCatReturn = false;
+
+  function fillCatSelect(selectedId){
+    const groups = [['product','Product groups'],['expense','Expense groups'],['service','Services']];
+    $('#pdCat').innerHTML = groups.map(([t, label]) => {
+      const opts = state.cats.filter(c => c.type === t)
+        .map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+      return opts ? `<optgroup label="${label}">${opts}</optgroup>` : '';
+    }).join('');
+  }
+
+  function syncDrawerCat(){
+    const c = catOf(Number($('#pdCat').value)) || state.cats[0];
+    if (!c) return;
+    $('#pdCatSwatch').style.background = c.color;
+    $('#pdCatSwatch').textContent = initials(c.name);
+    $('#pdCatName').textContent = c.name;
+    $('#pdCatType').textContent = typeLabel(c.type);
+    const isService = c.type === 'service';
+    $('#pdStockRow').classList.toggle('hidden', isService);
+    $('#pdPriceLabel').textContent = isService ? 'Service price (USD)' : 'Selling price (USD)';
+    if (!$('#pdCode').dataset.touched) {
+      const name = $('#pdName').value.trim();
+      $('#pdCode').value = name ? slugCode(name, c.prefix) : '';
+    }
+    $('#pdUnit').value = isService ? 'service' : ($('#pdUnit').value === 'service' ? 'bottle' : $('#pdUnit').value);
+  }
+
+  function openProduct(item){
+    state.editingId = item ? item.id : null;
+    state.editingCatId = item ? item.catId : state.selectedCat;
+    fillCatSelect(state.editingCatId);
+    $('#pdTitle').textContent = item ? 'Edit item' : 'New product';
+    $('#pdSub').textContent = item ? 'Update details or pricing' : 'Add an item to a category';
+
+    $('#pdName').value = item ? item.name : '';
+    $('#pdCode').value = item ? item.code : '';
+    $('#pdCode').dataset.touched = item ? '1' : '';
+    $('#pdPrice').value = item ? item.price : '';
+    $('#pdCost').value = item ? item.cost : '';
+    $('#pdStock').value = item && item.stock !== null ? item.stock : 0;
+    $('#pdMin').value = item && item.min !== null ? item.min : 5;
+    $('#pdUnit').value = item ? item.unit : 'bottle';
+    $('#pdActive').checked = item ? !!item.active : true;
+    $('#pdSaveNew').classList.toggle('hidden', !!item);
+
+    syncDrawerCat();
+    openOverlay(drawer);
+    setTimeout(() => $('#pdName').focus(), 60);
+  }
+
+  function saveProduct(keepOpen){
+    const name = $('#pdName').value.trim();
+    if (!name) { $('#pdName').focus(); toast('Item name is required', false); return; }
+    const cat = catOf(Number($('#pdCat').value));
+    if (!cat) { toast('Choose a category first', false); return; }
+
+    const code = ($('#pdCode').value.trim() || slugCode(name, cat.prefix)).toUpperCase();
+    const isService = cat.type === 'service';
+    const data = {
+      catId: cat.id,
+      name,
+      code,
+      unit: $('#pdUnit').value,
+      price: Number($('#pdPrice').value || 0),
+      cost: Number($('#pdCost').value || 0),
+      stock: isService ? null : Math.max(0, parseInt($('#pdStock').value || '0', 10)),
+      min: isService ? null : Math.max(0, parseInt($('#pdMin').value || '0', 10)),
+      active: $('#pdActive').checked
+    };
+
+    if (state.editingId) {
+      const idx = state.items.findIndex(i => i.id === state.editingId);
+      if (idx > -1) state.items[idx] = Object.assign({}, state.items[idx], data);
+      state.selectedCat = cat.id;
+      revealType(cat.type);
+      closeAll();
+      renderAll();
+      toast('Item updated');
+    } else {
+      state.items.unshift({ id: Date.now(), ...data });
+      state.selectedCat = cat.id;
+      revealType(cat.type);
+      renderAll();
+      if (keepOpen) {
+        $('#pdName').value = ''; $('#pdCode').value = ''; $('#pdCode').dataset.touched = '';
+        $('#pdPrice').value = ''; $('#pdCost').value = '';
+        $('#pdStock').value = 0; $('#pdActive').checked = true;
+        toast('Item added — ready for the next one');
+        $('#pdName').focus();
+      } else {
+        closeAll();
+        toast('Item added to ' + cat.name);
+      }
+    }
+  }
+
+  /* ---------------- category modal ---------------- */
+  const catModal = $('#categoryModal');
+  let catType = 'product';
+  let catColor = '#0284c7';
+
+  function openCategory(returnToProduct){
+    newCatReturn = !!returnToProduct;
+    catType = state.typeFilter === 'all' ? 'product' : state.typeFilter;
+    catColor = '#0284c7';
+    $('#cmName').value = '';
+    $('#cmCode').value = '';
+    $('#cmReturnNote').textContent = newCatReturn
+      ? 'After creating, the category is selected in the item form — no need to start over.'
+      : '';
+    setCatType(catType);
+    setCatColor(catColor);
+    openOverlay(catModal);
+    setTimeout(() => $('#cmName').focus(), 60);
+  }
+
+  function setCatType(t){
+    catType = t;
+    $$('#cmType button').forEach(b => {
+      b.classList.toggle('is-on', b.dataset.type === t);
+      b.setAttribute('aria-pressed', String(b.dataset.type === t));
+    });
+    $('#cmTypeHint').textContent = t === 'service'
+      ? 'No stock tracking. Price is the service fee.'
+      : t === 'expense'
+        ? 'Tracked as consumable stock for operations.'
+        : 'Tracked as stock. Counted in stock value.';
+    if (!$('#cmCode').dataset.touched) {
+      const name = $('#cmName').value.trim();
+      $('#cmCode').value = name ? slugCode(name, '') : '';
+    }
+  }
+
+  function setCatColor(c){
+    catColor = c;
+    $$('#cmColors .sw-btn').forEach(b => {
+      b.setAttribute('aria-pressed', String(b.dataset.color === c));
+    });
+  }
+
+  function saveCategory(){
+    const name = $('#cmName').value.trim();
+    if (!name) { $('#cmName').focus(); toast('Category name is required', false); return; }
+    const code = ($('#cmCode').value.trim() || slugCode(name, '')).toUpperCase();
+    if (state.cats.some(c => c.name.toLowerCase() === name.toLowerCase())) {
+      toast('That category already exists', false);
+      return;
+    }
+    const prefix = code.replace(/[^A-Z]/g, '').slice(0, 3) || 'CAT';
+    const cat = { id: Date.now(), name, type: catType, color: catColor, prefix };
+    state.cats.push(cat);
+    applyTypeFilter(catType);
+    state.selectedCat = cat.id;
+    state.search = '';
+    $('#prodSearch').value = '';
+    $('.search input').value = '';
+    state.stockFilter = 'all';
+    $('#stockFilter').value = 'all';
+    renderAll();
+    hide(catModal);
+
+    if (newCatReturn) {
+      fillCatSelect(cat.id);
+      syncDrawerCat();
+      openOverlay(drawer);
+      toast('Category created — now add the first item');
+      setTimeout(() => $('#pdName').focus(), 60);
+    } else {
+      toast('Category “' + name + '” created');
+    }
+  }
+
+  /* ---------------- restock modal ---------------- */
+  const restockModal = $('#restockModal');
+  let restockId = null;
+
+  function openRestock(item){
+    restockId = item.id;
+    const cat = catOf(item.catId);
+    $('#rsSwatch').style.background = cat ? cat.color : 'var(--border-strong)';
+    $('#rsSwatch').textContent = initials(item.name);
+    $('#rsName').textContent = item.name;
+    $('#rsCurrent').textContent = 'On hand: ' + item.stock + ' ' + item.unit;
+    $('#rsQty').value = 1;
+    $('#rsDir').value = '1';
+    $('#rsNote').value = '';
+    updateRestockPreview();
+    openOverlay(restockModal);
+    setTimeout(() => $('#rsQty').focus(), 60);
+  }
+
+  function updateRestockPreview(){
+    const item = state.items.find(i => i.id === restockId);
+    if (!item) return;
+    const dir = Number($('#rsDir').value);
+    const qty = Math.max(0, parseInt($('#rsQty').value || '0', 10));
+    $('#rsAfter').textContent = 'New balance: ' + Math.max(0, item.stock + dir * qty) + ' ' + item.unit;
+  }
+
+  function saveRestock(){
+    const item = state.items.find(i => i.id === restockId);
+    if (!item) return;
+    const dir = Number($('#rsDir').value);
+    const qty = parseInt($('#rsQty').value || '0', 10);
+    if (!qty || qty < 1) { toast('Enter a quantity of 1 or more', false); return; }
+    item.stock = Math.max(0, item.stock + dir * qty);
+    closeAll();
+    renderAll();
+    toast((dir > 0 ? 'Added ' : 'Removed ') + qty + ' ' + item.unit + ' · ' + item.name);
+  }
+
+  /* ---------------- toast ---------------- */
+  function toast(msg, ok){
+    const wrap = $('#toasts');
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.innerHTML = (ok === false
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2.4"><path d="M12 8v5M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 13 4 4L19 7"/></svg>')
+      + '<span>' + esc(msg) + '</span>';
+    wrap.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .2s'; }, 2200);
+    setTimeout(() => el.remove(), 2500);
+  }
+
+  /* ---------------- events ---------------- */
+  $$('[data-open="product"]').forEach(b => b.addEventListener('click', () => openProduct(null)));
+  $$('[data-open="category"]').forEach(b => b.addEventListener('click', () => openCategory(false)));
+  $$('[data-close]').forEach(b => b.addEventListener('click', () => {
+    if (b.closest('#categoryModal')) closeCategory(); else closeAll();
+  }));
+  scrim.addEventListener('click', dismissTop);
+  $('#pdNewCat').addEventListener('click', () => openCategory(true));
+
+  $('#catList').addEventListener('click', e => {
+    const btn = e.target.closest('[data-cat]');
+    if (!btn) return;
+    state.selectedCat = Number(btn.dataset.cat);
+    state.search = ''; $('#prodSearch').value = '';
+    state.stockFilter = 'all'; $('#stockFilter').value = 'all';
+    renderAll();
+  });
+
+  $$('.seg-btn').forEach(btn => btn.addEventListener('click', () => {
+    state.typeFilter = btn.dataset.type;
+    $$('.seg-btn').forEach(b => {
+      b.classList.toggle('is-on', b === btn);
+      b.setAttribute('aria-selected', String(b === btn));
+    });
+    renderAll();
+  }));
+
+  $('#prodSearch').addEventListener('input', e => { state.search = e.target.value; renderPanel(); });
+  $('#stockFilter').addEventListener('change', e => { state.stockFilter = e.target.value; renderPanel(); });
+
+  $('#prodBody').addEventListener('click', e => {
+    const edit = e.target.closest('[data-edit]');
+    const restock = e.target.closest('[data-restock]');
+    if (edit) {
+      const item = state.items.find(i => i.id === Number(edit.dataset.edit));
+      if (item) openProduct(item);
+    }
+    if (restock) {
+      const item = state.items.find(i => i.id === Number(restock.dataset.restock));
+      if (item) openRestock(item);
+    }
+  });
+
+  $('#pdName').addEventListener('input', e => {
+    if ($('#pdCode').dataset.touched) return;
+    const name = e.target.value.trim();
+    const c = catOf(Number($('#pdCat').value));
+    $('#pdCode').value = name ? slugCode(name, c ? c.prefix : '') : '';
+  });
+  $('#pdCode').addEventListener('input', e => { e.target.dataset.touched = '1'; });
+  $('#pdCat').addEventListener('change', syncDrawerCat);
+  $('#pdSave').addEventListener('click', () => saveProduct(false));
+  $('#pdSaveNew').addEventListener('click', () => saveProduct(true));
+
+  $$('#cmType button').forEach(b => b.addEventListener('click', () => setCatType(b.dataset.type)));
+  $('#cmName').addEventListener('input', e => {
+    if ($('#cmCode').dataset.touched) return;
+    const name = e.target.value.trim();
+    $('#cmCode').value = name ? slugCode(name, '') : '';
+  });
+  $('#cmCode').addEventListener('input', e => { e.target.dataset.touched = '1'; });
+  $$('#cmColors .sw-btn').forEach(b => b.addEventListener('click', () => setCatColor(b.dataset.color)));
+  $('#cmSave').addEventListener('click', saveCategory);
+
+  $('#rsDir').addEventListener('change', updateRestockPreview);
+  $('#rsQty').addEventListener('input', updateRestockPreview);
+  $('#rsSave').addEventListener('click', saveRestock);
+
+  /* keyboard */
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') dismissTop();
+  });
+
+  /* theme */
+  const themeBtn = $('#themeBtn');
+  const root = document.documentElement;
+  try {
+    const saved = localStorage.getItem('cw_theme');
+    if (saved) root.dataset.theme = saved;
+  } catch (err) {}
+  themeBtn.addEventListener('click', () => {
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem('cw_theme', root.dataset.theme); } catch (err) {}
+  });
+
+  /* sidebar group (visual only) */
+  const grpBtn = $('.nav-group-btn');
+  grpBtn.addEventListener('click', () => {
+    const grp = grpBtn.closest('.nav-group');
+    grp.classList.toggle('open');
+    grpBtn.setAttribute('aria-expanded', String(grp.classList.contains('open')));
+  });
+
+  renderAll();
+})();
+</script>
+</body>
+</html>

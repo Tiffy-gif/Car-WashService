@@ -140,7 +140,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 
     <div class="card">
         <div class="table-responsive">
-            <table class="table">
+            <table class="table js-paginated-table">
                 <thead>
                     <tr>
                         <th>Date & Time</th>
@@ -205,7 +205,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 
     <div class="card">
         <div class="table-responsive">
-            <table class="table">
+            <table class="table js-paginated-table">
                 <thead>
                     <tr>
                         <th>Supply Name</th>
@@ -344,7 +344,7 @@ $redeemRate = Loyalty::getRedeemRate();
             </a>
         </div>
         <div class="table-responsive">
-            <table class="table">
+            <table class="table js-paginated-table">
                 <thead>
                     <tr>
                         <th>Customer</th>

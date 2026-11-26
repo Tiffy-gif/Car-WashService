@@ -21,7 +21,11 @@ $filterDateFrom = trim($_GET['date_from'] ?? '');
 $filterDateTo   = trim($_GET['date_to'] ?? '');
 $filterKeyword  = trim($_GET['q'] ?? '');
 $page           = max(1, (int)($_GET['p'] ?? 1));
-$limit          = 30;
+$allowedLimits  = [8, 15, 25, 50];
+$limit          = (int)($_GET['limit'] ?? 8);
+if (!in_array($limit, $allowedLimits, true)) {
+    $limit = 8;
+}
 $offset         = ($page - 1) * $limit;
 
 $filters = [
@@ -207,7 +211,7 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
         </div>
 
         <div style="overflow-x: auto;">
-            <table class="table" style="width: 100%; margin-bottom: 0;">
+            <table class="table js-server-paginated" style="width: 100%; margin-bottom: 0;">
                 <thead>
                     <tr>
                         <th style="width: 160px;">Date &amp; Time</th>
@@ -282,7 +286,14 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
                 <div class="text-xs text-muted">
                     Showing <?= $offset + 1 ?> to <?= min($totalRecords, $offset + $limit) ?> of <?= number_format($totalRecords) ?> entries
                 </div>
-                <div style="display: flex; gap: 6px;">
+                <div style="display: flex; gap: 6px; align-items:center; flex-wrap:wrap;">
+                    <label class="text-xs text-muted">Rows
+                        <select class="form-input" aria-label="Rows per page" style="width:auto;min-height:34px;padding:5px 28px 5px 10px;" onchange="window.location.href=this.value">
+                            <?php foreach ($allowedLimits as $pageLimit): ?>
+                            <option value="<?= htmlspecialchars(APP_URL . '/index.php?' . http_build_query(array_merge($_GET, ['p' => 1, 'limit' => $pageLimit])), ENT_QUOTES, 'UTF-8') ?>" <?= $limit === $pageLimit ? 'selected' : '' ?>><?= $pageLimit ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
                     <?php if ($page > 1): ?>
                         <a href="<?= APP_URL ?>/index.php?<?= http_build_query(array_merge($_GET, ['p' => $page - 1])) ?>" class="btn btn-secondary btn-sm">
                             &laquo; Previous

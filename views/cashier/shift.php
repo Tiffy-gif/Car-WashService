@@ -308,7 +308,7 @@ include dirname(__DIR__) . '/layouts/header.php';
             <span class="badge badge-warning"><?= count($shiftsNeedingReview) ?> Pending Review</span>
         </div>
         <div class="table-responsive">
-            <table class="table" style="font-size: 13px;">
+            <table class="table js-paginated-table" style="font-size: 13px;">
                 <thead>
                     <tr>
                         <th>Shift UID</th>
@@ -554,7 +554,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                 </div>
             <?php else: ?>
                 <div class="table-responsive" style="max-height: 380px; overflow-y: auto;">
-                    <table class="table" style="font-size: 13px;">
+                    <table class="table js-paginated-table" style="font-size: 13px;">
                         <thead>
                             <tr>
                                 <th>Shift UID</th>
@@ -618,7 +618,7 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 
     <div class="table-responsive">
-        <table class="table">
+        <table class="table js-paginated-table">
             <thead>
                 <tr>
                     <th>Shift UID</th>
@@ -709,7 +709,7 @@ include dirname(__DIR__) . '/layouts/header.php';
         </div>
 
         <div class="table-responsive">
-            <table class="table">
+        <table class="table js-paginated-table">
                 <thead>
                     <tr>
                         <th>Close Date</th>

@@ -74,11 +74,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                 $recordedBy = $currentUserId;
 
                 // Resolve category_id and category slug
+                $categoryError = false;
                 if ($categoryId) {
-                    $catLookup = $pdo->prepare("SELECT id, code, name_en FROM categories WHERE id = ?");
+                    $catLookup = $pdo->prepare("SELECT id, code, name_en FROM categories WHERE id = ? AND type = 'expense'");
                     $catLookup->execute([$categoryId]);
                     if ($cRow = $catLookup->fetch()) {
                         $category = $cRow['code'];
+                    } else {
+                        $message = 'Please select a valid expense category.';
+                        $messageType = 'danger';
+                        $categoryError = true;
                     }
                 } elseif ($category !== '') {
                     $catLookup = $pdo->prepare("SELECT id, code, name_en FROM categories WHERE type = 'expense' AND (code = ? OR name_en = ?)");
@@ -86,10 +91,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                     if ($cRow = $catLookup->fetch()) {
                         $categoryId = (int)$cRow['id'];
                         $category = $cRow['code'];
+                    } else {
+                        $message = 'Please select a valid expense category.';
+                        $messageType = 'danger';
+                        $categoryError = true;
                     }
                 }
 
-                if (!$categoryId && empty($category)) {
+                if (!$categoryError && !$categoryId && empty($category)) {
                     $catLookup = $pdo->query("SELECT id, code FROM categories WHERE type = 'expense' ORDER BY sort_order ASC LIMIT 1");
                     if ($cRow = $catLookup->fetch()) {
                         $categoryId = (int)$cRow['id'];
@@ -99,7 +108,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                     }
                 }
 
-                if ($desc === '' || $usd <= 0) {
+                if ($categoryError) {
+                    // Keep the category validation error and do not save.
+                } elseif ($desc === '' || $usd <= 0) {
                     $message = 'Description and a valid amount greater than $0 are required.';
                     $messageType = 'danger';
                 } else {
@@ -291,7 +302,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 <!-- Expenses List Table -->
 <div class="card">
     <div class="table-responsive">
-        <table class="table searchable-table">
+        <table class="table searchable-table js-paginated-table">
             <thead>
                 <tr>
                     <th style="width: 130px;">Date</th>
@@ -387,7 +398,12 @@ include dirname(__DIR__) . '/layouts/header.php';
             <div class="modal-body">
                 <div class="grid grid-cols-2" style="gap: 16px;">
                     <div class="form-group">
-                        <label class="form-label">Category *</label>
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                            <label class="form-label" style="margin:0;">Category *</label>
+                            <?php if (Auth::can('categories.list') && Auth::can('categories.add')): ?>
+                                <a href="?view=expense_categories" target="_blank" style="font-size:11px;font-weight:600;color:var(--primary);text-decoration:none;"><i class="fa-solid fa-plus-circle mr-1"></i> New Category</a>
+                            <?php endif; ?>
+                        </div>
                         <input type="hidden" name="category_id" id="exp_category_id" value="">
                         <div style="position: relative; display: flex; align-items: center;">
                             <span style="position: absolute; left: 12px; pointer-events: none; color: var(--primary); font-size: 14px; z-index: 2;">

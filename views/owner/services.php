@@ -44,21 +44,31 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         $removeImage = (($_POST['remove_image'] ?? '0') === '1');
 
         // Resolve category_id and category slug
+        $categoryError = false;
         if ($categoryId) {
-            $catLookup = $pdo->prepare("SELECT id, code FROM categories WHERE id = ?");
+            $catLookup = $pdo->prepare("SELECT id, code FROM categories WHERE id = ? AND type = 'service'");
             $catLookup->execute([$categoryId]);
             if ($cRow = $catLookup->fetch()) {
                 $category = $cRow['code'];
+            } else {
+                $message = 'Please select a valid service category.';
+                $messageType = 'danger';
+                $categoryError = true;
             }
         } elseif ($category !== '') {
             $catLookup = $pdo->prepare("SELECT id, code FROM categories WHERE type = 'service' AND code = ?");
             $catLookup->execute([$category]);
             if ($cRow = $catLookup->fetch()) {
                 $categoryId = (int)$cRow['id'];
+                $category = $cRow['code'];
+            } else {
+                $message = 'Please select a valid service category.';
+                $messageType = 'danger';
+                $categoryError = true;
             }
         }
 
-        if (!$categoryId && empty($category)) {
+        if (!$categoryError && !$categoryId && empty($category)) {
             $catLookup = $pdo->query("SELECT id, code FROM categories WHERE type = 'service' ORDER BY sort_order ASC LIMIT 1");
             if ($cRow = $catLookup->fetch()) {
                 $categoryId = (int)$cRow['id'];
@@ -68,7 +78,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             }
         }
 
-        if ($nameEn === '' || $nameKm === '') {
+        if ($categoryError) {
+            // Keep the category validation error and do not save.
+        } elseif ($nameEn === '' || $nameKm === '') {
             $message = 'Service name in English and Khmer are required.';
             $messageType = 'danger';
         } else {
@@ -198,18 +210,6 @@ $servicesStmt = $pdo->prepare($sSql);
 $servicesStmt->execute($params);
 $services = $servicesStmt->fetchAll();
 
-$catCounts = [];
-$countsStmt = $pdo->query("SELECT category_id, category, COUNT(*) as cnt FROM services GROUP BY category_id, category");
-while ($r = $countsStmt->fetch()) {
-    if (!empty($r['category_id'])) {
-        $catCounts['id_' . $r['category_id']] = ($catCounts['id_' . $r['category_id']] ?? 0) + (int)$r['cnt'];
-    }
-    if (!empty($r['category'])) {
-        $catCounts['code_' . $r['category']] = ($catCounts['code_' . $r['category']] ?? 0) + (int)$r['cnt'];
-    }
-}
-$totalServicesCount = (int)$pdo->query("SELECT COUNT(*) FROM services")->fetchColumn();
-
 // Fetch all prices indexed by [service_id][vehicle_type]
 $pricesStmt = $pdo->query("SELECT * FROM service_prices");
 $prices = [];
@@ -227,24 +227,10 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 <?php endif; ?>
 
-<!-- Category Filter Tabs & Actions -->
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
-    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-        <a href="?view=services&cat=all" class="btn btn-sm <?= ($catFilter === 'all') ? 'btn-primary' : 'btn-secondary' ?>">
-            All Services (<?= $totalServicesCount ?>)
-        </a>
-        <?php foreach ($serviceCategories as $sc): 
-            $isActiveTab = ($catFilter === $sc['code'] || $catFilter === (string)$sc['id']);
-            $cnt = max($catCounts['id_' . $sc['id']] ?? 0, $catCounts['code_' . $sc['code']] ?? 0);
-            $scIcon = !empty($sc['icon']) ? $sc['icon'] : 'fa-tag';
-            $scColor = !empty($sc['color']) ? $sc['color'] : 'inherit';
-            $scName = (Language::current() === 'km') ? $sc['name_km'] : $sc['name_en'];
-        ?>
-        <a href="?view=services&cat=<?= htmlspecialchars($sc['code']) ?>" class="btn btn-sm <?= $isActiveTab ? 'btn-primary' : 'btn-secondary' ?>">
-            <i class="fa-solid <?= htmlspecialchars($scIcon) ?> mr-1" style="<?= !$isActiveTab && !empty($sc['color']) ? 'color: ' . htmlspecialchars($sc['color']) . ';' : '' ?>"></i>
-            <?= htmlspecialchars($scName) ?> (<?= $cnt ?>)
-        </a>
-        <?php endforeach; ?>
+<div class="page-content-heading">
+    <div>
+        <h2>Services &amp; Pricing</h2>
+        <p>Manage wash, maintenance, and repair services with vehicle pricing.</p>
     </div>
     <?php if (Auth::can('services.add')): ?>
     <button type="button" class="btn btn-primary" onclick="openNewServiceModal()">
@@ -253,10 +239,21 @@ include dirname(__DIR__) . '/layouts/header.php';
     <?php endif; ?>
 </div>
 
+<!-- Search and category filter replace the category tabs. -->
+<div class="table-toolbar">
+    <input type="search" id="serviceSearch" class="form-input" placeholder="Search services..." style="max-width:360px;">
+    <select id="serviceCategoryFilter" class="form-input" style="width:auto;min-width:210px;" aria-label="Filter services by category" onchange="changeServiceCategory(this.value)">
+        <option value="all" <?= $catFilter === 'all' ? 'selected' : '' ?>>All service categories</option>
+        <?php foreach ($serviceCategories as $sc): ?>
+            <option value="<?= htmlspecialchars($sc['code'], ENT_QUOTES, 'UTF-8') ?>" <?= ($catFilter === $sc['code'] || $catFilter === (string)$sc['id']) ? 'selected' : '' ?>><?= htmlspecialchars((Language::current() === 'km') ? $sc['name_km'] : $sc['name_en']) ?></option>
+        <?php endforeach; ?>
+    </select>
+</div>
+
 <!-- Services List / Table -->
-<div class="card">
+<div class="table-card">
     <div class="table-responsive">
-        <table class="table">
+        <table class="table js-paginated-table">
             <thead>
                 <tr>
                     <th style="width: 250px;">Service</th>
@@ -282,7 +279,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                     $catIcon  = $catObj['icon'] ?? 'fa-shower';
                     $catName  = $catObj ? ((Language::current() === 'km') ? $catObj['name_km'] : $catObj['name_en']) : ucfirst($s['category'] ?? 'Wash');
                 ?>
-                <tr>
+                <tr class="service-row" data-service-search="<?= htmlspecialchars(mb_strtolower($s['name_en'] . ' ' . ($s['name_km'] ?? '') . ' ' . $catName, 'UTF-8'), ENT_QUOTES, 'UTF-8') ?>">
                     <td>
                         <div style="display: flex; align-items: center; gap: 12px;">
                             <?php 
@@ -367,6 +364,9 @@ include dirname(__DIR__) . '/layouts/header.php';
                     </td>
                 </tr>
                 <?php endforeach; ?>
+                <tr id="serviceNoResults" style="display:<?= empty($services) ? 'table-row' : 'none' ?>;">
+                    <td colspan="8" style="text-align:center;color:var(--text-muted);padding:36px 16px;"><?= empty($services) ? 'No services found. Add a service to get started.' : 'No services match your search.' ?></td>
+                </tr>
             </tbody>
         </table>
     </div>
@@ -406,7 +406,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                     <div class="form-group" style="position: relative;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                             <label class="form-label" style="margin-bottom: 0;">Service Category *</label>
-                            <a href="?view=categories&tab=service" target="_blank" style="font-size: 11px; font-weight: 600; color: var(--primary); text-decoration: none;">
+                            <a href="?view=service_categories" target="_blank" style="font-size: 11px; font-weight: 600; color: var(--primary); text-decoration: none;">
                                 <i class="fa-solid fa-plus-circle mr-1"></i> New Category
                             </a>
                         </div>
@@ -424,7 +424,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                                 <div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 13px;">
                                     <i class="fa-solid fa-folder-open mb-1" style="font-size: 20px; opacity: 0.4; display: block;"></i>
                                     <div>No service categories found.</div>
-                                    <a href="?view=categories&tab=service" class="btn btn-sm btn-primary mt-2" style="font-size: 11px; padding: 4px 10px;">
+                                    <a href="?view=service_categories" class="btn btn-sm btn-primary mt-2" style="font-size: 11px; padding: 4px 10px;">
                                         <i class="fa-solid fa-plus mr-1"></i> Add Category First
                                     </a>
                                 </div>
@@ -593,6 +593,28 @@ include dirname(__DIR__) . '/layouts/header.php';
 </div>
 
 <script>
+function changeServiceCategory(category) {
+    window.location.href = '?view=services&cat=' + encodeURIComponent(category || 'all');
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    const searchInput = document.getElementById('serviceSearch');
+    const rows = Array.from(document.querySelectorAll('.service-row'));
+    const noResults = document.getElementById('serviceNoResults');
+    if (!searchInput) return;
+
+    searchInput.addEventListener('input', function () {
+        const query = this.value.trim().toLocaleLowerCase();
+        let visibleCount = 0;
+        rows.forEach(function (row) {
+            const matches = (row.dataset.serviceSearch || '').includes(query);
+            row.style.display = matches ? '' : 'none';
+            if (matches) visibleCount++;
+        });
+        if (noResults) noResults.style.display = visibleCount === 0 ? '' : 'none';
+    });
+});
+
 const serviceCategoriesList = <?= json_encode($serviceCategories, JSON_UNESCAPED_UNICODE) ?>;
 const serviceIcons = [
     { icon: 'fa-shower', name: 'fa-shower (Wash / Rinse)' },

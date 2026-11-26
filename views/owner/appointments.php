@@ -168,7 +168,7 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 
     <div class="table-responsive">
-        <table class="table">
+        <table class="table js-paginated-table">
             <thead>
                 <tr>
                     <th style="width: 140px;">Date &amp; Time</th>

@@ -13,9 +13,10 @@ $pdo = Database::getInstance();
 
 $message = null;
 $messageType = 'success';
-$activeTab = $_GET['tab'] ?? 'service';
-if (!in_array($activeTab, ['service', 'product', 'expense'], true)) {
-    $activeTab = 'service';
+$categoryTypes = ['service', 'product', 'expense'];
+$typeFilter = $_GET['type'] ?? $_GET['tab'] ?? 'product';
+if (!in_array($typeFilter, $categoryTypes, true)) {
+    $typeFilter = 'product';
 }
 
 if (isset($csrfError)) {
@@ -37,19 +38,39 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $message = 'Permission denied: Cannot add category.';
             $messageType = 'danger';
         } else {
-        $type      = trim($_POST['type'] ?? 'service');
+        $type      = trim($_POST['type'] ?? 'product');
         $nameEn    = trim($_POST['name_en'] ?? '');
         $nameKm    = trim($_POST['name_km'] ?? '');
         $code      = trim($_POST['code'] ?? '');
-        $icon      = trim($_POST['icon'] ?? 'fa-tag');
+        $defaultIcon = $type === 'service' ? 'fa-shower' : ($type === 'expense' ? 'fa-wallet' : 'fa-box');
+        $icon      = trim($_POST['icon'] ?? $defaultIcon);
         $color     = trim($_POST['color'] ?? '#0284c7');
         $sortOrder = (int)($_POST['sort_order'] ?? 0);
         $isActive  = isset($_POST['is_active']) ? 1 : 0;
 
-        if (!in_array($type, ['service', 'product', 'expense'], true)) {
-            $type = 'service';
+        if (!in_array($type, $categoryTypes, true)) {
+            $type = 'product';
         }
-        $activeTab = $type;
+
+        // Category type and code are stable identifiers once created. Changing
+        // either can detach existing services/products/expenses from their group.
+        $existingCategory = null;
+        if ($catId) {
+            $existingStmt = $pdo->prepare('SELECT id, type, code, icon, color, sort_order FROM categories WHERE id = ?');
+            $existingStmt->execute([$catId]);
+            $existingCategory = $existingStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            if (!$existingCategory) {
+                $message = 'Category not found.';
+                $messageType = 'danger';
+            } else {
+                $type = $existingCategory['type'];
+                $code = $existingCategory['code'];
+                $icon = $existingCategory['icon'] ?? 'fa-box';
+                $color = $existingCategory['color'] ?? '#0284c7';
+                $sortOrder = (int)($existingCategory['sort_order'] ?? 0);
+            }
+        }
+        $typeFilter = $type;
 
         // Normalize code slug
         if ($code === '') {
@@ -60,7 +81,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $code = trim($code, '_');
         }
 
-        if ($nameEn === '' || $code === '') {
+        if ($messageType === 'danger') {
+            // Preserve the error above and skip persistence.
+        } elseif ($nameEn === '' || $code === '') {
             $message = 'Category name (English) and code slug are required.';
             $messageType = 'danger';
         } else {
@@ -68,9 +91,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                 $nameKm = $nameEn;
             }
 
-            // Check duplicate code within the same type
-            $dupSql = "SELECT id FROM categories WHERE type = ? AND code = ?";
-            $dupParams = [$type, $code];
+            // The database has a global UNIQUE constraint on category codes.
+            $dupSql = "SELECT id FROM categories WHERE code = ?";
+            $dupParams = [$code];
             if ($catId) {
                 $dupSql .= " AND id != ?";
                 $dupParams[] = $catId;
@@ -78,7 +101,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $dupStmt = $pdo->prepare($dupSql);
             $dupStmt->execute($dupParams);
             if ($dupStmt->fetch()) {
-                $message = "A category with the code '{$code}' already exists for {$type}s. Please choose a different code.";
+                $message = "A category with the code '{$code}' already exists. Please choose a different name.";
                 $messageType = 'danger';
             } else {
                 if ($catId) {
@@ -109,7 +132,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $messageType = 'danger';
         } else {
             $catId = (int)($_POST['category_id'] ?? 0);
-            $newStatus = (int)($_POST['is_active'] ?? 1);
+            $newStatus = (int)($_POST['is_active'] ?? 1) === 1 ? 1 : 0;
             if ($catId > 0) {
                 $pdo->prepare("UPDATE categories SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")->execute([$newStatus, $catId]);
                 $message = "Category status updated.";
@@ -130,7 +153,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $catRow = $catStmt->fetch();
 
             if ($catRow) {
-                $activeTab = $catRow['type'];
+                $typeFilter = $catRow['type'];
                 $itemCount = 0;
                 $tableLabel = 'items';
 
@@ -161,7 +184,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                     // SOFT DELETE per requirement
                     $pdo->prepare("UPDATE categories SET is_active = 0 WHERE id = ?")->execute([$catId]);
                     audit_log('CATEGORY_DEACTIVATED', "Deactivated category '{$catRow['name_en']}' ({$catRow['code']})", 'category', (string)$catId);
-                    $message = "Category '{$catRow['name_en']}' marked inactive (soft deleted).";
+                    $message = "Category '{$catRow['name_en']}' deactivated.";
                 }
             }
         }
@@ -169,48 +192,33 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
     }
 }
 
-// Fetch all categories for current tab
-$catListStmt = $pdo->prepare("SELECT * FROM categories WHERE type = ? ORDER BY sort_order ASC, id ASC");
-$catListStmt->execute([$activeTab]);
-$categories = $catListStmt->fetchAll();
+// This page is type-scoped by its entry point. The stock sidebar opens product
+// categories, while the service editor can open the same list for services.
+$categorySql = 'SELECT * FROM categories WHERE type = ? ORDER BY sort_order ASC, id ASC';
+$catListStmt = $pdo->prepare($categorySql);
+$catListStmt->execute([$typeFilter]);
+$categories = $catListStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Count items assigned to each category
+// Count distinct assigned records by either the current ID link or legacy code.
 $assignedCounts = [];
-if ($activeTab === 'service') {
-    $rows = $pdo->query("SELECT id, category_id, category FROM services")->fetchAll();
-    foreach ($rows as $r) {
-        if (!empty($r['category_id'])) {
-            $assignedCounts['id_' . $r['category_id']] = ($assignedCounts['id_' . $r['category_id']] ?? 0) + 1;
-        } elseif (!empty($r['category'])) {
-            $assignedCounts['code_' . $r['category']] = ($assignedCounts['code_' . $r['category']] ?? 0) + 1;
-        }
-    }
-} elseif ($activeTab === 'product') {
-    $rows = $pdo->query("SELECT id, category_id, category FROM products")->fetchAll();
-    foreach ($rows as $r) {
-        if (!empty($r['category_id'])) {
-            $assignedCounts['id_' . $r['category_id']] = ($assignedCounts['id_' . $r['category_id']] ?? 0) + 1;
-        } elseif (!empty($r['category'])) {
-            $assignedCounts['code_' . $r['category']] = ($assignedCounts['code_' . $r['category']] ?? 0) + 1;
-        }
-    }
-} elseif ($activeTab === 'expense') {
-    $rows = $pdo->query("SELECT id, category_id, category FROM expenses")->fetchAll();
-    foreach ($rows as $r) {
-        if (!empty($r['category_id'])) {
-            $assignedCounts['id_' . $r['category_id']] = ($assignedCounts['id_' . $r['category_id']] ?? 0) + 1;
-        } elseif (!empty($r['category'])) {
-            $assignedCounts['code_' . $r['category']] = ($assignedCounts['code_' . $r['category']] ?? 0) + 1;
-        }
+foreach (['service' => 'services', 'product' => 'products', 'expense' => 'expenses'] as $type => $table) {
+    $countSql = "SELECT c.id, COUNT(DISTINCT i.id) AS item_count
+        FROM categories c LEFT JOIN {$table} i
+        ON (i.category_id = c.id OR i.category = c.code)
+        WHERE c.type = ? GROUP BY c.id";
+    $countStmt = $pdo->prepare($countSql);
+    $countStmt->execute([$type]);
+    foreach ($countStmt->fetchAll(PDO::FETCH_ASSOC) as $countRow) {
+        $assignedCounts[(int)$countRow['id']] = (int)$countRow['item_count'];
     }
 }
 
-// Overall counts for tabs
-$tabCounts = [
-    'service' => (int)$pdo->query("SELECT COUNT(*) FROM categories WHERE type = 'service'")->fetchColumn(),
-    'product' => (int)$pdo->query("SELECT COUNT(*) FROM categories WHERE type = 'product'")->fetchColumn(),
-    'expense' => (int)$pdo->query("SELECT COUNT(*) FROM categories WHERE type = 'expense'")->fetchColumn(),
-];
+$typeLabels = ['service' => 'Service', 'product' => 'Product', 'expense' => 'Expense'];
+$defaultCreateType = $typeFilter;
+$pageHeading = $typeFilter === 'product' ? 'Product Categories' : ($typeFilter === 'service' ? 'Service Categories' : 'Expense Categories');
+$pageDescription = $typeFilter === 'product'
+    ? 'Create product categories, then select one when adding a product.'
+    : ($typeFilter === 'service' ? 'Group services so they are easier to manage.' : 'Group expenses so they are easier to manage.');
 
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
@@ -222,37 +230,38 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 <?php endif; ?>
 
-<!-- Tabs Header & Actions Bar -->
-<?php
-$addBtnLabel = ($activeTab === 'service') ? 'Add Service Category' : (($activeTab === 'product') ? 'Add Product Category' : 'Add Category');
-?>
-<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 24px; flex-wrap: wrap; gap: 12px;">
-    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-        <a href="?view=categories&tab=service" class="btn btn-sm <?= ($activeTab === 'service') ? 'btn-primary' : 'btn-secondary' ?>">
-            <i class="fa-solid fa-shower mr-1"></i> Service Categories (<?= $tabCounts['service'] ?>)
-        </a>
-        <a href="?view=categories&tab=product" class="btn btn-sm <?= ($activeTab === 'product') ? 'btn-primary' : 'btn-secondary' ?>">
-            <i class="fa-solid fa-boxes-stacked mr-1"></i> Product Categories (<?= $tabCounts['product'] ?>)
-        </a>
-        <a href="?view=categories&tab=expense" class="btn btn-sm <?= ($activeTab === 'expense') ? 'btn-primary' : 'btn-secondary' ?>">
-            <i class="fa-solid fa-wallet mr-1"></i> Expense Categories (<?= $tabCounts['expense'] ?>)
-        </a>
+<!-- Category page heading and actions -->
+<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:20px;">
+    <div>
+        <h2 style="font-size:20px;font-weight:700;margin:0 0 4px;"><?= htmlspecialchars($pageHeading) ?></h2>
+        <p class="text-sm text-muted" style="margin:0;"><?= htmlspecialchars($pageDescription) ?></p>
     </div>
-    <button type="button" class="btn btn-primary" onclick="openNewCategoryModal('<?= $activeTab ?>')">
-        <i class="fa-solid fa-plus mr-1"></i> <?= htmlspecialchars($addBtnLabel) ?>
+    <?php if (Auth::can('categories.add')): ?>
+    <button type="button" class="btn btn-primary" onclick="openNewCategoryModal('<?= htmlspecialchars($defaultCreateType, ENT_QUOTES, 'UTF-8') ?>')">
+        <i class="fa-solid fa-plus mr-1"></i> Add <?= $typeFilter === 'product' ? 'Category' : htmlspecialchars($typeLabels[$typeFilter] . ' Category') ?>
     </button>
+    <?php endif; ?>
 </div>
 
 <!-- Categories Table Card -->
-<div class="card">
+<div class="table-toolbar">
+    <input type="search" id="categorySearch" class="form-input" placeholder="Search categories..." style="max-width:320px;">
+    <select id="categoryStatusFilter" class="form-input" style="width:auto;min-width:130px;">
+        <option value="all">All statuses</option>
+        <option value="active">Active</option>
+        <option value="inactive">Inactive</option>
+    </select>
+</div>
+
+<div class="table-card">
     <div class="table-responsive">
-        <table class="table">
+        <table class="table js-paginated-table">
             <thead>
                 <tr>
-                    <th style="width: 60px;">Sort</th>
-                    <th style="width: 280px;">Category Name</th>
-                    <th>Identifier</th>
-                    <th style="width: 140px;">Assigned Items</th>
+                    <th>Category</th>
+                    <th>Category slug</th>
+                    <th style="width:150px;">Assigned products</th>
+                    <th>Created On</th>
                     <th style="width: 120px;">Status</th>
                     <th style="text-align: right; width: 150px;">Actions</th>
                 </tr>
@@ -265,36 +274,24 @@ $addBtnLabel = ($activeTab === 'service') ? 'Add Service Category' : (($activeTa
                                 <i class="fa-solid fa-folder-plus"></i>
                             </div>
                             <h4 style="font-size: 16px; font-weight: 700; color: var(--text-main); margin-bottom: 4px;">
-                                <?= ($activeTab === 'service') ? 'No Service Categories Yet' : (($activeTab === 'product') ? 'No Product Categories Yet' : 'No Categories Found') ?>
+                                <?= $typeFilter === 'product' ? 'No Categories Yet' : 'No Categories Found' ?>
                             </h4>
                             <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px; max-width: 420px; margin-left: auto; margin-right: auto;">
-                                <?= ($activeTab === 'service') ? 'Create categories like Washing, Detailing, or Basic Maintenance to group your vehicle services.' : (($activeTab === 'product') ? 'Create categories like Engine Oils, Filters, or Fluids to organize your warehouse inventory.' : 'Click below to create your first category.') ?>
+                                <?= $typeFilter === 'product' ? 'Add your first category, then choose it when adding products.' : htmlspecialchars($pageDescription) ?>
                             </p>
-                            <button type="button" class="btn btn-primary btn-sm" onclick="openNewCategoryModal('<?= $activeTab ?>')">
-                                <i class="fa-solid fa-plus mr-1"></i> <?= htmlspecialchars($addBtnLabel) ?>
-                            </button>
+                            <?php if (Auth::can('categories.add')): ?><button type="button" class="btn btn-primary btn-sm" onclick="openNewCategoryModal('<?= htmlspecialchars($defaultCreateType, ENT_QUOTES, 'UTF-8') ?>')">
+                                <i class="fa-solid fa-plus mr-1"></i> Add Category
+                            </button><?php endif; ?>
                         </td>
                     </tr>
                 <?php else: ?>
-                    <?php foreach ($categories as $cat): 
-                        $catColor = !empty($cat['color']) ? $cat['color'] : '#0284c7';
-                        $catIcon  = !empty($cat['icon']) ? $cat['icon'] : 'fa-tag';
-                        
-                        $countById = $assignedCounts['id_' . $cat['id']] ?? 0;
-                        $countByCode = $assignedCounts['code_' . $cat['code']] ?? 0;
-                        $totalAssigned = max($countById, $countByCode);
+                    <?php foreach ($categories as $cat):
+                        $totalAssigned = $assignedCounts[(int)$cat['id']] ?? 0;
+                        $createdOn = !empty($cat['created_at']) ? date('d M Y', strtotime($cat['created_at'])) : '—';
                     ?>
-                    <tr>
-                        <td>
-                            <span class="badge badge-slate" style="font-family: var(--font-mono); font-size: 11px;">
-                                <?= (int)$cat['sort_order'] ?>
-                            </span>
-                        </td>
+                    <tr class="category-row" data-category-search="<?= htmlspecialchars(strtolower($cat['name_en'] . ' ' . $cat['name_km'] . ' ' . $cat['code']), ENT_QUOTES, 'UTF-8') ?>" data-category-status="<?= $cat['is_active'] ? 'active' : 'inactive' ?>">
                         <td>
                             <div style="display: flex; align-items: center; gap: 12px;">
-                                <div style="width: 36px; height: 36px; border-radius: var(--radius-md); background: <?= htmlspecialchars($catColor) ?>18; color: <?= htmlspecialchars($catColor) ?>; border: 1px solid <?= htmlspecialchars($catColor) ?>35; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;">
-                                    <i class="fa-solid <?= htmlspecialchars($catIcon) ?>"></i>
-                                </div>
                                 <div>
                                     <div style="font-weight: 700; font-size: 14.5px; color: var(--text-main);">
                                         <?= htmlspecialchars((Language::current() === 'km') ? $cat['name_km'] : $cat['name_en']) ?>
@@ -311,10 +308,9 @@ $addBtnLabel = ($activeTab === 'service') ? 'Add Service Category' : (($activeTa
                             </code>
                         </td>
                         <td>
-                            <span class="badge badge-slate" style="font-size: 12px;">
-                                <?= $totalAssigned ?> <?= ($activeTab === 'service') ? 'services' : (($activeTab === 'product') ? 'products' : 'expenses') ?>
-                            </span>
+                            <span class="badge badge-slate"><?= $totalAssigned ?> <?= $totalAssigned === 1 ? 'product' : 'products' ?></span>
                         </td>
+                        <td><?= htmlspecialchars($createdOn) ?></td>
                         <td>
                             <?php if ($cat['is_active']): ?>
                                 <span class="badge badge-success"><i class="fa-solid fa-check mr-1"></i> Active</span>
@@ -324,7 +320,7 @@ $addBtnLabel = ($activeTab === 'service') ? 'Add Service Category' : (($activeTa
                         </td>
                         <td style="text-align: right;">
                             <div style="display: inline-flex; gap: 6px; align-items: center;">
-                                <button type="button" class="btn btn-secondary btn-sm" data-category="<?= htmlspecialchars(json_encode($cat, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>" onclick="editCategory(this)" title="Edit Category">
+                                <?php if (Auth::can('categories.edit')): ?><button type="button" class="btn btn-secondary btn-sm" data-category="<?= htmlspecialchars(json_encode($cat, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>" onclick="editCategory(this)" title="Edit Category">
                                     <i class="fa-solid fa-pen-to-square"></i>
                                 </button>
 
@@ -343,7 +339,9 @@ $addBtnLabel = ($activeTab === 'service') ? 'Add Service Category' : (($activeTa
                                         </button>
                                     <?php endif; ?>
                                 </form>
+                                <?php endif; ?>
 
+                                <?php if (Auth::can('categories.delete')): ?>
                                 <form action="" method="POST" style="display: inline;" data-cat-name="<?= htmlspecialchars($cat['name_en'], ENT_QUOTES, 'UTF-8') ?>" data-assigned="<?= (int)$totalAssigned ?>" onsubmit="return confirmDeleteCategory(this);">
                                     <?= csrf_field() ?>
                                     <input type="hidden" name="action" value="delete_category">
@@ -352,6 +350,7 @@ $addBtnLabel = ($activeTab === 'service') ? 'Add Service Category' : (($activeTa
                                         <i class="fa-solid fa-trash-can"></i>
                                     </button>
                                 </form>
+                                <?php endif; ?>
                             </div>
                         </td>
                     </tr>
@@ -373,10 +372,11 @@ $addBtnLabel = ($activeTab === 'service') ? 'Add Service Category' : (($activeTa
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="save_category">
             <input type="hidden" name="category_id" id="cat_id" value="">
-            <input type="hidden" name="type" id="cat_type" value="<?= htmlspecialchars($activeTab) ?>">
+            <input type="hidden" name="type" id="cat_type" value="<?= htmlspecialchars($defaultCreateType) ?>">
             <input type="hidden" name="code" id="cat_code" value="">
 
             <div class="modal-body">
+                <p class="text-sm text-muted" id="catTypeHelp" style="margin:0 0 16px;">Products in this category can be selected when adding stock items.</p>
                 <div class="grid grid-cols-2" style="gap: 16px;">
                     <div class="form-group">
                         <label class="form-label"><?= htmlspecialchars(__('category_name_en')) ?> *</label>
@@ -385,50 +385,6 @@ $addBtnLabel = ($activeTab === 'service') ? 'Add Service Category' : (($activeTa
                     <div class="form-group">
                         <label class="form-label"><?= htmlspecialchars(__('category_name_km')) ?> *</label>
                         <input type="text" name="name_km" id="cat_name_km" class="form-input" placeholder="e.g. លាងបន្ទប់ម៉ាស៊ីន" required>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-3" style="gap: 16px;">
-                    <div class="form-group">
-                        <label class="form-label"><?= htmlspecialchars(__('icon')) ?></label>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <div id="iconPreviewBadge" style="width: 38px; height: 38px; border-radius: var(--radius-md); background: var(--bg-subtle); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; color: var(--primary);">
-                                <i class="fa-solid fa-tag" id="previewIcon"></i>
-                            </div>
-                            <input type="text" name="icon" id="cat_icon" class="form-input" value="fa-tag" placeholder="fa-tag" oninput="updateIconPreview(this.value)">
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label"><?= htmlspecialchars(__('color')) ?></label>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <input type="color" id="cat_color_picker" value="#0284c7" style="width: 38px; height: 38px; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer;" oninput="document.getElementById('cat_color').value = this.value; updateColorPreview(this.value)">
-                            <input type="text" name="color" id="cat_color" class="form-input" value="#0284c7" placeholder="#0284c7" oninput="document.getElementById('cat_color_picker').value = this.value; updateColorPreview(this.value)">
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label"><?= htmlspecialchars(__('sort_order')) ?></label>
-                        <input type="number" name="sort_order" id="cat_sort_order" class="form-input" value="0">
-                    </div>
-                </div>
-
-                <!-- Quick Icon Presets -->
-                <div class="form-group" style="margin-bottom: 16px;">
-                    <label class="text-xs text-muted" style="margin-bottom: 6px; display: block;">Suggested Icons (Click to select):</label>
-                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                        <?php 
-                        $suggestedIcons = [
-                            'fa-shower', 'fa-broom', 'fa-sparkles', 'fa-gears', 'fa-wrench',
-                            'fa-oil-can', 'fa-filter', 'fa-bottle-droplet', 'fa-spray-can-sparkles',
-                            'fa-water', 'fa-bolt', 'fa-soap', 'fa-screwdriver-wrench',
-                            'fa-shield-halved', 'fa-battery-full', 'fa-box', 'fa-tag'
-                        ];
-                        foreach ($suggestedIcons as $si): ?>
-                            <button type="button" class="btn btn-secondary btn-sm" style="width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center;" onclick="selectPresetIcon('<?= $si ?>')">
-                                <i class="fa-solid <?= $si ?>"></i>
-                            </button>
-                        <?php endforeach; ?>
                     </div>
                 </div>
 
@@ -457,50 +413,28 @@ function autoSuggestSlug(val) {
     }
 }
 
-function updateIconPreview(iconClass) {
-    const iconEl = document.getElementById('previewIcon');
-    iconEl.className = 'fa-solid ' + (iconClass.trim() || 'fa-tag');
-}
-
-function selectPresetIcon(iconClass) {
-    document.getElementById('cat_icon').value = iconClass;
-    updateIconPreview(iconClass);
-}
-
-function updateColorPreview(colorHex) {
-    const badge = document.getElementById('iconPreviewBadge');
-    badge.style.color = colorHex;
-}
-
 function openNewCategoryModal(defaultType) {
-    const type = defaultType || '<?= $activeTab ?>';
+    const type = defaultType || '<?= $defaultCreateType ?>';
     let title = 'Add Category';
-    let defaultIcon = 'fa-tag';
     if (type === 'service') {
         title = 'Add Service Category';
-        defaultIcon = 'fa-shower';
     } else if (type === 'product') {
         title = 'Add Product Category';
-        defaultIcon = 'fa-box';
     } else if (type === 'expense') {
         title = 'Add Expense Category';
-        defaultIcon = 'fa-wallet';
     }
 
     document.getElementById('catModalTitle').innerText = title;
     document.getElementById('cat_id').value = '';
     document.getElementById('cat_type').value = type;
+    document.getElementById('catTypeHelp').textContent = type === 'product'
+        ? 'Products in this category can be selected when adding stock items.'
+        : (type === 'service' ? 'Services in this category can be selected when adding services.' : 'Expenses in this category can be selected when recording expenses.');
     document.getElementById('cat_name_en').value = '';
+    document.getElementById('cat_name_en').placeholder = type === 'product' ? 'e.g. Engine Oil' : (type === 'service' ? 'e.g. Washing Services' : 'e.g. Utilities');
     document.getElementById('cat_name_km').value = '';
     document.getElementById('cat_code').value = '';
-    document.getElementById('cat_sort_order').value = '0';
-    document.getElementById('cat_icon').value = defaultIcon;
-    document.getElementById('cat_color').value = '#0284c7';
-    document.getElementById('cat_color_picker').value = '#0284c7';
     document.getElementById('cat_is_active').checked = true;
-
-    updateIconPreview(defaultIcon);
-    updateColorPreview('#0284c7');
     openModal('categoryModal');
 }
 
@@ -525,19 +459,12 @@ function editCategory(btnOrCat) {
     document.getElementById('catModalTitle').innerText = title;
     document.getElementById('cat_id').value = cat.id || '';
     document.getElementById('cat_type').value = type;
+    document.getElementById('catTypeHelp').textContent = 'Category type cannot be changed after creation, so existing items stay correctly grouped.';
     document.getElementById('cat_name_en').value = cat.name_en || '';
+    document.getElementById('cat_name_en').placeholder = 'Category name';
     document.getElementById('cat_name_km').value = cat.name_km || '';
     document.getElementById('cat_code').value = cat.code || '';
-    document.getElementById('cat_sort_order').value = cat.sort_order ?? '0';
-    document.getElementById('cat_icon').value = cat.icon || 'fa-tag';
-    
-    const color = cat.color || '#0284c7';
-    document.getElementById('cat_color').value = color;
-    document.getElementById('cat_color_picker').value = color;
     document.getElementById('cat_is_active').checked = (cat.is_active == 1);
-
-    updateIconPreview(cat.icon || 'fa-tag');
-    updateColorPreview(color);
     openModal('categoryModal');
 }
 
@@ -552,8 +479,21 @@ function confirmDeleteCategory(formOrName, assignedCount) {
         alert("Cannot delete category '" + catName + "' because " + count + " items are currently assigned to it.\n\nPlease deactivate the category or reassign those items first.");
         return false;
     }
-    return confirm("Are you sure you want to permanently delete the category '" + catName + "'?");
+    return confirm("Deactivate the category '" + catName + "'? It will be kept in records but hidden from new selections.");
 }
+
+function applyCategoryTableFilters() {
+    const query = (document.getElementById('categorySearch')?.value || '').trim().toLowerCase();
+    const status = document.getElementById('categoryStatusFilter')?.value || 'all';
+    document.querySelectorAll('.category-row').forEach(row => {
+        const matchesSearch = !query || (row.dataset.categorySearch || '').includes(query);
+        const matchesStatus = status === 'all' || row.dataset.categoryStatus === status;
+        row.hidden = !(matchesSearch && matchesStatus);
+    });
+}
+
+document.getElementById('categorySearch')?.addEventListener('input', applyCategoryTableFilters);
+document.getElementById('categoryStatusFilter')?.addEventListener('change', applyCategoryTableFilters);
 </script>
 
 <?php include dirname(__DIR__) . '/layouts/footer.php'; ?>

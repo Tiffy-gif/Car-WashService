@@ -318,7 +318,7 @@ require_once dirname(__DIR__, 2) . '/views/layouts/header.php';
     </div>
 
     <div style="overflow-x: auto;">
-        <table class="table" style="width: 100%; font-size: 13px;">
+        <table class="table js-paginated-table" style="width: 100%; font-size: 13px;">
             <thead>
                 <tr>
                     <th style="width: 160px;">Timestamp</th>

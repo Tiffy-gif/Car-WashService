@@ -626,7 +626,17 @@ $viewMap = [
     'change_pin'      => '/views/auth/change_pin.php',
     'dashboard'       => '/views/owner/dashboard.php',
     'services'        => '/views/owner/services.php',
+    'service_categories' => '/views/owner/categories.php',
+    'expense_categories' => '/views/owner/categories.php',
     'products'        => '/views/owner/oil_care.php',
+    'product_catalog' => '/views/owner/oil_care.php',
+    'product_categories' => '/views/owner/categories.php',
+    'low_stock'       => '/views/owner/oil_care.php',
+    'stock_manage'    => '/views/owner/oil_care.php',
+    'stock_requests'  => '/views/owner/oil_care.php',
+    'stock_movements' => '/views/owner/oil_care.php',
+    'stock_supplies'  => '/views/owner/oil_care.php',
+    'stock_counts'    => '/views/owner/oil_care.php',
     'parts_dispatch'  => '/views/owner/oil_care.php',
     'customers'       => '/views/owner/customers.php',
     'pos'             => '/views/cashier/pos.php',
@@ -665,8 +675,29 @@ $viewMap = [
 $fallbackViewKey = Auth::getDefaultViewForUser();
 $defaultFallback = $viewMap[$fallbackViewKey] ?? '/views/auth/login.php';
 
-// Set default tab for alias views
-if ($view === 'products' && !isset($_GET['tab'])) {
+// Map sidebar destinations to the matching panel in the shared stock workspace.
+$stockTabAliases = [
+    'stock_requests' => 'requests',
+    'stock_movements' => 'ledger',
+    'stock_supplies' => 'supplies',
+    'stock_counts' => 'discrepancies',
+];
+
+// Set default panel for sidebar aliases while keeping existing direct links valid.
+if (in_array($view, ['product_catalog', 'stock_manage', 'low_stock'], true)) {
+    $_GET['tab'] = 'products';
+    if ($view === 'low_stock') {
+        $_GET['stock_filter'] = 'low';
+    }
+} elseif (isset($stockTabAliases[$view])) {
+    $_GET['tab'] = $stockTabAliases[$view];
+} elseif (in_array($view, ['product_categories', 'service_categories', 'expense_categories'], true)) {
+    $_GET['type'] = [
+        'product_categories' => 'product',
+        'service_categories' => 'service',
+        'expense_categories' => 'expense',
+    ][$view];
+} elseif ($view === 'products' && !isset($_GET['tab'])) {
     $_GET['tab'] = 'products';
 } elseif ($view === 'parts_dispatch' && !isset($_GET['tab'])) {
     $_GET['tab'] = 'requests';

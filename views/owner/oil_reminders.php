@@ -265,7 +265,7 @@ include dirname(__DIR__) . '/layouts/header.php';
     <!-- Vehicles List Table -->
     <div class="card" style="padding: 0; overflow: hidden;">
         <div style="overflow-x: auto;">
-            <table class="table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <table class="table js-paginated-table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
                 <thead>
                     <tr style="background: var(--bg-surface); border-bottom: 2px solid var(--border); text-align: left;">
                         <th style="padding: 12px 16px;">Status</th>
