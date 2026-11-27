@@ -15,9 +15,11 @@ $pdo = Database::getInstance();
 $totalCustomers = (int)$pdo->query("SELECT COUNT(*) FROM customers")->fetchColumn();
 $totalVehicles = (int)$pdo->query("SELECT COUNT(*) FROM vehicles")->fetchColumn();
 $activeServices = (int)$pdo->query("SELECT COUNT(*) FROM services WHERE is_active = 1")->fetchColumn();
+$todayDate = date('Y-m-d');
 
 // Today's orders & revenue (Net Settled Revenue: Confirmed Gross Payments - Settled Refunds)
-$todayOrdersStmt = $pdo->query("SELECT COUNT(*) as count, COALESCE(SUM(total_usd), 0) as revenue_usd, COALESCE(SUM(total_khr), 0) as revenue_khr FROM orders WHERE DATE(COALESCE(paid_at, created_at)) = CURDATE() AND (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled'");
+$todayOrdersStmt = $pdo->prepare("SELECT COUNT(*) as count, COALESCE(SUM(total_usd), 0) as revenue_usd, COALESCE(SUM(total_khr), 0) as revenue_khr FROM orders WHERE DATE(COALESCE(paid_at, created_at)) = ? AND (payment_status = 'paid' OR status = 'paid') AND status != 'cancelled'");
+$todayOrdersStmt->execute([$todayDate]);
 $todayStats = $todayOrdersStmt->fetch() ?: ['count' => 0, 'revenue_usd' => 0.00, 'revenue_khr' => 0];
 
 $hasRefundCols = false;
@@ -29,7 +31,7 @@ try {
 $todayRefundUsd = 0.00;
 if ($hasRefundCols) {
     try {
-        $todayRefundUsd = (float)$pdo->query("
+        $refundStmt = $pdo->prepare(" 
             SELECT COALESCE(SUM(
                 CASE 
                     WHEN refund_amount_usd > 0 THEN refund_amount_usd
@@ -38,8 +40,10 @@ if ($hasRefundCols) {
                 END
             ), 0)
             FROM orders
-            WHERE DATE(COALESCE(refunded_at, paid_at, created_at)) = CURDATE() AND status != 'cancelled'
-        ")->fetchColumn();
+            WHERE DATE(COALESCE(refunded_at, paid_at, created_at)) = ? AND status != 'cancelled'
+        ");
+        $refundStmt->execute([$todayDate]);
+        $todayRefundUsd = (float)$refundStmt->fetchColumn();
     } catch (Throwable $e) {}
 }
 $todayGrossUsd = (float)$todayStats['revenue_usd'];
@@ -47,7 +51,8 @@ $todayNetUsd = max(0.0, $todayGrossUsd - $todayRefundUsd);
 $todayNetKhr = (int)round($todayNetUsd * get_exchange_rate());
 
 // Order status breakdown
-$statusCountsStmt = $pdo->query("SELECT status, COUNT(*) as count FROM orders WHERE DATE(created_at) = CURDATE() GROUP BY status");
+$statusCountsStmt = $pdo->prepare("SELECT status, COUNT(*) as count FROM orders WHERE DATE(created_at) = ? GROUP BY status");
+$statusCountsStmt->execute([$todayDate]);
 $statusCounts = ['waiting' => 0, 'washing' => 0, 'finished' => 0, 'paid' => 0, 'cancelled' => 0];
 while ($row = $statusCountsStmt->fetch()) {
     $statusCounts[$row['status']] = (int)$row['count'];
@@ -57,7 +62,7 @@ while ($row = $statusCountsStmt->fetch()) {
 $recentOrders = $pdo->query("SELECT * FROM orders ORDER BY id DESC LIMIT 5")->fetchAll();
 
 // Today's Sales by POS Device & Web
-$todayDeviceStmt = $pdo->query("
+$todayDeviceStmt = $pdo->prepare(" 
     SELECT 
         CASE 
             WHEN o.pos_device_id IS NULL OR o.pos_device_id = 0 OR o.source = 'web' THEN 'web'
@@ -72,7 +77,7 @@ $todayDeviceStmt = $pdo->query("
         COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.total_khr ELSE 0 END), 0) as total_sales_khr
     FROM orders o
     LEFT JOIN pos_devices pd ON o.pos_device_id = pd.id
-    WHERE DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()
+    WHERE DATE(COALESCE(o.paid_at, o.created_at)) = ?
     GROUP BY 
         CASE 
             WHEN o.pos_device_id IS NULL OR o.pos_device_id = 0 OR o.source = 'web' THEN 0 
@@ -81,6 +86,7 @@ $todayDeviceStmt = $pdo->query("
         pd.device_name, o.pos_device_name, pd.location, pd.device_uid
     ORDER BY total_sales_usd DESC
 ");
+$todayDeviceStmt->execute([$todayDate]);
 $todayDeviceSales = $todayDeviceStmt->fetchAll(PDO::FETCH_ASSOC);
 
 include dirname(__DIR__) . '/layouts/header.php';

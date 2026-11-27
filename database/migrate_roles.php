@@ -205,7 +205,7 @@ function migrateRoles(bool $force = false): bool {
         ],
     ];
 
-    $insRoleStmt = $pdo->prepare("
+    $insRoleStmt = $isSqlite ? null : $pdo->prepare("
         INSERT INTO roles (code, name_en, name_km, description, is_system, is_active, is_commission_eligible, can_assign_washer, can_assign_mechanic)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE 
@@ -221,8 +221,17 @@ function migrateRoles(bool $force = false): bool {
     foreach ($builtInRoles as $r) {
         if ($isSqlite) {
             $pdo->prepare("
-                INSERT OR REPLACE INTO roles (code, name_en, name_km, description, is_system, is_active, is_commission_eligible, can_assign_washer, can_assign_mechanic)
+                INSERT INTO roles (code, name_en, name_km, description, is_system, is_active, is_commission_eligible, can_assign_washer, can_assign_mechanic)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(code) DO UPDATE SET
+                    name_en = excluded.name_en,
+                    name_km = excluded.name_km,
+                    description = excluded.description,
+                    is_system = excluded.is_system,
+                    is_active = excluded.is_active,
+                    is_commission_eligible = excluded.is_commission_eligible,
+                    can_assign_washer = excluded.can_assign_washer,
+                    can_assign_mechanic = excluded.can_assign_mechanic
             ")->execute([$r['code'], $r['name_en'], $r['name_km'], $r['description'], $r['is_system'], $r['is_active'], $r['is_commission_eligible'], $r['can_assign_washer'], $r['can_assign_mechanic']]);
         } else {
             $insRoleStmt->execute([$r['code'], $r['name_en'], $r['name_km'], $r['description'], $r['is_system'], $r['is_active'], $r['is_commission_eligible'], $r['can_assign_washer'], $r['can_assign_mechanic']]);
@@ -331,7 +340,7 @@ function migrateRoles(bool $force = false): bool {
         ['pos_devices', 'pos_devices.regen_key', 'Regenerate API Key', 'បង្កើតសោរសម្ងាត់ឡើងវិញ', 'settings', 66],
     ];
 
-    $insPermStmt = $pdo->prepare("
+    $insPermStmt = $isSqlite ? null : $pdo->prepare("
         INSERT INTO permissions (module, code, label_en, label_km, area, sort_order)
         VALUES (?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE 
@@ -345,8 +354,14 @@ function migrateRoles(bool $force = false): bool {
     foreach ($permissionsToSeed as $p) {
         if ($isSqlite) {
             $pdo->prepare("
-                INSERT OR REPLACE INTO permissions (module, code, label_en, label_km, area, sort_order)
+                INSERT INTO permissions (module, code, label_en, label_km, area, sort_order)
                 VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(code) DO UPDATE SET
+                    module = excluded.module,
+                    label_en = excluded.label_en,
+                    label_km = excluded.label_km,
+                    area = excluded.area,
+                    sort_order = excluded.sort_order
             ")->execute($p);
         } else {
             $insPermStmt->execute($p);

@@ -518,6 +518,13 @@ foreach ($allActiveProducts as $ap) {
     }
 }
 $products = $allActiveProducts;
+if ($isLowStockView) {
+    $products = array_values(array_filter($allActiveProducts, static function (array $product): bool {
+        $available = max(0, (int)($product['stock_qty'] ?? 0) - (int)($product['reserved_qty'] ?? 0));
+        $minimum = (int)($product['min_stock_alert'] ?: 5);
+        return $available <= $minimum;
+    }));
+}
 $categoryFilter = $_GET['cat'] ?? 'all';
 
 // Fetch Parts Requests for Warehouse
@@ -938,6 +945,29 @@ include dirname(__DIR__) . '/layouts/header.php';
 .status-pill.low-stock .dot { background: var(--warning); }
 .status-pill.out-of-stock { background: var(--danger-bg); color: var(--danger); }
 .status-pill.out-of-stock .dot { background: var(--danger); }
+
+/* Compact stock presentation used on the Manage Stock list. */
+.pw-manage-stock-table .stock-availability {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 112px;
+}
+.pw-manage-stock-table .stock-track {
+    width: 64px;
+    flex: 0 0 64px;
+    margin: 0;
+}
+.pw-manage-stock-table .stock-num { font-size: 14px; }
+.pw-manage-stock-table .status-pill {
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    font-weight: 500;
+}
+.pw-manage-stock-table .status-pill.in-stock { color: var(--text-muted); }
+.pw-manage-stock-table .status-pill.low-stock { color: #c2410c; }
+.pw-manage-stock-table .status-pill.out-of-stock { color: #be123c; }
 
 /* Row Action Buttons */
 .btn-stock-plus {
@@ -1573,8 +1603,17 @@ include dirname(__DIR__) . '/layouts/header.php';
         <button type="button" class="btn btn-primary" onclick="openNewProductModal()"><i class="fa-solid fa-plus mr-1"></i> Add Product</button>
         <?php endif; ?>
     </div>
+    <?php elseif ($isLowStockView): ?>
+    <div class="page-content-heading">
+        <div>
+            <h2>Low Stock</h2>
+            <p><?= count($products) ?> <?= count($products) === 1 ? 'product needs' : 'products need' ?> restocking · At or below the configured alert quantity.</p>
+        </div>
+        <button type="button" class="btn btn-secondary" onclick="openReceiveStockModal()"><i class="fa-solid fa-truck-ramp-box mr-1"></i> Receive Delivery</button>
+    </div>
     <?php endif; ?>
 
+    <?php if (!$isLowStockView): ?>
     <div class="pw-page-actions">
     <?php if ($showReceiveDelivery): ?>
         <button type="button" class="btn btn-secondary" onclick="openReceiveStockModal()"><i class="fa-solid fa-truck-ramp-box mr-1"></i> Receive Delivery</button>
@@ -1583,7 +1622,11 @@ include dirname(__DIR__) . '/layouts/header.php';
         <button type="button" class="btn btn-primary" onclick="openNewProductModal()"><i class="fa-solid fa-plus mr-1"></i> Add Product</button>
     <?php endif; ?>
 </div>
+    <?php endif; ?>
 
+    <?php if ($isLowStockView): ?>
+    <span class="sr-only" role="status"><?= count($products) ?> products need restocking.</span>
+    <?php else: ?>
     <!-- 1. KPI Summary Cards Grid -->
     <div class="pw-kpi-grid">
         <div class="pw-kpi-card <?= $isLowStockView ? '' : 'active' ?>" data-kpi="all" onclick="filterByKpi('all')">
@@ -1607,6 +1650,7 @@ include dirname(__DIR__) . '/layouts/header.php';
             <div class="pw-kpi-sub">Needs restocking</div>
         </div>
     </div>
+    <?php endif; ?>
 
     <!-- 2. Search & Filter Controls Toolbar -->
     <div class="pw-toolbar table-toolbar">
@@ -1631,10 +1675,10 @@ include dirname(__DIR__) . '/layouts/header.php';
                     </select>
                 </div>
             <?php else: ?>
-                <label class="pw-checkbox-label">
+                <?php if (!$isLowStockView): ?><label class="pw-checkbox-label">
                     <input type="checkbox" id="pwHideOutOfStock" onchange="toggleHideOutOfStock(this.checked)">
                     <span>Hide out of stock</span>
-                </label>
+                </label><?php endif; ?>
                 <div class="pw-sort-wrap">
                     <span>Sort</span>
                     <select id="pwSortSelect" class="pw-sort-select" onchange="handleSort(this.value)">
@@ -1651,7 +1695,7 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 
     <!-- 4. Bulk Action Floating Bar -->
-    <div id="pwBulkBar" class="pw-bulk-bar" style="display: none;">
+    <div id="pwBulkBar" class="pw-bulk-bar" style="display: none; <?= $isLowStockView ? 'visibility: hidden;' : '' ?>">
         <div><strong id="pwBulkCount">0</strong> products selected</div>
         <div style="display: flex; gap: 8px;">
             <button type="button" class="btn btn-sm btn-primary" onclick="openBulkRestock()">
@@ -1666,23 +1710,33 @@ include dirname(__DIR__) . '/layouts/header.php';
     <!-- 5. Products Table Card -->
     <div class="pw-table-card table-card">
         <div class="table-responsive">
-            <table class="pw-table" id="pwProductsTable">
+            <table class="pw-table <?= (!$isLowStockView && !$isProductCatalogView) ? 'pw-manage-stock-table' : '' ?>" id="pwProductsTable">
                 <thead>
                     <tr>
-                        <th class="pw-select-col" style="width: 44px; text-align: center;">
+                        <?php if (!$isLowStockView): ?><th class="pw-select-col" style="width: 44px; text-align: center;">
                             <input type="checkbox" id="pwSelectAll" class="pw-row-checkbox" onchange="toggleSelectAll(this.checked)">
-                        </th>
+                        </th><?php endif; ?>
                         <th>PRODUCT</th>
                         <th>CATEGORY</th>
+                        <?php if ($isLowStockView): ?>
+                        <th><?= $isProductCatalogView ? 'QTY' : 'STOCK' ?></th>
+                        <th>QTY ALERT</th>
+                        <?php else: ?>
                         <th>BRAND</th>
                         <th>PRICE</th>
                         <th>UNIT</th>
-                        <th>QTY</th>
+                        <th><?= $isProductCatalogView ? 'QTY' : 'STOCK' ?></th>
+                        <?php endif; ?>
                         <th class="pw-status-col">STATUS</th>
                         <th style="text-align: right; width: 170px;">ACTIONS</th>
                     </tr>
                 </thead>
                 <tbody id="pwTableBody">
+                    <?php if (empty($products)): ?>
+                    <tr><td colspan="<?= $isLowStockView ? 6 : 9 ?>" style="text-align: center; color: var(--text-muted); padding: 32px;">
+                        <?= $isLowStockView ? 'No products need restocking right now.' : 'No products found.' ?>
+                    </td></tr>
+                    <?php else: ?>
                     <?php foreach ($products as $p): 
                         $physical = (int)$p['stock_qty'];
                         $reserved = (int)($p['reserved_qty'] ?? 0);
@@ -1748,9 +1802,9 @@ include dirname(__DIR__) . '/layouts/header.php';
                         data-stock-status="<?= $isOut ? 'out_of_stock' : ($isLow ? 'low_stock' : 'in_stock') ?>"
                         data-price="<?= (float)$p['price_usd'] ?>"
                         data-name-sort="<?= htmlspecialchars(strtolower($p['name_en'])) ?>">
-                        <td class="pw-select-col" style="text-align: center;">
+                        <?php if (!$isLowStockView): ?><td class="pw-select-col" style="text-align: center;">
                             <input type="checkbox" class="pw-row-checkbox" value="<?= $p['id'] ?>" onchange="handleRowCheckbox(this)">
-                        </td>
+                        </td><?php endif; ?>
                         <td>
                             <div class="product-flex">
                                 <div class="product-icon-sq" style="background: <?= $catBg ?>; color: <?= $catTextColor ?>;">
@@ -1771,15 +1825,34 @@ include dirname(__DIR__) . '/layouts/header.php';
                         <td>
                             <?= htmlspecialchars($catName) ?>
                         </td>
+                        <?php if ($isLowStockView): ?>
+                        <td>
+                            <span class="stock-num <?= $isOut ? 'out-of-stock' : 'low-stock' ?>"><?= $avail ?></span>
+                            <span class="text-xs text-muted"><?= htmlspecialchars($p['unit'] ?: 'unit') ?></span>
+                        </td>
+                        <td>
+                            <strong><?= $minAlert ?></strong>
+                            <span class="text-xs text-muted"><?= htmlspecialchars($p['unit'] ?: 'unit') ?></span>
+                        </td>
+                        <?php else: ?>
                         <td><?= htmlspecialchars($p['brand'] ?: '—') ?></td>
                         <td>
                             <div class="price-main">$<?= number_format((float)$p['price_usd'], 2) ?></div>
                             <div class="price-sub">&#6107;<?= number_format((int)$p['price_khr']) ?></div>
                         </td>
                         <td><?= htmlspecialchars($p['unit'] ?: 'unit') ?></td>
+                        <?php endif; ?>
+                        <?php if (!$isLowStockView): ?>
                         <td>
                             <?php if ($isProductCatalogView): ?>
                                 <span class="stock-num"><?= $physical ?></span>
+                            <?php elseif (!$isLowStockView): ?>
+                            <div class="stock-availability" title="<?= $physical ?> on hand, <?= $reserved ?> reserved">
+                                <div class="stock-track" aria-hidden="true">
+                                    <div class="stock-bar <?= $isOut ? 'out-of-stock' : ($isLow ? 'low-stock' : 'in-stock') ?>" style="width: <?= $barPercent ?>%;"></div>
+                                </div>
+                                <span class="stock-num <?= $isOut ? 'out-of-stock' : ($isLow ? 'low-stock' : 'in-stock') ?>" aria-label="<?= $avail ?> available; <?= $physical ?> on hand; <?= $reserved ?> reserved"><?= $avail ?></span>
+                            </div>
                             <?php else: ?>
                             <div style="display: flex; align-items: baseline;">
                                 <span class="stock-num <?= $isOut ? 'out-of-stock' : ($isLow ? 'low-stock' : 'in-stock') ?>"><?= $avail ?></span>
@@ -1790,6 +1863,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                             </div>
                             <?php endif; ?>
                         </td>
+                        <?php endif; ?>
                         <td class="pw-status-col">
                             <?php if ($isOut): ?>
                                 <span class="status-pill out-of-stock"><span class="dot"></span> Out of stock</span>
@@ -1839,6 +1913,7 @@ include dirname(__DIR__) . '/layouts/header.php';
                         </td>
                     </tr>
                     <?php endforeach; ?>
+                    <?php endif; ?>
                 </tbody>
             </table>
         </div>
@@ -2292,7 +2367,7 @@ let pwState = {
     search: '',
     category: 'all',
     brand: 'all',
-    kpi: <?= json_encode($isLowStockView ? 'low_stock' : 'all') ?>,
+    kpi: <?= json_encode($isLowStockView ? 'needs_restock' : 'all') ?>,
     hideOutOfStock: false,
     sort: 'name_asc',
     rowsPerPage: 8,
@@ -2356,7 +2431,8 @@ function applyPwFilters() {
         if (pwState.search && !name.includes(pwState.search)) return false;
         if (pwState.category !== 'all' && cat !== pwState.category) return false;
         if (pwState.brand !== 'all' && brand !== pwState.brand) return false;
-        if (pwState.kpi !== 'all' && stockStatus !== pwState.kpi) return false;
+        if (pwState.kpi === 'needs_restock' && !['low_stock', 'out_of_stock'].includes(stockStatus)) return false;
+        if (!['all', 'needs_restock'].includes(pwState.kpi) && stockStatus !== pwState.kpi) return false;
         if (pwState.hideOutOfStock && stock <= 0) return false;
 
         return true;
