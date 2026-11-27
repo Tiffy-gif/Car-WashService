@@ -57,6 +57,7 @@ $rawMenuGroups = [
                 'icon'       => 'fa-list-ol',
                 'permission' => 'orders.list',
             ],
+            ['view' => 'shift', 'query' => ['section' => 'history'], 'label' => __('nav_shift_history', 'My Shift History'), 'icon' => 'fa-clock-rotate-left', 'permission' => 'pos.access', 'role_restricted' => ['cashier']],
             [
                 'view'       => 'washer_jobs',
                 'label'      => __('nav_washer_screen'),
@@ -199,26 +200,20 @@ $rawMenuGroups = [
                 'icon'       => 'fa-tags',
                 'permission' => 'categories.list',
             ],
-            [
-                'view'       => 'reports',
-                'label'      => __('nav_reports'),
-                'icon'       => 'fa-chart-line',
-                'permission' => 'reports.view',
-            ],
-            [
-                'view'       => 'cash_movements',
-                'label'      => __('nav_cash_movements', 'Cash Movements'),
-                'icon'       => 'fa-money-bill-transfer',
-                'permission' => 'reports.view',
-                'role_restricted' => ['owner', 'manager'],
-            ],
-            [
-                'view'       => 'cashier_sessions',
-                'label'      => __('nav_cashier_sessions', 'Cashier Sessions'),
-                'icon'       => 'fa-user-clock',
-                'permission' => 'reports.view',
-                'role_restricted' => ['owner', 'manager'],
-            ],
+        ],
+    ],
+    [
+        'id'    => 'reports',
+        'title' => __('nav_reports', 'Reports'),
+        'icon'  => 'fa-chart-column',
+        'items' => [
+            ['view' => 'reports', 'query' => ['report' => 'financial_summary'], 'label' => __('nav_report_financial_summary', 'Financial Summary'), 'icon' => 'fa-chart-line', 'permission' => 'reports.view'],
+            ['view' => 'reports', 'query' => ['report' => 'service_revenue'], 'label' => __('nav_report_service_revenue', 'Service Revenue'), 'icon' => 'fa-soap', 'permission' => 'reports.view'],
+            ['view' => 'reports', 'query' => ['report' => 'product_sales'], 'label' => __('nav_report_product_sales', 'Product Sales'), 'icon' => 'fa-box-open', 'permission' => 'reports.view'],
+            ['view' => 'reports', 'query' => ['report' => 'cancelled_orders'], 'label' => __('nav_report_cancelled_orders', 'Cancelled Orders'), 'icon' => 'fa-ban', 'permission' => 'reports.view', 'role_restricted' => ['owner', 'manager']],
+            ['view' => 'cash_movements', 'label' => __('nav_cash_movements', 'Cash Movements'), 'icon' => 'fa-money-bill-transfer', 'permission' => 'reports.view', 'role_restricted' => ['owner', 'manager']],
+            ['view' => 'cashier_sessions', 'label' => __('nav_cashier_sessions', 'Cashier Sessions'), 'icon' => 'fa-user-clock', 'permission' => 'reports.view', 'role_restricted' => ['owner', 'manager']],
+            ['view' => 'shift', 'query' => ['section' => 'daily_closes'], 'label' => __('nav_daily_close_reports', 'Daily Close Reports'), 'icon' => 'fa-file-invoice-dollar', 'permission' => 'pos.access', 'role_restricted' => ['owner', 'manager', 'system_admin']],
         ],
     ],
     [
@@ -340,7 +335,15 @@ foreach ($rawMenuGroups as $grp) {
             $itemCount = count($grp['items']);
             $hasActiveView = false;
             foreach ($grp['items'] as $it) {
-                if ($it['view'] === $effectiveView || $it['view'] === $currentView) {
+                $queryMatches = true;
+                foreach (($it['query'] ?? []) as $key => $value) {
+                    $currentQueryValue = $_GET[$key] ?? (($it['view'] === 'shift' && $key === 'section') ? 'desk' : (($it['view'] === 'reports' && $key === 'report') ? 'financial_summary' : (($it['view'] === 'reports' && $key === 'section') ? 'financial' : '')));
+                    if ((string)$currentQueryValue !== (string)$value) {
+                        $queryMatches = false;
+                        break;
+                    }
+                }
+                if ($queryMatches && ($it['view'] === $effectiveView || $it['view'] === $currentView)) {
                     $hasActiveView = true;
                     break;
                 }
@@ -380,8 +383,22 @@ foreach ($rawMenuGroups as $grp) {
                         <ul class="nav-sub-links" role="region" aria-labelledby="btn_<?= htmlspecialchars($grp['id']) ?>">
                             <?php foreach ($grp['items'] as $it): ?>
                                 <?php
-                                $itUrl = ($it['view'] === 'pos') ? get_pos_url() : APP_URL . '/index.php?view=' . $it['view'];
-                                $isItemActive = ($it['view'] === $effectiveView) || ($it['view'] === $currentView && !in_array($currentView, ['oil_care', 'extras'], true));
+                                $itemQuery = array_merge(['view' => $it['view']], $it['query'] ?? []);
+                                if ($it['view'] === 'reports' && $currentView === 'reports') {
+                                    foreach (['period', 'start_date', 'end_date'] as $dateFilterKey) {
+                                        if (isset($_GET[$dateFilterKey])) $itemQuery[$dateFilterKey] = $_GET[$dateFilterKey];
+                                    }
+                                }
+                                $itUrl = ($it['view'] === 'pos') ? get_pos_url() : APP_URL . '/index.php?' . http_build_query($itemQuery);
+                                $queryMatches = true;
+                                foreach (($it['query'] ?? []) as $key => $value) {
+                                    $currentQueryValue = $_GET[$key] ?? (($it['view'] === 'shift' && $key === 'section') ? 'desk' : (($it['view'] === 'reports' && $key === 'report') ? 'financial_summary' : (($it['view'] === 'reports' && $key === 'section') ? 'financial' : '')));
+                                    if ((string)$currentQueryValue !== (string)$value) {
+                                        $queryMatches = false;
+                                        break;
+                                    }
+                                }
+                                $isItemActive = $queryMatches && (($it['view'] === $effectiveView) || ($it['view'] === $currentView && !in_array($currentView, ['oil_care', 'extras'], true)));
                                 ?>
                                 <li>
                                     <a href="<?= $itUrl ?>" 
@@ -407,8 +424,22 @@ foreach ($rawMenuGroups as $grp) {
                         <ul class="sidebar-flyout-links">
                             <?php foreach ($grp['items'] as $it): ?>
                                 <?php
-                                $itUrl = ($it['view'] === 'pos') ? get_pos_url() : APP_URL . '/index.php?view=' . $it['view'];
-                                $isItemActive = ($it['view'] === $effectiveView) || ($it['view'] === $currentView && !in_array($currentView, ['oil_care', 'extras'], true));
+                                $itemQuery = array_merge(['view' => $it['view']], $it['query'] ?? []);
+                                if ($it['view'] === 'reports' && $currentView === 'reports') {
+                                    foreach (['period', 'start_date', 'end_date'] as $dateFilterKey) {
+                                        if (isset($_GET[$dateFilterKey])) $itemQuery[$dateFilterKey] = $_GET[$dateFilterKey];
+                                    }
+                                }
+                                $itUrl = ($it['view'] === 'pos') ? get_pos_url() : APP_URL . '/index.php?' . http_build_query($itemQuery);
+                                $queryMatches = true;
+                                foreach (($it['query'] ?? []) as $key => $value) {
+                                    $currentQueryValue = $_GET[$key] ?? (($it['view'] === 'shift' && $key === 'section') ? 'desk' : (($it['view'] === 'reports' && $key === 'report') ? 'financial_summary' : (($it['view'] === 'reports' && $key === 'section') ? 'financial' : '')));
+                                    if ((string)$currentQueryValue !== (string)$value) {
+                                        $queryMatches = false;
+                                        break;
+                                    }
+                                }
+                                $isItemActive = $queryMatches && (($it['view'] === $effectiveView) || ($it['view'] === $currentView && !in_array($currentView, ['oil_care', 'extras'], true)));
                                 ?>
                                 <li>
                                     <a href="<?= $itUrl ?>" 

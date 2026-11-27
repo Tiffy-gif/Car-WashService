@@ -9,7 +9,6 @@ require_once dirname(__DIR__, 2) . '/core/Helpers.php';
 require_once dirname(__DIR__, 2) . '/core/CashierControl.php';
 
 Auth::requirePermission('pos.access');
-$pageTitle = __('nav_shifts', 'Shifts & Cash Handover');
 $pdo = Database::getInstance();
 
 $currentUserId = (int)Auth::getUserId();
@@ -18,9 +17,25 @@ $currentUserRole = Auth::getRole() ?? 'cashier';
 $currentFullName = Auth::getFullName() ?? $currentUsername;
 $isManagerOrOwner = in_array($currentUserRole, ['owner', 'manager', 'system_admin'], true);
 $canCloseDay = $isManagerOrOwner || Auth::userHasPermission($currentUserId, 'daily_close.close') || Auth::userHasPermission($currentUserId, 'pos.close_day') || $currentUserRole === 'cashier';
+$canViewDailyCloses = $isManagerOrOwner;
+$shiftViews = ['desk' => 'Shift Desk', 'history' => 'Shift History'];
+if ($canViewDailyCloses) {
+    $shiftViews['daily_closes'] = 'Daily Close Reports';
+}
+$shiftView = (string)($_GET['section'] ?? 'desk');
+if (!isset($shiftViews[$shiftView])) {
+    $shiftView = 'desk';
+}
+$pageTitle = $shiftViews[$shiftView];
+$shiftViewDescriptions = [
+    'desk' => 'Start, hand over, and close the active cashier shift.',
+    'history' => 'Review cashier shift records and handovers.',
+    'daily_closes' => 'Review completed daily close and Z-report records.',
+];
 
 $message = null;
 $messageType = 'success';
+$messageAction = null;
 
 // Handle POST actions
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
@@ -34,7 +49,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $notes = trim($_POST['notes'] ?? '');
 
             $res = CashierControl::startShift($currentUserId, $currentFullName, $openingUsd, $openingKhr, null, null, $notes);
-            $message = "Shift started successfully with starting cash $" . number_format($openingUsd, 2) . ". <a href='slip.php?type=open&id=" . (int)$res['shift_id'] . "' target='_blank' class='btn btn-xs btn-primary ml-2' style='display:inline-flex;align-items:center;margin-left:8px;'><i class='fa-solid fa-print mr-1'></i> Print Open Float Slip</a>";
+            $message = "Shift started successfully with starting cash $" . number_format($openingUsd, 2) . ".";
+            $messageAction = ['href' => 'slip.php?type=open&id=' . (int)$res['shift_id'], 'label' => 'Print Open Float Slip'];
             $messageType = 'success';
         }
 
@@ -49,18 +65,18 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $notes = trim($_POST['notes'] ?? '');
 
             $res = CashierControl::endShift($shiftId, $countedUsd, $countedKhr, $outgoingPin, $incomingUsername, $incomingPin, $notes);
-            $printBtn = " <a href='slip.php?type=end&id={$shiftId}' target='_blank' class='btn btn-xs btn-primary ml-2' style='display:inline-flex;align-items:center;margin-left:8px;'><i class='fa-solid fa-print mr-1'></i> Print Slip</a>";
+            $messageAction = ['href' => 'slip.php?type=end&id=' . $shiftId, 'label' => 'Print Slip'];
 
             if (!empty($res['has_shortage'])) {
                 if ($isManagerOrOwner) {
-                    $message = "Shift handover complete. Warning: Cash shortage of $" . number_format($res['shortage_owed_usd'], 2) . " recorded." . $printBtn;
+                    $message = "Shift handover complete. Warning: Cash shortage of $" . number_format($res['shortage_owed_usd'], 2) . " recorded.";
                     $messageType = 'warning';
                 } else {
-                    $message = "Shift handover successfully signed off by both cashiers." . $printBtn;
+                    $message = "Shift handover successfully signed off by both cashiers.";
                     $messageType = 'success';
                 }
             } else {
-                $message = "Shift handover successfully completed and signed off." . $printBtn;
+                $message = "Shift handover successfully completed and signed off.";
                 $messageType = 'success';
             }
         }
@@ -74,13 +90,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $notes = trim($_POST['notes'] ?? '');
 
             $res = CashierControl::endShiftSolo($shiftId, $countedUsd, $countedKhr, $cashierPin, $notes);
-            $printBtn = " <a href='slip.php?type=end&id={$shiftId}' target='_blank' class='btn btn-xs btn-primary ml-2' style='display:inline-flex;align-items:center;margin-left:8px;'><i class='fa-solid fa-print mr-1'></i> Print Slip</a>";
+            $messageAction = ['href' => 'slip.php?type=end&id=' . $shiftId, 'label' => 'Print Slip'];
 
             if (!empty($res['has_shortage'])) {
-                $message = "Solo shift ended. Warning: Cash shortage of $" . number_format($res['shortage_owed_usd'], 2) . " recorded." . $printBtn;
+                $message = "Solo shift ended. Warning: Cash shortage of $" . number_format($res['shortage_owed_usd'], 2) . " recorded.";
                 $messageType = 'warning';
             } else {
-                $message = "Solo shift ended successfully. Cash drawer closed." . $printBtn;
+                $message = "Solo shift ended successfully. Cash drawer closed.";
                 $messageType = 'success';
             }
         }
@@ -95,8 +111,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
             $reason = trim($_POST['review_reason'] ?? '');
 
             $res = CashierControl::managerCloseReviewShift($shiftId, $countedUsd, $countedKhr, $mgrUsername, $mgrPin, $reason);
-            $printBtn = " <a href='slip.php?type=end&id={$shiftId}' target='_blank' class='btn btn-xs btn-primary ml-2' style='display:inline-flex;align-items:center;margin-left:8px;'><i class='fa-solid fa-print mr-1'></i> Print Slip</a>";
-            $message = "Overnight shift #{$shiftId} reviewed and closed by manager. Written reason recorded." . $printBtn;
+            $messageAction = ['href' => 'slip.php?type=end&id=' . $shiftId, 'label' => 'Print Slip'];
+            $message = "Overnight shift #{$shiftId} reviewed and closed by manager. Written reason recorded.";
             $messageType = 'success';
         }
 
@@ -136,8 +152,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
 
             $res = CashierControl::closeDayZReport($mgrUsername, $mgrPin, $countedUsd, $countedKhr, $notes);
             $closeRef = $res['close_id'] ?? $res['z_report_number'];
-            $printBtn = " <a href='slip.php?type=close_day&id={$closeRef}' target='_blank' class='btn btn-xs btn-primary ml-2' style='display:inline-flex;align-items:center;margin-left:8px;'><i class='fa-solid fa-print mr-1'></i> Print Z-Report Slip</a>";
-            $message = "Day closed successfully! Final Z-Report: {$res['z_report_number']}. Total Sales: $" . number_format($res['total_sales_usd'], 2) . $printBtn;
+            $messageAction = ['href' => 'slip.php?type=close_day&id=' . $closeRef, 'label' => 'Print Z-Report Slip'];
+            $message = "Day closed successfully! Final Z-Report: {$res['z_report_number']}. Total Sales: $" . number_format($res['total_sales_usd'], 2) . ".";
             $messageType = 'success';
         }
 
@@ -207,7 +223,7 @@ if ($isManagerOrOwner) {
     $shortagesOwed = [];
     $allSpotAudits = [];
     $dailyCloses = [];
-    if ($canCloseDay) {
+    if ($canViewDailyCloses) {
         $closesStmt = $pdo->query("SELECT * FROM pos_daily_closes ORDER BY close_date DESC, id DESC LIMIT 30");
         $dailyCloses = $closesStmt->fetchAll(PDO::FETCH_ASSOC);
     }
@@ -217,37 +233,23 @@ if ($isManagerOrOwner) {
 include dirname(__DIR__) . '/layouts/header.php';
 ?>
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
-    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-        <span class="badge badge-primary" style="padding: 6px 12px; font-size: 13px;">
-            <i class="fa-solid fa-hand-holding-dollar mr-1"></i> Cash &amp; Shift Operations
-        </span>
-        <span style="font-size: 13px; color: var(--text-muted);">
-            Blind Handovers, Drawer Audits &amp; Daily Z-Reports
-        </span>
+<div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 20px;">
+    <div>
+        <h1 style="margin: 0 0 5px; font-size: 22px;"><?= htmlspecialchars($pageTitle) ?></h1>
+        <p style="margin: 0; color: var(--text-muted);"><?= htmlspecialchars($shiftViewDescriptions[$shiftView]) ?></p>
     </div>
-    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-        <a href="<?= get_pos_url() ?>" class="btn btn-secondary">
-            <i class="fa-solid fa-cash-register mr-1"></i> POS Register
-        </a>
-        <button type="button" class="btn btn-secondary" onclick="openModal('drawerNoSaleModal')">
-            <i class="fa-solid fa-unlock-keyhole mr-1" style="color: #ea580c;"></i> Open Drawer (No Sale)
-        </button>
-        <?php if ($canCloseDay): ?>
-            <button type="button" class="btn btn-primary" onclick="openModal('closeDayModal')">
-                <i class="fa-solid fa-file-invoice-dollar mr-1"></i> Close Day &amp; Z-Report
-            </button>
-        <?php endif; ?>
-        <?php if ($isManagerOrOwner): ?>
-            <a href="?view=cash_movements" class="btn btn-secondary">
-                <i class="fa-solid fa-money-bill-transfer mr-1" style="color: #ea580c;"></i> Cash Movements
-            </a>
-            <a href="?view=cashier_sessions" class="btn btn-secondary">
-                <i class="fa-solid fa-user-clock mr-1" style="color: #2563eb;"></i> Cashier Sessions
-            </a>
-            <button type="button" class="btn btn-secondary" onclick="openModal('spotAuditModal')">
-                <i class="fa-solid fa-magnifying-glass-chart mr-1" style="color: #2563eb;"></i> Trigger Spot Audit
-            </button>
+    <div style="display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap;">
+        <?php if ($shiftView === 'desk'): ?>
+            <a href="<?= get_pos_url() ?>" class="btn btn-secondary"><i class="fa-solid fa-cash-register mr-1"></i> POS Register</a>
+            <button type="button" class="btn btn-secondary" onclick="openModal('drawerNoSaleModal')"><i class="fa-solid fa-unlock-keyhole mr-1" style="color: #ea580c;"></i> Open Drawer</button>
+            <?php if ($canCloseDay): ?>
+                <button type="button" class="btn btn-primary" onclick="openModal('closeDayModal')"><i class="fa-solid fa-file-invoice-dollar mr-1"></i> Close Day</button>
+            <?php endif; ?>
+            <?php if ($isManagerOrOwner): ?>
+                <button type="button" class="btn btn-secondary" onclick="openModal('spotAuditModal')"><i class="fa-solid fa-magnifying-glass-chart mr-1"></i> Spot Audit</button>
+            <?php endif; ?>
+        <?php elseif ($shiftView === 'daily_closes' && $canViewDailyCloses && $canCloseDay): ?>
+            <button type="button" class="btn btn-primary" onclick="openModal('closeDayModal')"><i class="fa-solid fa-file-invoice-dollar mr-1"></i> Close Day</button>
         <?php endif; ?>
     </div>
 </div>
@@ -256,6 +258,11 @@ include dirname(__DIR__) . '/layouts/header.php';
     <div style="background: <?= ($messageType === 'danger') ? 'var(--danger-bg)' : (($messageType === 'warning') ? '#fef3c7' : 'var(--success-bg)') ?>; color: <?= ($messageType === 'danger') ? 'var(--danger)' : (($messageType === 'warning') ? '#92400e' : 'var(--success)') ?>; padding: 14px 20px; border-radius: var(--radius-md); margin-bottom: 24px; display: flex; align-items: center; gap: 10px; border: 1px solid <?= ($messageType === 'danger') ? '#fecaca' : (($messageType === 'warning') ? '#fde68a' : '#bbf7d0') ?>;">
         <i class="fa-solid <?= ($messageType === 'danger') ? 'fa-circle-exclamation' : (($messageType === 'warning') ? 'fa-triangle-exclamation' : 'fa-circle-check') ?>"></i>
         <span style="font-weight: 600;"><?= htmlspecialchars($message) ?></span>
+        <?php if ($messageAction): ?>
+            <a href="<?= htmlspecialchars($messageAction['href'], ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener" class="btn btn-xs btn-primary" style="display: inline-flex; align-items: center; white-space: nowrap;">
+                <i class="fa-solid fa-print mr-1"></i> <?= htmlspecialchars($messageAction['label'], ENT_QUOTES, 'UTF-8') ?>
+            </a>
+        <?php endif; ?>
     </div>
 <?php endif; ?>
 
@@ -298,6 +305,7 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 <?php endif; ?>
 
+<?php if ($shiftView === 'history'): ?>
 <!-- Manager Review List of Overnight Shifts -->
 <?php if ($isManagerOrOwner && !empty($shiftsNeedingReview)): ?>
     <div class="card" style="border: 2px solid #f97316; margin-bottom: 24px;">
@@ -342,6 +350,9 @@ include dirname(__DIR__) . '/layouts/header.php';
     </div>
 <?php endif; ?>
 
+<?php endif; // history view ?>
+
+<?php if ($shiftView === 'desk'): ?>
 <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; align-items: start;">
     
     <!-- Active Shift Card -->
@@ -607,7 +618,9 @@ include dirname(__DIR__) . '/layouts/header.php';
         <?php endif; ?>
     </div>
 </div>
+<?php endif; // shift desk view ?>
 
+<?php if ($shiftView === 'history'): ?>
 <!-- Shift History Table -->
 <div class="card" style="margin-bottom: 24px;">
     <div class="card-header">
@@ -698,8 +711,9 @@ include dirname(__DIR__) . '/layouts/header.php';
         </table>
     </div>
 </div>
+<?php endif; // shift history view ?>
 
-<?php if ($canCloseDay): ?>
+<?php if ($shiftView === 'daily_closes' && $canViewDailyCloses): ?>
     <!-- Daily Closes / Z-Report History Table -->
     <div class="card">
         <div class="card-header">

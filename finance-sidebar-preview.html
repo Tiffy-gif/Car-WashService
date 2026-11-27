@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Finance Sidebar Preview</title>
+  <style>
+    :root { --navy:#101c32; --muted:#667b98; --line:#e0e8f1; --active:#e0f2fe; --blue:#0284c7; --orange:#f97316; --bg:#f5f8fc; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:flex; background:var(--bg); color:var(--navy); font:14px/1.4 Inter, "Segoe UI", Arial, sans-serif; }
+    aside { width:260px; min-height:100vh; overflow-y:auto; background:#fff; border-right:1px solid var(--line); padding:0 12px 20px; }
+    .brand { height:78px; margin:0 -12px 10px; padding:14px 16px; display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--line); }
+    .logo { width:40px; height:40px; display:grid; place-items:center; border:2px solid #d6e6f5; border-radius:10px; color:#0752a0; font-weight:900; box-shadow:0 2px 8px #dce8f3; }
+    .brand strong { display:block; font-size:15px; }
+    .brand small { display:block; margin-top:2px; color:var(--muted); font-size:10px; }
+    nav { display:grid; gap:4px; }
+    .item, .group-title { min-height:40px; display:flex; align-items:center; gap:12px; padding:0 12px; border-radius:10px; color:#536985; text-decoration:none; }
+    .item:hover { background:#f4f8fc; }
+    .icon { width:18px; text-align:center; font-size:15px; color:#71849d; }
+    .group { margin-top:4px; }
+    .group-title { justify-content:space-between; color:var(--navy); font-weight:700; }
+    .group-title span:first-child { display:flex; align-items:center; gap:12px; }
+    .group-title .icon { color:var(--blue); }
+    .children { display:grid; gap:3px; padding:2px 0 7px; }
+    .children .item { margin-left:0; padding-left:40px; }
+    .children .active { background:var(--active); color:var(--blue); font-weight:700; }
+    .children .active .icon { color:var(--blue); }
+    .divider { height:1px; margin:9px 8px; background:var(--line); }
+    main { flex:1; padding:34px; }
+    .preview-card { max-width:720px; padding:28px; border:1px solid var(--line); border-radius:16px; background:white; box-shadow:0 8px 24px #152c4910; }
+    h1 { margin:0 0 8px; font-size:23px; }
+    p { margin:0; color:var(--muted); }
+    .note { margin-top:20px; padding:14px 16px; border:1px solid #cfe8f9; border-radius:10px; background:#f0f9ff; color:#31536e; }
+    .note strong { color:#0c4a6e; }
+    @media (max-width:700px) { aside { width:240px; } main { padding:18px; } }
+  </style>
+</head>
+<body>
+  <aside aria-label="Backoffice navigation preview">
+    <div class="brand"><div class="logo">LQ</div><div><strong>My Car Wash</strong><small>សេវាកម្មលាងរថយន្ត</small></div></div>
+    <nav>
+      <a class="item" href="#"><span class="icon">◷</span>Dashboard</a>
+      <section class="group"><div class="group-title"><span><span class="icon">▣</span>Sales &amp; Operations</span><span>⌄</span></div><div class="children">
+        <a class="item" href="#"><span class="icon">▤</span>New Order / POS</a><a class="item" href="#"><span class="icon">▣</span>Appointments</a><a class="item" href="#"><span class="icon">☷</span>Orders &amp; Invoices</a><a class="item" href="#"><span class="icon">◷</span>Shifts &amp; Daily Close</a>
+      </div></section>
+      <section class="group"><div class="group-title"><span><span class="icon">♧</span>Customers &amp; Vehicles</span><span>⌄</span></div></section>
+      <section class="group"><div class="group-title"><span><span class="icon">◉</span>Services</span><span>⌃</span></div><div class="children"><a class="item" href="#"><span class="icon">☷</span>Services &amp; Pricing</a><a class="item" href="#"><span class="icon">◆</span>Service Categories</a></div></section>
+      <section class="group"><div class="group-title"><span><span class="icon">▣</span>Products</span><span>⌃</span></div><div class="children"><a class="item" href="#"><span class="icon">▣</span>Product List</a><a class="item" href="#"><span class="icon">◆</span>Product Categories</a></div></section>
+      <section class="group"><div class="group-title"><span><span class="icon">▦</span>Stock</span><span>⌃</span></div><div class="children"><a class="item" href="#"><span class="icon">▦</span>Manage Stock</a><a class="item" href="#"><span class="icon">↧</span>Low Stock</a><a class="item" href="#"><span class="icon">⇄</span>Stock Movements</a><a class="item" href="#"><span class="icon">⚗</span>Washing Supplies</a></div></section>
+      <section class="group"><div class="group-title"><span><span class="icon">＄</span>Finance</span><span>⌃</span></div><div class="children">
+        <a class="item" href="#"><span class="icon">▣</span>Operating Expenses</a>
+        <a class="item" href="#"><span class="icon">◆</span>Expense Categories</a>
+        <a class="item active" href="#"><span class="icon">▥</span>Financial Reports &amp; P&amp;L</a>
+        <a class="item" href="#"><span class="icon">⇄</span>Cash Movements</a>
+        <a class="item" href="#"><span class="icon">◷</span>Cashier Sessions</a>
+      </div></section>
+      <section class="group"><div class="group-title"><span><span class="icon">☷</span>Administration</span><span>⌄</span></div></section>
+    </nav>
+  </aside>
+  <main><div class="preview-card"><h1>Sidebar preview</h1><p>Finance groups the pages used to track expenses, business results, and cash accountability.</p><div class="note"><strong>Suggested placement:</strong> keep Shifts &amp; Daily Close under Sales &amp; Operations. Keep Cash Movements and Cashier Sessions under Finance because they support cash reconciliation and financial review.</div></div></main>
+</body>
+</html>

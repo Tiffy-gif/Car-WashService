@@ -9,61 +9,91 @@ require_once dirname(__DIR__, 2) . '/core/Helpers.php';
 require_once dirname(__DIR__, 2) . '/core/OrderCancellation.php';
 
 Auth::requirePermission('reports.view');
-$pageTitle = __('nav_reports');
+$pageTitle = __('nav_reports', 'Reports');
 $pdo = Database::getInstance();
 $canViewProfit = Auth::canViewProfit();
+$legacySection = strtolower(trim((string)($_GET['section'] ?? '')));
+$legacyReportMap = ['financial' => 'financial_summary', 'operations' => 'financial_summary', 'staff_cash' => 'cancelled_orders'];
+$reportAliases = ['cashier_shift' => 'cancelled_orders'];
+$requestedReport = strtolower(trim((string)($_GET['report'] ?? $legacyReportMap[$legacySection] ?? 'financial_summary')));
+$reportKey = $reportAliases[$requestedReport] ?? $requestedReport;
+$availableReports = ['financial_summary', 'service_revenue', 'product_sales', 'cancelled_orders'];
+if (!in_array($reportKey, $availableReports, true)) {
+    $reportKey = 'financial_summary';
+}
+$excludedExports = ['bay_utilization', 'tech_efficiency', 'bottlenecks', 'timecards'];
+if (isset($_GET['export']) && in_array((string)$_GET['export'], $excludedExports, true)) {
+    http_response_code(404);
+    exit('This report is no longer available.');
+}
+$reportTitles = [
+    'financial_summary' => 'Financial Summary', 'service_revenue' => 'Service Revenue',
+    'product_sales' => 'Product Sales', 'cancelled_orders' => 'Cancelled Orders',
+];
+$reportTitle = $reportTitles[$reportKey];
+$reportDescriptions = [
+    'financial_summary' => 'Review revenue, payments, costs, and profit for the selected period.',
+    'service_revenue' => 'Compare wash packages, vehicle types, and maintenance service revenue.',
+    'product_sales' => 'Review products and parts sold during the selected period.',
+    'cancelled_orders' => 'Review cancelled transactions and the revenue they affected.',
+];
+$pageTitle = $reportTitle;
 
 // Period Filter
 $period = $_GET['period'] ?? 'this_month';
 $startDate = $_GET['start_date'] ?? date('Y-m-01');
 $endDate = $_GET['end_date'] ?? date('Y-m-d');
 
-// Device Filter (all, web, or POS device ID)
-$selectedDevice = $_GET['device'] ?? 'all';
-$deviceWhere = "";
-$selectedDeviceName = __('all_devices');
+// Reports are site-wide because this business currently has one checkout station.
 
-if ($selectedDevice === 'web') {
-    $deviceWhere = " AND (o.pos_device_id IS NULL OR o.pos_device_id = 0 OR o.source = 'web')";
-    $selectedDeviceName = __('back_office_web');
-} elseif (is_numeric($selectedDevice) && (int)$selectedDevice > 0) {
-    $devId = (int)$selectedDevice;
-    $deviceWhere = " AND o.pos_device_id = {$devId}";
-    $devRow = $pdo->query("SELECT device_name, device_uid FROM pos_devices WHERE id = {$devId}")->fetch(PDO::FETCH_ASSOC);
-    if ($devRow) {
-        $selectedDeviceName = $devRow['device_name'] . ' (' . $devRow['device_uid'] . ')';
-    }
-} else {
-    $selectedDevice = 'all';
+// Build inclusive calendar periods as half-open ranges. Comparing ISO date strings
+// works on both MySQL and SQLite and keeps timestamps on the final day included.
+$validDate = static function (string $value): bool {
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+    return $date !== false && $date->format('Y-m-d') === $value;
+};
+$today = new DateTimeImmutable(date('Y-m-d'));
+$periodStart = $today->format('Y-m-d');
+$periodEnd = $today->modify('+1 day')->format('Y-m-d');
+
+if (!in_array($period, ['today', 'this_week', 'this_month', 'this_year', 'custom'], true)) {
+    $period = 'this_month';
 }
-
-// Registered devices list
-$allRegisteredDevices = $pdo->query("SELECT id, device_uid, device_name, location, status FROM pos_devices ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC);
-
-$orderDateWhere = "";
-$expenseWhere = "";
-$dateParams = [];
-
-// Use paid_at (or created_at if paid_at is null) in shop timezone for all order reporting
-if ($period === 'today') {
-    $orderDateWhere = "AND DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()";
-    $expenseWhere = "AND expense_date = CURDATE()";
-} elseif ($period === 'this_week') {
-    $orderDateWhere = "AND YEARWEEK(COALESCE(o.paid_at, o.created_at), 1) = YEARWEEK(CURDATE(), 1)";
-    $expenseWhere = "AND YEARWEEK(expense_date, 1) = YEARWEEK(CURDATE(), 1)";
+if ($period === 'this_week') {
+    $periodStart = $today->modify('monday this week')->format('Y-m-d');
+    $periodEnd = $today->modify('+1 day')->format('Y-m-d');
 } elseif ($period === 'this_month') {
-    $orderDateWhere = "AND MONTH(COALESCE(o.paid_at, o.created_at)) = MONTH(CURDATE()) AND YEAR(COALESCE(o.paid_at, o.created_at)) = YEAR(CURDATE())";
-    $expenseWhere = "AND MONTH(expense_date) = MONTH(CURDATE()) AND YEAR(expense_date) = YEAR(CURDATE())";
+    $periodStart = $today->modify('first day of this month')->format('Y-m-d');
+    $periodEnd = $today->modify('+1 day')->format('Y-m-d');
 } elseif ($period === 'this_year') {
-    $orderDateWhere = "AND YEAR(COALESCE(o.paid_at, o.created_at)) = YEAR(CURDATE())";
-    $expenseWhere = "AND YEAR(expense_date) = YEAR(CURDATE())";
-} elseif ($period === 'custom' && $startDate && $endDate) {
-    $orderDateWhere = "AND DATE(COALESCE(o.paid_at, o.created_at)) BETWEEN ? AND ?";
-    $expenseWhere = "AND expense_date BETWEEN ? AND ?";
-    $dateParams = [$startDate, $endDate];
+    $periodStart = $today->format('Y-01-01');
+    $periodEnd = $today->modify('+1 day')->format('Y-m-d');
+} elseif ($period === 'custom') {
+    if (!$validDate((string)$startDate) || !$validDate((string)$endDate)) {
+        $period = 'this_month';
+        $periodStart = $today->modify('first day of this month')->format('Y-m-d');
+        $periodEnd = $today->modify('first day of next month')->format('Y-m-d');
+        $startDate = $periodStart;
+        $endDate = $today->format('Y-m-d');
+    } else {
+        if ($startDate > $endDate) {
+            [$startDate, $endDate] = [$endDate, $startDate];
+        }
+        $periodStart = $startDate;
+        $periodEnd = (new DateTimeImmutable($endDate))->modify('+1 day')->format('Y-m-d');
+    }
 }
 
-$orderWhere = $orderDateWhere . $deviceWhere;
+if ($period !== 'custom') {
+    $startDate = $periodStart;
+    $endDate = $today->format('Y-m-d');
+}
+
+$orderDateWhere = "AND COALESCE(o.paid_at, o.created_at) >= ? AND COALESCE(o.paid_at, o.created_at) < ?";
+$expenseWhere = "AND expense_date >= ? AND expense_date < ?";
+$dateParams = [$periodStart, $periodEnd];
+
+$orderWhere = $orderDateWhere;
 
 // Check if refund columns exist (backward compatibility across SQLite and MySQL)
 $hasRefundCols = false;
@@ -156,16 +186,11 @@ $washerComm = 0.00;
 $mechanicComm = 0.00;
 $totalComm = 0.00;
 
-// 3. Operating Expenses
-if ($selectedDevice === 'all') {
-    $expSql = "SELECT COALESCE(SUM(amount_usd), 0) as total_expenses FROM expenses WHERE 1=1 {$expenseWhere}";
-    $expStmt = $pdo->prepare($expSql);
-    $expStmt->execute($dateParams);
-    $totalExp = (float)$expStmt->fetchColumn();
-} else {
-    // Single device or web selected; shop-level operating expenses do not apply to an individual POS terminal
-    $totalExp = 0.00;
-}
+// 3. Operating Expenses (shop-wide; exclude cancelled entries)
+$expSql = "SELECT COALESCE(SUM(amount_usd), 0) as total_expenses FROM expenses WHERE (is_active IS NULL OR is_active = 1) {$expenseWhere}";
+$expStmt = $pdo->prepare($expSql);
+$expStmt->execute($dateParams);
+$totalExp = (float)$expStmt->fetchColumn();
 
 // 4. Revenue Split & Cost of Goods Sold (COGS)
 $splitSql = "
@@ -305,74 +330,6 @@ $vehStmt = $pdo->prepare($vehSql);
 $vehStmt->execute($dateParams);
 $vehicleBreakdown = $vehStmt->fetchAll();
 
-// 7. Income by Washer (Filter strictly by role = 'washer')
-$wSql = "
-    SELECT u.full_name, COUNT(DISTINCT o.id) as jobs_count,
-           COALESCE(SUM(o.total_usd), 0) as revenue_handled
-    FROM order_washers ow
-    JOIN orders o ON ow.order_id = o.id
-    JOIN users u ON ow.washer_id = u.id
-    WHERE (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND u.role = 'washer' {$orderWhere}
-    GROUP BY u.id, u.full_name
-    ORDER BY revenue_handled DESC
-";
-$wStmt = $pdo->prepare($wSql);
-$wStmt->execute($dateParams);
-$washerBreakdown = $wStmt->fetchAll();
-
-// 7b. Waiting & Washing Duration Breakdown per Vehicle
-$timeSql = "
-    SELECT o.id, o.order_number, o.plate_number, o.vehicle_type, o.customer_name,
-           o.status, o.created_at, o.arrived_at, o.started_at, o.finished_at, o.paid_at,
-           b.bay_name,
-           GROUP_CONCAT(DISTINCT oi.service_name SEPARATOR ', ') as service_names
-    FROM orders o
-    LEFT JOIN bays b ON o.bay_id = b.id
-    LEFT JOIN order_items oi ON o.id = oi.order_id
-    WHERE o.status != 'cancelled' {$orderWhere}
-    GROUP BY o.id
-    ORDER BY COALESCE(o.finished_at, o.started_at, o.created_at) DESC
-    LIMIT 100
-";
-$timeStmt = $pdo->prepare($timeSql);
-$timeStmt->execute($dateParams);
-$serviceTimes = $timeStmt->fetchAll(PDO::FETCH_ASSOC);
-
-$totalWaitMins = 0;
-$countWait = 0;
-$totalWashMins = 0;
-$countWash = 0;
-foreach ($serviceTimes as &$st) {
-    $arrivedTs = strtotime($st['arrived_at'] ?: $st['created_at']);
-    $startedTs = !empty($st['started_at']) ? strtotime($st['started_at']) : null;
-    $finishedTs = !empty($st['finished_at']) ? strtotime($st['finished_at']) : (!empty($st['paid_at']) ? strtotime($st['paid_at']) : null);
-
-    $waitMins = null;
-    if ($arrivedTs && $startedTs && $startedTs >= $arrivedTs) {
-        $waitMins = max(0, (int)round(($startedTs - $arrivedTs) / 60));
-        $totalWaitMins += $waitMins;
-        $countWait++;
-    }
-
-    $washMins = null;
-    if ($startedTs && $finishedTs && $finishedTs >= $startedTs) {
-        $washMins = max(0, (int)round(($finishedTs - $startedTs) / 60));
-        $totalWashMins += $washMins;
-        $countWash++;
-    }
-
-    $totalDuration = ($waitMins !== null && $washMins !== null) ? ($waitMins + $washMins) : ($finishedTs && $arrivedTs && $finishedTs >= $arrivedTs ? (int)round(($finishedTs - $arrivedTs) / 60) : null);
-
-    $st['wait_minutes'] = $waitMins;
-    $st['wash_minutes'] = $washMins;
-    $st['total_minutes'] = $totalDuration;
-}
-unset($st);
-
-$avgWaitMins = $countWait > 0 ? (int)round($totalWaitMins / $countWait) : 0;
-$avgWashMins = $countWash > 0 ? (int)round($totalWashMins / $countWash) : 0;
-$avgTotalMins = $avgWaitMins + $avgWashMins;
-
 // 8. Payment Method Split
 $paySql = "
     SELECT o.payment_method, COUNT(*) as count, COALESCE(SUM(o.total_usd), 0) as method_total
@@ -384,189 +341,6 @@ $paySql = "
 $payStmt = $pdo->prepare($paySql);
 $payStmt->execute($dateParams);
 $payBreakdown = $payStmt->fetchAll();
-
-// 9. Sales by POS Device Breakdown (All Registered Devices + Web POS)
-$devTotalPaidOrders = 0;
-$devTotalGross = 0.00;
-$devTotalDiscount = 0.00;
-$devTotalNet = 0.00;
-$devTotalCash = 0.00;
-$devTotalAba = 0.00;
-$devTotalKhqr = 0.00;
-$devTotalUnpaid = 0.00;
-$devTotalCancelled = 0;
-
-$devQuerySql = "
-    SELECT 
-        pd.id,
-        pd.device_name,
-        pd.location,
-        pd.device_uid,
-        pd.status,
-        COUNT(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN 1 END) as paid_orders_count,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.subtotal_usd ELSE 0 END), 0) as gross_sales,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.discount_usd ELSE 0 END), 0) as total_discount,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.total_usd ELSE 0 END), 0) as net_sales,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'cash' THEN o.total_usd ELSE 0 END), 0) as cash_total,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'aba' THEN o.total_usd ELSE 0 END), 0) as aba_total,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'khqr' THEN o.total_usd ELSE 0 END), 0) as khqr_total,
-        COALESCE(SUM(CASE WHEN o.status != 'cancelled' AND o.payment_status = 'unpaid' THEN o.total_usd ELSE 0 END), 0) as unpaid_total,
-        COUNT(CASE WHEN o.status = 'cancelled' THEN 1 END) as cancelled_count
-    FROM pos_devices pd
-    LEFT JOIN orders o ON o.pos_device_id = pd.id {$orderDateWhere}
-    GROUP BY pd.id, pd.device_name, pd.location, pd.device_uid, pd.status
-    ORDER BY net_sales DESC, pd.id ASC
-";
-$devQueryStmt = $pdo->prepare($devQuerySql);
-$devQueryStmt->execute($dateParams);
-$registeredDevRows = $devQueryStmt->fetchAll(PDO::FETCH_ASSOC);
-
-$webQuerySql = "
-    SELECT 
-        0 as id,
-        'Back Office (Web POS)' as device_name,
-        'Admin Desk' as location,
-        'WEB' as device_uid,
-        'active' as status,
-        COUNT(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN 1 END) as paid_orders_count,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.subtotal_usd ELSE 0 END), 0) as gross_sales,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.discount_usd ELSE 0 END), 0) as total_discount,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.total_usd ELSE 0 END), 0) as net_sales,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'cash' THEN o.total_usd ELSE 0 END), 0) as cash_total,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'aba' THEN o.total_usd ELSE 0 END), 0) as aba_total,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'khqr' THEN o.total_usd ELSE 0 END), 0) as khqr_total,
-        COALESCE(SUM(CASE WHEN o.status != 'cancelled' AND o.payment_status = 'unpaid' THEN o.total_usd ELSE 0 END), 0) as unpaid_total,
-        COUNT(CASE WHEN o.status = 'cancelled' THEN 1 END) as cancelled_count
-    FROM orders o
-    WHERE (o.pos_device_id IS NULL OR o.pos_device_id = 0 OR o.source = 'web') {$orderDateWhere}
-";
-$webQueryStmt = $pdo->prepare($webQuerySql);
-$webQueryStmt->execute($dateParams);
-$webRow = $webQueryStmt->fetch(PDO::FETCH_ASSOC) ?: [
-    'id' => 0,
-    'device_name' => 'Back Office (Web POS)',
-    'location' => 'Admin Desk',
-    'device_uid' => 'WEB',
-    'status' => 'active',
-    'paid_orders_count' => 0,
-    'gross_sales' => 0.00,
-    'total_discount' => 0.00,
-    'net_sales' => 0.00,
-    'cash_total' => 0.00,
-    'aba_total' => 0.00,
-    'khqr_total' => 0.00,
-    'unpaid_total' => 0.00,
-    'cancelled_count' => 0
-];
-
-$allDeviceReportRows = array_merge($registeredDevRows, [$webRow]);
-
-foreach ($allDeviceReportRows as &$dr) {
-    $dr['paid_orders_count'] = (int)$dr['paid_orders_count'];
-    $dr['gross_sales'] = (float)$dr['gross_sales'];
-    $dr['total_discount'] = (float)$dr['total_discount'];
-    $dr['net_sales'] = (float)$dr['net_sales'];
-    $dr['cash_total'] = (float)$dr['cash_total'];
-    $dr['aba_total'] = (float)$dr['aba_total'];
-    $dr['khqr_total'] = (float)$dr['khqr_total'];
-    $dr['unpaid_total'] = (float)$dr['unpaid_total'];
-    $dr['cancelled_count'] = (int)$dr['cancelled_count'];
-
-    $devTotalPaidOrders += $dr['paid_orders_count'];
-    $devTotalGross += $dr['gross_sales'];
-    $devTotalDiscount += $dr['total_discount'];
-    $devTotalNet += $dr['net_sales'];
-    $devTotalCash += $dr['cash_total'];
-    $devTotalAba += $dr['aba_total'];
-    $devTotalKhqr += $dr['khqr_total'];
-    $devTotalUnpaid += $dr['unpaid_total'];
-    $devTotalCancelled += $dr['cancelled_count'];
-}
-unset($dr);
-
-// 10. Sales by Cashier Breakdown (Respects current device filter: shop-wide or Device x Cashier)
-$cashierQuerySql = "
-    SELECT 
-        COALESCE(u.id, 0) as cashier_id,
-        COALESCE(u.full_name, 'Unassigned / System') as cashier_name,
-        COALESCE(u.role, 'staff') as cashier_role,
-        COUNT(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN 1 END) as paid_orders_count,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.subtotal_usd ELSE 0 END), 0) as gross_sales,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.discount_usd ELSE 0 END), 0) as total_discount,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' THEN o.total_usd ELSE 0 END), 0) as net_sales,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'cash' THEN o.total_usd ELSE 0 END), 0) as cash_total,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'aba' THEN o.total_usd ELSE 0 END), 0) as aba_total,
-        COALESCE(SUM(CASE WHEN (o.payment_status = 'paid' OR o.status = 'paid') AND o.status != 'cancelled' AND o.payment_method = 'khqr' THEN o.total_usd ELSE 0 END), 0) as khqr_total,
-        COALESCE(SUM(CASE WHEN o.status != 'cancelled' AND o.payment_status = 'unpaid' THEN o.total_usd ELSE 0 END), 0) as unpaid_total,
-        COUNT(CASE WHEN o.status = 'cancelled' THEN 1 END) as cancelled_count
-    FROM orders o
-    LEFT JOIN users u ON o.cashier_id = u.id
-    WHERE 1=1 {$orderWhere}
-    GROUP BY u.id, u.full_name, u.role
-    ORDER BY net_sales DESC, paid_orders_count DESC
-";
-$cashierQueryStmt = $pdo->prepare($cashierQuerySql);
-$cashierQueryStmt->execute($dateParams);
-$cashierSalesRows = $cashierQueryStmt->fetchAll(PDO::FETCH_ASSOC);
-
-$cashierTotalPaidOrders = 0;
-$cashierTotalGross = 0.00;
-$cashierTotalDiscount = 0.00;
-$cashierTotalNet = 0.00;
-$cashierTotalCash = 0.00;
-$cashierTotalAba = 0.00;
-$cashierTotalKhqr = 0.00;
-$cashierTotalUnpaid = 0.00;
-$cashierTotalCancelled = 0;
-
-foreach ($cashierSalesRows as &$cr) {
-    $cr['paid_orders_count'] = (int)$cr['paid_orders_count'];
-    $cr['gross_sales'] = (float)$cr['gross_sales'];
-    $cr['total_discount'] = (float)$cr['total_discount'];
-    $cr['net_sales'] = (float)$cr['net_sales'];
-    $cr['cash_total'] = (float)$cr['cash_total'];
-    $cr['aba_total'] = (float)$cr['aba_total'];
-    $cr['khqr_total'] = (float)$cr['khqr_total'];
-    $cr['unpaid_total'] = (float)$cr['unpaid_total'];
-    $cr['cancelled_count'] = (int)$cr['cancelled_count'];
-
-    $cashierTotalPaidOrders += $cr['paid_orders_count'];
-    $cashierTotalGross += $cr['gross_sales'];
-    $cashierTotalDiscount += $cr['total_discount'];
-    $cashierTotalNet += $cr['net_sales'];
-    $cashierTotalCash += $cr['cash_total'];
-    $cashierTotalAba += $cr['aba_total'];
-    $cashierTotalKhqr += $cr['khqr_total'];
-    $cashierTotalUnpaid += $cr['unpaid_total'];
-    $cashierTotalCancelled += $cr['cancelled_count'];
-}
-unset($cr);
-
-require_once dirname(__DIR__, 2) . '/core/PerformanceAnalytics.php';
-require_once dirname(__DIR__, 2) . '/core/TimecardManager.php';
-
-$perfStartDate = $startDate;
-$perfEndDate = $endDate;
-if ($period === 'today') {
-    $perfStartDate = date('Y-m-d');
-    $perfEndDate = date('Y-m-d');
-} elseif ($period === 'this_week') {
-    $perfStartDate = date('Y-m-d', strtotime('monday this week'));
-    $perfEndDate = date('Y-m-d');
-} elseif ($period === 'this_month') {
-    $perfStartDate = date('Y-m-01');
-    $perfEndDate = date('Y-m-d');
-} elseif ($period === 'this_year') {
-    $perfStartDate = date('Y-01-01');
-    $perfEndDate = date('Y-m-d');
-}
-
-$cphReport = PerformanceAnalytics::getCarsPerLaborHour($pdo, $perfStartDate, $perfEndDate);
-$bayReport = PerformanceAnalytics::getBayUtilization($pdo, $perfStartDate, $perfEndDate);
-$waitReport = PerformanceAnalytics::getAverageWaitByService($pdo, $perfStartDate, $perfEndDate);
-$techReport = PerformanceAnalytics::getTechnicianEfficiency7Days($pdo);
-$patternReport = PerformanceAnalytics::getBottleneckAndIdlePatterns($pdo, $perfStartDate, $perfEndDate);
-$timecardList = TimecardManager::getTimecards($pdo, $perfStartDate, $perfEndDate);
 
 // 9. Cancelled Orders & Lost Revenue Analytics (Visible to Owner & Manager)
 $canViewCancelReport = in_array(Auth::getRole(), ['owner', 'manager'], true);
@@ -580,20 +354,10 @@ if ($canViewCancelReport) {
     $cancelDateWhere = "";
     $cancelParams = [];
 
-    if ($period === 'today') {
-        $cancelDateWhere = "AND DATE(COALESCE(o.cancelled_at, o.created_at)) = CURDATE()";
-    } elseif ($period === 'this_week') {
-        $cancelDateWhere = "AND YEARWEEK(COALESCE(o.cancelled_at, o.created_at), 1) = YEARWEEK(CURDATE(), 1)";
-    } elseif ($period === 'this_month') {
-        $cancelDateWhere = "AND MONTH(COALESCE(o.cancelled_at, o.created_at)) = MONTH(CURDATE()) AND YEAR(COALESCE(o.cancelled_at, o.created_at)) = YEAR(CURDATE())";
-    } elseif ($period === 'this_year') {
-        $cancelDateWhere = "AND YEAR(COALESCE(o.cancelled_at, o.created_at)) = YEAR(CURDATE())";
-    } elseif ($period === 'custom' && $startDate && $endDate) {
-        $cancelDateWhere = "AND DATE(COALESCE(o.cancelled_at, o.created_at)) BETWEEN ? AND ?";
-        $cancelParams = [$startDate, $endDate];
-    }
+    $cancelDateWhere = "AND COALESCE(o.cancelled_at, o.created_at) >= ? AND COALESCE(o.cancelled_at, o.created_at) < ?";
+    $cancelParams = [$periodStart, $periodEnd];
 
-    $cancelWhere = $cancelDateWhere . $deviceWhere;
+    $cancelWhere = $cancelDateWhere;
 
     $hasCancelCodeCol = false;
     try {
@@ -715,7 +479,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'cancellations') {
         'Period:', strtoupper(str_replace('_', ' ', $period)),
         'Start Date:', $startDate,
         'End Date:', $endDate,
-        'Device Filter:', $selectedDeviceName,
+        'Scope:', 'Whole site',
         'Timezone:', 'Asia/Phnom_Penh (UTC+7)',
         'Generated At:', date('Y-m-d H:i:s'),
         'Generated By:', (Auth::getUserName() ?: Auth::getUsername()) . ' (' . ucfirst(Auth::getRole()) . ')'
@@ -784,139 +548,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'cancellations') {
     exit;
 }
 
-// CSV Export for Bay Utilization
-if (isset($_GET['export']) && $_GET['export'] === 'bay_utilization') {
-    Auth::requirePermission('reports.export');
-    $filename = "CarWash_Bay_Utilization_" . $period . "_" . date('Ymd_His') . ".csv";
-    header('Content-Type: text/csv; charset=UTF-8');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    header('Pragma: no-cache');
-    header('Expires: 0');
-
-    $out = fopen('php://output', 'w');
-    fwrite($out, "\xEF\xBB\xBF");
-    fputcsv($out, ['AQUAGLEAM CAR WASH - BAY UTILIZATION REPORT']);
-    fputcsv($out, ['Period:', strtoupper(str_replace('_', ' ', $period)), 'Start Date:', $perfStartDate, 'End Date:', $perfEndDate, 'Days Measured:', $bayReport['days_count'], 'Shop Hours/Day:', $bayReport['daily_open_hours']]);
-    fputcsv($out, ['Overall Shop Bay Utilization:', $bayReport['overall_utilization_percent'] . '%', 'Total Busy Mins:', $bayReport['total_busy_minutes'], 'Total Available Mins:', $bayReport['total_available_minutes']]);
-    fputcsv($out, []);
-    fputcsv($out, ['Bay Number', 'Bay Name (EN)', 'Bay Name (KM)', 'Skill Tag', 'Cars Handled', 'Busy Minutes', 'Available Minutes', 'Utilization %', 'Idle Minutes', 'Idle %', 'Revenue Generated (USD)']);
-    foreach ($bayReport['bays'] as $b) {
-        fputcsv($out, [
-            $b['bay_number'],
-            $b['name_en'],
-            $b['name_km'],
-            $b['skill_tag'],
-            $b['orders_count'],
-            $b['busy_minutes'],
-            $b['available_minutes'],
-            $b['utilization_percent'] . '%',
-            $b['idle_minutes'],
-            $b['idle_percent'] . '%',
-            number_format($b['total_usd'], 2)
-        ]);
-    }
-    fclose($out);
-    exit;
-}
-
-// CSV Export for Technician & Washer Efficiency
-if (isset($_GET['export']) && $_GET['export'] === 'tech_efficiency') {
-    Auth::requirePermission('reports.export');
-    $filename = "CarWash_Tech_Efficiency_" . $period . "_" . date('Ymd_His') . ".csv";
-    header('Content-Type: text/csv; charset=UTF-8');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    header('Pragma: no-cache');
-    header('Expires: 0');
-
-    $out = fopen('php://output', 'w');
-    fwrite($out, "\xEF\xBB\xBF");
-    fputcsv($out, ['AQUAGLEAM CAR WASH - TECHNICIAN & WASHER EFFICIENCY REPORT']);
-    fputcsv($out, ['Window:', 'Rolling 7 Days', 'Overall Efficiency:', $techReport['overall_efficiency_percent'] . '%', 'Standard Hours:', $techReport['total_standard_hours'], 'Actual Hours:', $techReport['total_actual_hours']]);
-    fputcsv($out, []);
-    fputcsv($out, ['Staff ID', 'Staff Member', 'Role', 'Completed Jobs', 'Standard Minutes', 'Actual Minutes', 'Efficiency %', 'Speed Factor']);
-    foreach ($techReport['staff'] as $st) {
-        fputcsv($out, [
-            $st['staff_id'],
-            $st['staff_name'],
-            strtoupper($st['staff_role']),
-            $st['completed_jobs'],
-            $st['standard_minutes'],
-            $st['actual_minutes'],
-            $st['efficiency_percent'] . '%',
-            $st['factor'] . 'x'
-        ]);
-    }
-    fclose($out);
-    exit;
-}
-
-// CSV Export for Bottlenecks & Idle Patterns
-if (isset($_GET['export']) && $_GET['export'] === 'bottlenecks') {
-    Auth::requirePermission('reports.export');
-    $filename = "CarWash_Bottlenecks_Patterns_" . $period . "_" . date('Ymd_His') . ".csv";
-    header('Content-Type: text/csv; charset=UTF-8');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    header('Pragma: no-cache');
-    header('Expires: 0');
-
-    $out = fopen('php://output', 'w');
-    fwrite($out, "\xEF\xBB\xBF");
-    fputcsv($out, ['AQUAGLEAM CAR WASH - BOTTLENECK & IDLE TIME PATTERN REPORT']);
-    fputcsv($out, ['Period:', strtoupper(str_replace('_', ' ', $period)), 'Start Date:', $perfStartDate, 'End Date:', $perfEndDate]);
-    fputcsv($out, []);
-    fputcsv($out, ['--- OPERATIONAL INSIGHTS & BOTTLENECK HIGHLIGHTS ---']);
-    foreach ($patternReport['insights'] as $ins) {
-        fputcsv($out, [strtoupper($ins['type']), $ins['title'], $ins['text']]);
-    }
-    fputcsv($out, []);
-    fputcsv($out, ['--- PATTERNS BY DAY OF WEEK & HOUR OF DAY ---']);
-    fputcsv($out, ['Day of Week', 'Hour (24h)', 'Vehicle Volume', 'Avg Wait (Minutes)', 'Avg Service Duration (Minutes)']);
-    foreach ($patternReport['matrix'] as $pm) {
-        fputcsv($out, [
-            $pm['day_name'],
-            sprintf('%02d:00 - %02d:00', $pm['hour_of_day'], $pm['hour_of_day'] + 1),
-            $pm['volume'],
-            $pm['avg_wait_mins'],
-            $pm['avg_service_mins']
-        ]);
-    }
-    fclose($out);
-    exit;
-}
-
-// CSV Export for Staff Timecards
-if (isset($_GET['export']) && $_GET['export'] === 'timecards') {
-    Auth::requirePermission('reports.export');
-    $filename = "CarWash_Staff_Timecards_" . $period . "_" . date('Ymd_His') . ".csv";
-    header('Content-Type: text/csv; charset=UTF-8');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    header('Pragma: no-cache');
-    header('Expires: 0');
-
-    $out = fopen('php://output', 'w');
-    fwrite($out, "\xEF\xBB\xBF");
-    fputcsv($out, ['AQUAGLEAM CAR WASH - STAFF TIMECARDS & LABOR HOURS LOG']);
-    fputcsv($out, ['Period:', strtoupper(str_replace('_', ' ', $period)), 'Start Date:', $perfStartDate, 'End Date:', $perfEndDate, 'Total Labor Hours:', $cphReport['labor_hours'], 'Cars/Labor Hr:', $cphReport['cars_per_labor_hour']]);
-    fputcsv($out, []);
-    fputcsv($out, ['Timecard UID', 'Staff Member', 'Role', 'Clock In', 'Clock Out', 'Total Hours', 'Status', 'Corrections', 'Latest Correction Reason', 'Corrected By']);
-    foreach ($timecardList as $tc) {
-        fputcsv($out, [
-            $tc['timecard_uid'],
-            $tc['staff_name'],
-            strtoupper($tc['staff_role']),
-            $tc['clock_in'],
-            $tc['clock_out'] ?: 'Active / In Progress',
-            $tc['total_hours'] !== null ? number_format((float)$tc['total_hours'], 2) : '-',
-            strtoupper($tc['status']),
-            (int)$tc['correction_count'],
-            $tc['latest_correction_reason'] ?: '-',
-            $tc['latest_corrected_by'] ?: '-'
-        ]);
-    }
-    fclose($out);
-    exit;
-}
-
 // CSV Export for Excel
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     Auth::requirePermission('reports.export');
@@ -936,7 +567,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         'Period:', strtoupper(str_replace('_', ' ', $period)),
         'Start Date:', $startDate,
         'End Date:', $endDate,
-        'Device Filter:', $selectedDeviceName,
+        'Scope:', 'Whole site',
         'Timezone:', 'Asia/Phnom_Penh (UTC+7)',
         'Generated At:', date('Y-m-d H:i:s')
     ]);
@@ -1037,18 +668,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     }
     fputcsv($out, []);
 
-    // Washer Production
-    fputcsv($out, ['--- WASHER PRODUCTION ---']);
-    fputcsv($out, ['Staff Name', 'Jobs Handled', 'Revenue Handled (USD)']);
-    foreach ($washerBreakdown as $wb) {
-        fputcsv($out, [
-            $wb['full_name'],
-            $wb['jobs_count'],
-            number_format((float)$wb['revenue_handled'], 2)
-        ]);
-    }
-    fputcsv($out, []);
-
     // Payment Methods
     fputcsv($out, ['--- PAYMENT METHODS BREAKDOWN ---']);
     fputcsv($out, ['Payment Method', 'Orders Count', 'Total Collected (USD)']);
@@ -1060,132 +679,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         ]);
     }
     fputcsv($out, []);
-
-    // Sales by POS Device
-    fputcsv($out, ['--- SALES BY POS DEVICE ---']);
-    fputcsv($out, ['Device Name', 'Location', 'UID', 'Paid Orders', 'Gross Sales (USD)', 'Discounts (USD)', 'Net Sales (USD)', 'Cash (USD)', 'ABA (USD)', 'KHQR (USD)', 'Unpaid (USD)', 'Cancelled Orders', 'Share (%)']);
-    foreach ($allDeviceReportRows as $dr) {
-        $devShare = ($devTotalNet > 0) ? round(($dr['net_sales'] / $devTotalNet) * 100, 1) : 0.0;
-        fputcsv($out, [
-            $dr['device_name'],
-            $dr['location'],
-            $dr['device_uid'],
-            $dr['paid_orders_count'],
-            number_format($dr['gross_sales'], 2),
-            number_format($dr['total_discount'], 2),
-            number_format($dr['net_sales'], 2),
-            number_format($dr['cash_total'], 2),
-            number_format($dr['aba_total'], 2),
-            number_format($dr['khqr_total'], 2),
-            number_format($dr['unpaid_total'], 2),
-            $dr['cancelled_count'],
-            $devShare . '%'
-        ]);
-    }
-    fputcsv($out, [
-        'TOTAL',
-        '-',
-        '-',
-        $devTotalPaidOrders,
-        number_format($devTotalGross, 2),
-        number_format($devTotalDiscount, 2),
-        number_format($devTotalNet, 2),
-        number_format($devTotalCash, 2),
-        number_format($devTotalAba, 2),
-        number_format($devTotalKhqr, 2),
-        number_format($devTotalUnpaid, 2),
-        $devTotalCancelled,
-        '100.0%'
-    ]);
-    fputcsv($out, []);
-
-    // Sales by Cashier / Device x Cashier
-    $cashierSectionTitle = ($selectedDevice === 'all') ? '--- SALES BY CASHIER ---' : '--- DEVICE X CASHIER BREAKDOWN (' . $selectedDeviceName . ') ---';
-    fputcsv($out, [$cashierSectionTitle]);
-    fputcsv($out, ['Cashier Name', 'Role', 'Paid Orders', 'Gross Sales (USD)', 'Discounts (USD)', 'Net Sales (USD)', 'Cash (USD)', 'ABA (USD)', 'KHQR (USD)', 'Unpaid (USD)', 'Cancelled Orders']);
-    foreach ($cashierSalesRows as $cr) {
-        fputcsv($out, [
-            $cr['cashier_name'],
-            strtoupper($cr['cashier_role']),
-            $cr['paid_orders_count'],
-            number_format($cr['gross_sales'], 2),
-            number_format($cr['total_discount'], 2),
-            number_format($cr['net_sales'], 2),
-            number_format($cr['cash_total'], 2),
-            number_format($cr['aba_total'], 2),
-            number_format($cr['khqr_total'], 2),
-            number_format($cr['unpaid_total'], 2),
-            $cr['cancelled_count']
-        ]);
-    }
-    fputcsv($out, [
-        'TOTAL',
-        '-',
-        $cashierTotalPaidOrders,
-        number_format($cashierTotalGross, 2),
-        number_format($cashierTotalDiscount, 2),
-        number_format($cashierTotalNet, 2),
-        number_format($cashierTotalCash, 2),
-        number_format($cashierTotalAba, 2),
-        number_format($cashierTotalKhqr, 2),
-        number_format($cashierTotalUnpaid, 2),
-        $cashierTotalCancelled
-    ]);
-    fputcsv($out, []);
-
-    // --- Performance: Bay Utilization ---
-    fputcsv($out, ['--- BAY UTILIZATION REPORT ---']);
-    fputcsv($out, ['Days Measured:', $bayReport['days_count'], 'Daily Shop Hours:', $bayReport['daily_open_hours'], 'Shop Bay Utilization:', $bayReport['overall_utilization_percent'] . '%']);
-    fputcsv($out, ['Bay Number', 'Bay Name', 'Skill Tag', 'Cars Handled', 'Busy Minutes', 'Available Minutes', 'Utilization %', 'Idle Minutes', 'Idle %', 'Revenue (USD)']);
-    foreach ($bayReport['bays'] as $b) {
-        fputcsv($out, [$b['bay_number'], $b['name_en'], $b['skill_tag'], $b['orders_count'], $b['busy_minutes'], $b['available_minutes'], $b['utilization_percent'] . '%', $b['idle_minutes'], $b['idle_percent'] . '%', number_format($b['total_usd'], 2)]);
-    }
-    fputcsv($out, []);
-
-    // --- Performance: Technician & Washer Efficiency ---
-    fputcsv($out, ['--- TECHNICIAN & WASHER EFFICIENCY (ROLLING 7 DAYS) ---']);
-    fputcsv($out, ['Overall Efficiency:', $techReport['overall_efficiency_percent'] . '%', 'Total Standard Hours:', $techReport['total_standard_hours'], 'Total Actual Hours:', $techReport['total_actual_hours']]);
-    fputcsv($out, ['Staff Name', 'Role', 'Completed Jobs', 'Standard Minutes', 'Actual Minutes', 'Efficiency %', 'Speed Factor']);
-    foreach ($techReport['staff'] as $st) {
-        fputcsv($out, [$st['staff_name'], strtoupper($st['staff_role']), $st['completed_jobs'], $st['standard_minutes'], $st['actual_minutes'], $st['efficiency_percent'] . '%', $st['factor'] . 'x']);
-    }
-    fputcsv($out, []);
-
-    // --- Performance: Bottleneck and Idle Patterns ---
-    fputcsv($out, ['--- BOTTLENECK & IDLE TIME PATTERN ANALYSIS ---']);
-    foreach ($patternReport['insights'] as $ins) {
-        fputcsv($out, [strtoupper($ins['type']), $ins['title'], $ins['text']]);
-    }
-    fputcsv($out, ['Day of Week', 'Hour (24h)', 'Vehicle Volume', 'Avg Wait (Minutes)', 'Avg Service Duration (Minutes)']);
-    foreach ($patternReport['matrix'] as $pm) {
-        fputcsv($out, [
-            $pm['day_name'],
-            sprintf('%02d:00 - %02d:00', $pm['hour_of_day'], $pm['hour_of_day'] + 1),
-            $pm['volume'],
-            $pm['avg_wait_mins'],
-            $pm['avg_service_mins']
-        ]);
-    }
-    fputcsv($out, []);
-
-    // --- Performance: Staff Timecards & Labor Hours ---
-    fputcsv($out, ['--- STAFF TIMECARDS & LABOR HOURS LOG ---']);
-    fputcsv($out, ['Total Labor Hours:', $cphReport['labor_hours'], 'Cars per Labor Hr:', $cphReport['cars_per_labor_hour'], 'Target:', $cphReport['target']]);
-    fputcsv($out, ['Timecard UID', 'Staff Member', 'Role', 'Clock In', 'Clock Out', 'Total Hours', 'Status', 'Corrections Count', 'Latest Reason', 'Corrected By']);
-    foreach ($timecardList as $tc) {
-        fputcsv($out, [
-            $tc['timecard_uid'],
-            $tc['staff_name'],
-            strtoupper($tc['staff_role']),
-            $tc['clock_in'],
-            $tc['clock_out'] ?: 'Active / In Progress',
-            $tc['total_hours'] !== null ? number_format((float)$tc['total_hours'], 2) : '-',
-            strtoupper($tc['status']),
-            (int)$tc['correction_count'],
-            $tc['latest_correction_reason'] ?: '-',
-            $tc['latest_corrected_by'] ?: '-'
-        ]);
-    }
 
     fclose($out);
     exit;
@@ -1204,7 +697,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 .reports-container {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 16px;
     padding-bottom: 30px;
 }
 
@@ -1242,20 +735,20 @@ include dirname(__DIR__) . '/layouts/header.php';
 .reports-toolbar {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    gap: 16px;
+    align-items: flex-end;
+    gap: 12px;
     flex-wrap: wrap;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 14px 20px;
+    padding: 14px 16px;
     box-shadow: var(--shadow-sm);
 }
 
 .filter-period-group {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 10px;
     flex-wrap: wrap;
 }
 
@@ -1382,20 +875,20 @@ include dirname(__DIR__) . '/layouts/header.php';
 /* KPI Summary Cards Grid: Balanced 2 Columns with Equal Height */
 .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
 }
 
 .kpi-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 24px;
+    padding: 18px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
     box-shadow: var(--shadow-sm);
-    min-height: 190px;
+    min-height: 148px;
     position: relative;
     overflow: hidden;
 }
@@ -1670,6 +1163,9 @@ include dirname(__DIR__) . '/layouts/header.php';
     .charts-grid {
         grid-template-columns: 1fr;
     }
+    .kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
     .tables-dual-grid {
         grid-template-columns: 1fr;
     }
@@ -1678,7 +1174,7 @@ include dirname(__DIR__) . '/layouts/header.php';
 @media (max-width: 768px) {
     .kpi-grid, 
     .secondary-metrics-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .reports-toolbar {
         flex-direction: column;
@@ -1703,6 +1199,12 @@ include dirname(__DIR__) . '/layouts/header.php';
     }
     .actions-dropdown {
         width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    .kpi-grid, .secondary-metrics-grid {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -1751,75 +1253,58 @@ include dirname(__DIR__) . '/layouts/header.php';
 }   
 </style>
 
-<div class="reports-container">
+<div class="reports-container" data-report-page="<?= htmlspecialchars($reportKey) ?>">
+    <div class="reports-header-bar">
+        <div>
+            <h1 class="reports-header-title"><?= htmlspecialchars($reportTitle) ?></h1>
+            <p class="reports-header-sub"><?= htmlspecialchars($reportDescriptions[$reportKey]) ?></p>
+        </div>
+    </div>
     <!-- Print Header Only (Shows when printing) -->
     <div class="print-only" style="display: none; padding: 12px 0 16px 0; border-bottom: 2px solid #333; margin-bottom: 20px;">
         <h2 style="font-size: 20px; font-weight: 800; margin: 0 0 6px 0;">AquaGleam Car Wash - Business &amp; Operations Report</h2>
         <div style="font-size: 12px; color: #555; display: flex; flex-wrap: wrap; gap: 16px;">
             <span><strong>Period:</strong> <?= htmlspecialchars(strtoupper(str_replace('_', ' ', $period))) ?> (<?= htmlspecialchars($startDate) ?> to <?= htmlspecialchars($endDate) ?>)</span>
-            <span><strong>Device Filter:</strong> <?= htmlspecialchars($selectedDeviceName) ?></span>
+            <span><strong>Scope:</strong> Whole site</span>
+            <span><strong>Report:</strong> <?= htmlspecialchars($reportTitle) ?></span>
             <span><strong>Shop Timezone:</strong> Asia/Phnom_Penh (UTC+7)</span>
             <span><strong>Generated:</strong> <?= date('Y-m-d H:i:s') ?></span>
         </div>
     </div>
 
-    <!-- 2. Unified Toolbar: Period Filters + Device Filter + Custom Date Range + Separate Actions Menu -->
+    <!-- 2. Report Toolbar: Period Filters, Custom Date Range, and Export Actions -->
     <div class="reports-toolbar no-print">
-        <div class="filter-period-group">
-            <a href="?view=reports&period=today&device=<?= urlencode($selectedDevice) ?>" class="filter-pill <?= ($period === 'today') ? 'active' : '' ?>">
-                <i class="fa-solid fa-sun"></i> Today
-            </a>
-            <a href="?view=reports&period=this_week&device=<?= urlencode($selectedDevice) ?>" class="filter-pill <?= ($period === 'this_week') ? 'active' : '' ?>">
-                <i class="fa-solid fa-calendar-week"></i> This Week
-            </a>
-            <a href="?view=reports&period=this_month&device=<?= urlencode($selectedDevice) ?>" class="filter-pill <?= ($period === 'this_month') ? 'active' : '' ?>">
-                <i class="fa-solid fa-calendar-days"></i> This Month
-            </a>
-            <a href="?view=reports&period=this_year&device=<?= urlencode($selectedDevice) ?>" class="filter-pill <?= ($period === 'this_year') ? 'active' : '' ?>">
-                <i class="fa-solid fa-calendar"></i> This Year
-            </a>
+        <form action="" method="GET" class="filter-period-group" style="margin: 0;">
+            <input type="hidden" name="view" value="reports">
+            <input type="hidden" name="report" value="<?= htmlspecialchars($reportKey) ?>">
+            <label for="reportPeriodSelect" class="text-xs text-muted" style="font-weight: 700;">Date range</label>
+            <select id="reportPeriodSelect" name="period" class="form-input" style="width: 190px; min-height: 42px;" onchange="handleReportPeriodChange(this)">
+                <option value="today" <?= $period === 'today' ? 'selected' : '' ?>>Today</option>
+                <option value="this_week" <?= $period === 'this_week' ? 'selected' : '' ?>>This week</option>
+                <option value="this_month" <?= $period === 'this_month' ? 'selected' : '' ?>>This month</option>
+                <option value="this_year" <?= $period === 'this_year' ? 'selected' : '' ?>>This year</option>
+                <option value="custom" <?= $period === 'custom' ? 'selected' : '' ?>>Custom range</option>
+            </select>
+            <?php if ($period !== 'custom'): ?>
+                <button type="submit" class="btn btn-secondary" style="min-height: 42px;">Apply</button>
+            <?php endif; ?>
+        </form>
 
-            <!-- Device Filter Dropdown -->
-            <form action="" method="GET" id="deviceFilterForm" style="display: inline-flex; align-items: center; margin: 0 4px;">
-                <input type="hidden" name="view" value="reports">
-                <input type="hidden" name="period" value="<?= htmlspecialchars($period) ?>">
-                <?php if ($period === 'custom'): ?>
-                    <input type="hidden" name="start_date" value="<?= htmlspecialchars($startDate) ?>">
-                    <input type="hidden" name="end_date" value="<?= htmlspecialchars($endDate) ?>">
-                <?php endif; ?>
-                <div style="display: flex; align-items: center; gap: 6px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-full); padding: 5px 12px;">
-                    <i class="fa-solid fa-tablet-screen-button text-muted" style="font-size: 12px;"></i>
-                    <select name="device" onchange="document.getElementById('deviceFilterForm').submit()" style="border: none; background: transparent; font-size: 13px; font-weight: 600; color: var(--text-main); outline: none; cursor: pointer;">
-                        <option value="all" <?= ($selectedDevice === 'all') ? 'selected' : '' ?>><?= htmlspecialchars(__('all_devices')) ?></option>
-                        <option value="web" <?= ($selectedDevice === 'web') ? 'selected' : '' ?>><?= htmlspecialchars(__('back_office_web')) ?></option>
-                        <?php foreach ($allRegisteredDevices as $ard): ?>
-                            <option value="<?= $ard['id'] ?>" <?= ($selectedDevice == (string)$ard['id']) ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($ard['device_name']) ?> (<?= htmlspecialchars($ard['device_uid']) ?>)
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-            </form>
-
-            <!-- Inline Custom Date Range Picker -->
-            <form action="" method="GET" class="custom-range-form">
-                <input type="hidden" name="view" value="reports">
-                <input type="hidden" name="period" value="custom">
-                <input type="hidden" name="device" value="<?= htmlspecialchars($selectedDevice) ?>">
-                <div class="date-input-wrap" title="Start Date">
-                    <i class="fa-solid fa-arrow-right-to-bracket text-muted"></i>
-                    <input type="date" name="start_date" value="<?= htmlspecialchars($startDate) ?>" required>
-                </div>
-                <span class="text-muted" style="font-size: 13px;">to</span>
-                <div class="date-input-wrap" title="End Date">
-                    <i class="fa-solid fa-arrow-right-from-bracket text-muted"></i>
-                    <input type="date" name="end_date" value="<?= htmlspecialchars($endDate) ?>" required>
-                </div>
-                <button type="submit" class="btn btn-secondary btn-sm" style="padding: 6px 12px; min-height: 34px;">
-                    <i class="fa-solid fa-filter mr-1"></i> Apply
-                </button>
-            </form>
-        </div>
+        <form action="" method="GET" id="customReportRange" class="custom-range-form" style="<?= $period === 'custom' ? 'display: inline-flex;' : 'display: none;' ?>">
+            <input type="hidden" name="view" value="reports">
+            <input type="hidden" name="report" value="<?= htmlspecialchars($reportKey) ?>">
+            <input type="hidden" name="period" value="custom">
+            <div class="date-input-wrap" title="Start Date">
+                <i class="fa-solid fa-calendar-day text-muted"></i>
+                <input type="date" name="start_date" value="<?= htmlspecialchars($startDate) ?>" required aria-label="Start date">
+            </div>
+            <span class="text-muted" style="font-size: 13px;">to</span>
+            <div class="date-input-wrap" title="End Date">
+                <i class="fa-solid fa-calendar-day text-muted"></i>
+                <input type="date" name="end_date" value="<?= htmlspecialchars($endDate) ?>" required aria-label="End date">
+            </div>
+            <button type="submit" class="btn btn-primary" style="min-height: 42px;"><i class="fa-solid fa-filter mr-1"></i> Apply</button>
+        </form>
 
         <!-- Separate Actions Menu Group (Export, Print, Backup) -->
         <div class="actions-group">
@@ -1828,26 +1313,14 @@ include dirname(__DIR__) . '/layouts/header.php';
             </button>
             <div class="actions-dropdown" id="reportsActionsDropdown">
                 <?php if (Auth::can('reports.export')): ?>
-                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&device=<?= urlencode($selectedDevice) ?>&export=csv">
+                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=csv">
                     <i class="fa-solid fa-file-excel" style="color: #16a34a; width: 16px;"></i> Export Full Report (CSV)
                 </a>
-                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=bay_utilization">
-                    <i class="fa-solid fa-warehouse" style="color: var(--primary); width: 16px;"></i> Bay Utilization (CSV)
-                </a>
-                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=tech_efficiency">
-                    <i class="fa-solid fa-bolt" style="color: #9333ea; width: 16px;"></i> Technician Efficiency (CSV)
-                </a>
-                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=bottlenecks">
-                    <i class="fa-solid fa-chart-simple" style="color: #f59e0b; width: 16px;"></i> Bottlenecks &amp; Patterns (CSV)
-                </a>
-                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=timecards">
-                    <i class="fa-solid fa-clock" style="color: #10b981; width: 16px;"></i> Staff Timecards (CSV)
-                </a>
                 <?php if (in_array(Auth::getRole(), ['owner', 'manager'], true)): ?>
-                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&device=<?= urlencode($selectedDevice) ?>&export=cancellations">
+                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=cancellations">
                     <i class="fa-solid fa-ban" style="color: #dc2626; width: 16px;"></i> <?= htmlspecialchars(__('export_cancellations_csv', 'Cancelled Orders (CSV)')) ?>
                 </a>
-                <a href="?view=cash_movements&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&device=<?= urlencode($selectedDevice) ?>&export=csv">
+                <a href="?view=cash_movements&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=csv">
                     <i class="fa-solid fa-money-bill-transfer" style="color: #ea580c; width: 16px;"></i> <?= htmlspecialchars(__('export_cash_movements_csv', 'Cash Movements (CSV)')) ?>
                 </a>
                 <a href="?view=cashier_sessions&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=csv">
@@ -1868,1943 +1341,25 @@ include dirname(__DIR__) . '/layouts/header.php';
         </div>
     </div>
 
-    <?php if ($canViewProfit && $hasMissingCogs): ?>
-    <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid #f59e0b; border-radius: var(--radius-lg); padding: 14px 18px; margin-bottom: 20px; display: flex; align-items: center; gap: 14px; color: #b45309;">
-        <i class="fa-solid fa-triangle-exclamation" style="font-size: 22px; flex-shrink: 0; color: #d97706;"></i>
-        <div style="flex: 1;">
-            <strong style="font-size: 14px; display: block; margin-bottom: 2px;">Cost of Goods Sold (COGS) Incomplete:</strong>
-            <span style="font-size: 13px;">
-                <strong><?= $missingCogsCount ?></strong> sold product item(s) (totaling <strong><?= formatUSD($missingCogsSales) ?></strong> in sales) have missing or zero cost data. Recorded COGS is <?= formatUSD($productCogs) ?> and Net Operating Profit may be overstated. Please update product cost prices in Inventory.
-            </span>
-        </div>
-        <a href="<?= APP_URL ?>/index.php?view=products" class="btn btn-sm btn-secondary" style="border-color: #d97706; color: #b45309; white-space: nowrap;">
-            <i class="fa-solid fa-pen-to-square mr-1"></i> Update Costs
-        </a>
-    </div>
-    <?php endif; ?>
-
-    <!-- 3. Primary KPI Summary Cards -->
-    <div class="kpi-grid">
-        <!-- Card 1: Net Settled Revenue & Confirmed Payments -->
-        <div class="kpi-card">
-            <div class="kpi-card-top">
-                <div>
-                    <div class="kpi-card-title">Net Settled Revenue</div>
-                    <div class="kpi-card-value" style="color: #16a34a;"><?= formatUSD($netSettledRevenue) ?></div>
-                    <div class="kpi-card-khr">(<?= formatKHR($netSettledRevenueKhr) ?>)</div>
-                </div>
-                <div class="kpi-icon-box" style="background: rgba(22, 163, 74, 0.12); color: #16a34a;">
-                    <i class="fa-solid fa-sack-dollar"></i>
-                </div>
-            </div>
-            <div class="kpi-card-footer">
-                <div>
-                    <span>Gross: <strong><?= formatUSD($grossRev) ?></strong> (<?= $totalVehicles ?> <?= ($totalVehicles === 1) ? 'order' : 'orders' ?>)</span>
-                    <?php if ($settledRefunds > 0): ?>
-                    <span style="margin: 0 6px;">&bull;</span>
-                    <span style="color: #dc2626; font-weight: 600;">Refunds: -<?= formatUSD($settledRefunds) ?> (<?= $refundCount ?>)</span>
-                    <?php endif; ?>
-                </div>
-                <span>Avg Ticket: <strong><?= formatUSD($avgTicket) ?></strong></span>
-            </div>
-        </div>
-
-        <?php if ($canViewProfit): ?>
-        <!-- Card 2: Cost of Goods Sold (COGS) -->
-        <div class="kpi-card">
-            <div class="kpi-card-top">
-                <div>
-                    <div class="kpi-card-title">Cost of Goods Sold (COGS)</div>
-                    <div class="kpi-card-value" style="color: #0284c7;"><?= formatUSD($productCogs) ?></div>
-                    <div class="kpi-card-khr">(<?= formatKHR((int)round($productCogs * $curRate)) ?>)</div>
-                </div>
-                <div class="kpi-icon-box" style="background: rgba(2, 132, 199, 0.12); color: #0284c7;">
-                    <i class="fa-solid fa-boxes-stacked"></i>
-                </div>
-            </div>
-            <div class="kpi-card-footer">
-                <div>
-                    <span>Parts &amp; Products: <strong><?= $productUnits ?> units sold</strong></span>
-                    <?php if ($hasMissingCogs): ?>
-                    <span style="margin: 0 6px;">&bull;</span>
-                    <span style="color: #d97706; font-weight: 600;"><i class="fa-solid fa-triangle-exclamation mr-1"></i><?= $missingCogsCount ?> unpriced</span>
-                    <?php endif; ?>
-                </div>
-                <?php $cogsShare = ($netSettledRevenue > 0) ? round(($productCogs / $netSettledRevenue) * 100) : 0; ?>
-                <span class="text-muted"><strong><?= $cogsShare ?>%</strong> of revenue</span>
-            </div>
-        </div>
-
-        <!-- Card 3: Operating Expenses -->
-        <div class="kpi-card">
-            <div class="kpi-card-top">
-                <div>
-                    <div class="kpi-card-title">Operating Expenses</div>
-                    <div class="kpi-card-value" style="color: #d97706;"><?= formatUSD($totalExp) ?></div>
-                    <div class="kpi-card-khr">(<?= formatKHR((int)round($totalExp * $curRate)) ?>)</div>
-                </div>
-                <div class="kpi-icon-box" style="background: rgba(217, 119, 6, 0.12); color: #d97706;">
-                    <i class="fa-solid fa-file-invoice-dollar"></i>
-                </div>
-            </div>
-            <div class="kpi-card-footer">
-                <span>Utilities, rent, soap, water &amp; maintenance costs</span>
-                <?php $expShare = ($netSettledRevenue > 0) ? round(($totalExp / $netSettledRevenue) * 100) : 0; ?>
-                <span class="text-muted"><strong><?= $expShare ?>%</strong> of revenue</span>
-            </div>
-        </div>
-
-        <!-- Card 4: Net Operating Profit (Full Width) -->
-        <div class="kpi-card <?= ($netOperatingProfit >= 0) ? 'profit-positive' : 'profit-negative' ?>" style="grid-column: 1 / -1;">
-            <div class="kpi-card-top">
-                <div>
-                    <div class="kpi-card-title" style="color: <?= ($netOperatingProfit >= 0) ? '#16a34a' : '#dc2626' ?>; font-size: 15px;">
-                        Net Operating Profit
-                    </div>
-                    <div class="kpi-card-value" style="color: <?= ($netOperatingProfit >= 0) ? '#16a34a' : '#dc2626' ?>; font-size: 32px;">
-                        <?= formatUSD($netOperatingProfit) ?>
-                    </div>
-                    <div class="kpi-card-khr" style="color: <?= ($netOperatingProfit >= 0) ? '#16a34a' : '#dc2626' ?>;">
-                        (<?= formatKHR($netOperatingProfitKhr) ?>)
-                    </div>
-                </div>
-                <div class="kpi-icon-box" style="background: <?= ($netOperatingProfit >= 0) ? 'rgba(22, 163, 74, 0.15)' : 'rgba(220, 38, 38, 0.15)' ?>; color: <?= ($netOperatingProfit >= 0) ? '#16a34a' : '#dc2626' ?>; width: 52px; height: 52px; font-size: 22px;">
-                    <i class="fa-solid <?= ($netOperatingProfit >= 0) ? 'fa-trophy' : 'fa-circle-exclamation' ?>"></i>
-                </div>
-            </div>
-            <div class="kpi-card-footer" style="padding-top: 14px; margin-top: 14px; border-top: 1px dashed var(--border);">
-                <span>Formula: Net Settled Rev (<?= formatUSD($netSettledRevenue) ?>) - COGS (<?= formatUSD($productCogs) ?>) - Exp (<?= formatUSD($totalExp) ?>)</span>
-                <?php $netMargin = ($netSettledRevenue > 0) ? round(($netOperatingProfit / $netSettledRevenue) * 100) : 0; ?>
-                <span style="font-weight: 700; font-size: 14px; color: <?= ($netOperatingProfit >= 0) ? '#16a34a' : '#dc2626' ?>;">
-                    <?= $netMargin ?>% Net Margin
-                </span>
-            </div>
-        </div>
-        <?php else: ?>
-        <!-- Department Revenue Cards for Managers without Profit Permission -->
-        <!-- Card 2: Car Wash Services Revenue -->
-        <div class="kpi-card">
-            <div class="kpi-card-top">
-                <div>
-                    <div class="kpi-card-title">Car Wash Services</div>
-                    <div class="kpi-card-value" style="color: #0284c7;"><?= formatUSD($washRevenue) ?></div>
-                    <div class="kpi-card-khr">(<?= formatKHR((int)round($washRevenue * $curRate)) ?>)</div>
-                </div>
-                <div class="kpi-icon-box" style="background: rgba(2, 132, 199, 0.12); color: #0284c7;">
-                    <i class="fa-solid fa-shower"></i>
-                </div>
-            </div>
-            <div class="kpi-card-footer">
-                <span>Wash bay revenue &amp; service volume</span>
-                <span class="text-muted"><strong><?= count($servicesBreakdown) ?></strong> services</span>
-            </div>
-        </div>
-
-        <!-- Card 3: Repair & Maintenance Labor -->
-        <div class="kpi-card">
-            <div class="kpi-card-top">
-                <div>
-                    <div class="kpi-card-title">Repair &amp; Labor</div>
-                    <div class="kpi-card-value" style="color: #ea580c;"><?= formatUSD($repairRevenue) ?></div>
-                    <div class="kpi-card-khr">(<?= formatKHR((int)round($repairRevenue * $curRate)) ?>)</div>
-                </div>
-                <div class="kpi-icon-box" style="background: rgba(234, 88, 12, 0.12); color: #ea580c;">
-                    <i class="fa-solid fa-screwdriver-wrench"></i>
-                </div>
-            </div>
-            <div class="kpi-card-footer">
-                <span>Mechanic &amp; technical labor revenue</span>
-                <span class="text-muted"><strong><?= count($repairBreakdown) ?></strong> job types</span>
-            </div>
-        </div>
-
-        <!-- Card 4: Products & Parts Sales -->
-        <div class="kpi-card">
-            <div class="kpi-card-top">
-                <div>
-                    <div class="kpi-card-title">Parts &amp; Oil Sales</div>
-                    <div class="kpi-card-value" style="color: #9333ea;"><?= formatUSD($productRevenue) ?></div>
-                    <div class="kpi-card-khr">(<?= formatKHR((int)round($productRevenue * $curRate)) ?>)</div>
-                </div>
-                <div class="kpi-icon-box" style="background: rgba(147, 51, 234, 0.12); color: #9333ea;">
-                    <i class="fa-solid fa-boxes-stacked"></i>
-                </div>
-            </div>
-            <div class="kpi-card-footer">
-                <span>Total parts &amp; inventory retail revenue</span>
-                <span class="text-muted"><strong><?= $productUnits ?></strong> units sold</span>
-            </div>
-        </div>
-        <?php endif; ?>
-    </div>
-
-    <!-- 4. Visual Comparison Charts: 3 Clean Cards (Responsive, Light & Dark Theme Resilient) -->
-    <div class="charts-grid">
-        <?php if ($canViewProfit): ?>
-        <!-- Chart 1: Financial Balance (Revenue vs Expenses vs COGS) -->
-        <div class="chart-card">
-            <div class="chart-header">
-                <div>
-                    <h3 class="chart-title">
-                        <i class="fa-solid fa-scale-balanced" style="color: var(--primary);"></i> Revenue vs. Costs
-                    </h3>
-                    <div class="chart-subtitle">Outflow vs net settled revenue</div>
-                </div>
-                <span class="badge badge-slate" style="font-size: 11px;">USD Total</span>
-            </div>
-            <?php 
-                $maxBarRef = max(0.01, $netSettledRevenue, ($totalExp + $productCogs));
-                $revPct = min(100, round(($netSettledRevenue / $maxBarRef) * 100));
-                $cogsPct = min(100, round(($productCogs / $maxBarRef) * 100));
-                $expPct = min(100, round(($totalExp / $maxBarRef) * 100));
-            ?>
-            <div class="chart-bars-wrap">
-                <div class="chart-bar-item">
-                    <div class="chart-bar-meta">
-                        <span class="chart-bar-label"><i class="fa-solid fa-circle" style="color: #16a34a; font-size: 9px;"></i> Net Settled Revenue</span>
-                        <strong><?= formatUSD($netSettledRevenue) ?></strong>
-                    </div>
-                    <div class="chart-bar-track">
-                        <div class="chart-bar-fill" style="width: <?= $revPct ?>%; background: #16a34a;"></div>
-                    </div>
-                </div>
-
-                <div class="chart-bar-item">
-                    <div class="chart-bar-meta">
-                        <span class="chart-bar-label"><i class="fa-solid fa-circle" style="color: #0284c7; font-size: 9px;"></i> Cost of Goods Sold (COGS)</span>
-                        <strong><?= formatUSD($productCogs) ?></strong>
-                    </div>
-                    <div class="chart-bar-track">
-                        <div class="chart-bar-fill" style="width: <?= $cogsPct ?>%; background: #0284c7;"></div>
-                    </div>
-                </div>
-
-                <div class="chart-bar-item">
-                    <div class="chart-bar-meta">
-                        <span class="chart-bar-label"><i class="fa-solid fa-circle" style="color: #d97706; font-size: 9px;"></i> Operating Expenses</span>
-                        <strong><?= formatUSD($totalExp) ?></strong>
-                    </div>
-                    <div class="chart-bar-track">
-                        <div class="chart-bar-fill" style="width: <?= $expPct ?>%; background: #d97706;"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <?php endif; ?>
-
-        <!-- Chart 2: Revenue Stream Breakdown (Wash vs Repair vs Parts) -->
-        <div class="chart-card">
-            <div class="chart-header">
-                <div>
-                    <h3 class="chart-title">
-                        <i class="fa-solid fa-chart-pie" style="color: #0284c7;"></i> Revenue by Department
-                    </h3>
-                    <div class="chart-subtitle">Wash, Repair, &amp; Products</div>
-                </div>
-                <span class="badge badge-slate" style="font-size: 11px;">Share</span>
-            </div>
-            <?php 
-                $denomDept = max(0.01, $totalSubtotal > 0 ? $totalSubtotal : $grossRev);
-                $washShare = round(($washRevenue / $denomDept) * 100);
-                $repairShare = round(($repairRevenue / $denomDept) * 100);
-                $partShare = round(($productRevenue / $denomDept) * 100);
-            ?>
-            <div class="chart-bars-wrap">
-                <div class="chart-bar-item">
-                    <div class="chart-bar-meta">
-                        <span class="chart-bar-label"><i class="fa-solid fa-shower" style="color: #0284c7;"></i> Car Wash</span>
-                        <span><?= formatUSD($washRevenue) ?> <strong class="text-muted">(<?= $washShare ?>%)</strong></span>
-                    </div>
-                    <div class="chart-bar-track">
-                        <div class="chart-bar-fill" style="width: <?= min(100, $washShare) ?>%; background: #0284c7;"></div>
-                    </div>
-                </div>
-
-                <div class="chart-bar-item">
-                    <div class="chart-bar-meta">
-                        <span class="chart-bar-label"><i class="fa-solid fa-wrench" style="color: #ea580c;"></i> Repair &amp; Labor</span>
-                        <span><?= formatUSD($repairRevenue) ?> <strong class="text-muted">(<?= $repairShare ?>%)</strong></span>
-                    </div>
-                    <div class="chart-bar-track">
-                        <div class="chart-bar-fill" style="width: <?= min(100, $repairShare) ?>%; background: #ea580c;"></div>
-                    </div>
-                </div>
-
-                <div class="chart-bar-item">
-                    <div class="chart-bar-meta">
-                        <span class="chart-bar-label"><i class="fa-solid fa-box-open" style="color: #9333ea;"></i> Oils &amp; Parts</span>
-                        <span><?= formatUSD($productRevenue) ?> <strong class="text-muted">(<?= $partShare ?>%)</strong></span>
-                    </div>
-                    <div class="chart-bar-track">
-                        <div class="chart-bar-fill" style="width: <?= min(100, $partShare) ?>%; background: #9333ea;"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Chart 3: Payment Tender Split (Cash vs ABA vs KHQR) -->
-        <div class="chart-card">
-            <div class="chart-header">
-                <div>
-                    <h3 class="chart-title">
-                        <i class="fa-solid fa-wallet" style="color: #16a34a;"></i> Payment Tender Split
-                    </h3>
-                    <div class="chart-subtitle">Breakdown by payment method</div>
-                </div>
-                <span class="badge badge-slate" style="font-size: 11px;">Tender</span>
-            </div>
-            <div class="chart-bars-wrap">
-                <?php if (empty($payBreakdown)): ?>
-                    <div class="empty-state-box" style="padding: 10px;">
-                        <div class="empty-state-text">No payment records in this period.</div>
-                    </div>
-                <?php else: ?>
-                    <?php 
-                    $methodColors = [
-                        'cash' => '#16a34a',
-                        'aba'  => '#0284c7',
-                        'khqr' => '#dc2626',
-                        'unpaid' => '#64748b'
-                    ];
-                    $methodIcons = [
-                        'cash' => 'fa-money-bill-wave',
-                        'aba'  => 'fa-building-columns',
-                        'khqr' => 'fa-qrcode',
-                        'unpaid' => 'fa-clock'
-                    ];
-                    foreach ($payBreakdown as $pb):
-                        $mKey = strtolower((string)($pb['payment_method'] ?? 'unpaid'));
-                        $mColor = $methodColors[$mKey] ?? '#64748b';
-                        $mIcon = $methodIcons[$mKey] ?? 'fa-wallet';
-                        $mShare = ($grossRev > 0) ? round(((float)$pb['method_total'] / $grossRev) * 100) : 0;
-                    ?>
-                    <div class="chart-bar-item">
-                        <div class="chart-bar-meta">
-                            <span class="chart-bar-label">
-                                <i class="fa-solid <?= $mIcon ?>" style="color: <?= $mColor ?>;"></i>
-                                <?= strtoupper($mKey) ?> (<?= $pb['count'] ?> <?= ($pb['count'] === 1) ? 'order' : 'orders' ?>)
-                            </span>
-                            <span><?= formatUSD((float)$pb['method_total']) ?> <strong class="text-muted">(<?= $mShare ?>%)</strong></span>
-                        </div>
-                        <div class="chart-bar-track">
-                            <div class="chart-bar-fill" style="width: <?= min(100, $mShare) ?>%; background: <?= $mColor ?>;"></div>
-                        </div>
-                    </div>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-
-    <!-- 5. Secondary Metrics: 2 Balanced Cards (Department Highlights) -->
-    <div class="secondary-metrics-grid">
-        <div class="metric-pill-card">
-            <div>
-                <div class="text-xs text-muted" style="text-transform: uppercase; font-weight: 700;">Minor Repair &amp; Maintenance</div>
-                <div style="font-size: 22px; font-weight: 800; color: #ea580c; margin-top: 4px;"><?= formatUSD($repairRevenue) ?></div>
-                <div class="text-xs text-muted" style="margin-top: 2px;">
-                    <?= count($repairBreakdown) ?> distinct repair service types performed
-                </div>
-            </div>
-            <div class="kpi-icon-box" style="background: rgba(234, 88, 12, 0.12); color: #ea580c;">
-                <i class="fa-solid fa-screwdriver-wrench"></i>
-            </div>
-        </div>
-
-        <div class="metric-pill-card">
-            <?php if ($canViewProfit): ?>
-            <div>
-                <div class="text-xs text-muted" style="text-transform: uppercase; font-weight: 700;">Parts &amp; Oil Net Margin</div>
-                <div style="font-size: 22px; font-weight: 800; color: #16a34a; margin-top: 4px;"><?= formatUSD($productProfit) ?></div>
-                <?php $pMargin = ($productRevenue > 0) ? round(($productProfit / $productRevenue) * 100) : 0; ?>
-                <div class="text-xs text-muted" style="margin-top: 2px;">
-                    <?= $productUnits ?> items sold &bull; <strong><?= $pMargin ?>%</strong> product profit margin
-                </div>
-            </div>
-            <div class="kpi-icon-box" style="background: rgba(22, 163, 74, 0.12); color: #16a34a;">
-                <i class="fa-solid fa-boxes-stacked"></i>
-            </div>
-            <?php else: ?>
-            <div>
-                <div class="text-xs text-muted" style="text-transform: uppercase; font-weight: 700;">Parts &amp; Oil Retail Sales</div>
-                <div style="font-size: 22px; font-weight: 800; color: #9333ea; margin-top: 4px;"><?= formatUSD($productRevenue) ?></div>
-                <div class="text-xs text-muted" style="margin-top: 2px;">
-                    <?= $productUnits ?> retail units sold in this period
-                </div>
-            </div>
-            <div class="kpi-icon-box" style="background: rgba(147, 51, 234, 0.12); color: #9333ea;">
-                <i class="fa-solid fa-boxes-stacked"></i>
-            </div>
-            <?php endif; ?>
-        </div>
-    </div>
-
-    <!-- 6. Table: Sales by POS Device Breakdown (All Registered Terminals + Web POS) -->
-    <div class="report-table-card">
-        <div class="report-table-header">
-            <div>
-                <h2 class="report-table-title">
-                    <i class="fa-solid fa-cash-register" style="color: var(--primary);"></i>
-                    <?= htmlspecialchars(__('sales_by_device')) ?>
-                </h2>
-                <span class="text-xs text-muted">Performance and payment tender reconciliation per connected POS counter terminal and Back Office Web POS</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <?php if (abs($devTotalNet - $grossRev) < 0.01): ?>
-                    <span class="badge badge-success" style="font-size: 11.5px; padding: 4px 10px;">
-                        <i class="fa-solid fa-circle-check mr-1"></i> <?= htmlspecialchars(__('reconciled_note')) ?> (<?= formatUSD($devTotalNet) ?>)
-                    </span>
-                <?php else: ?>
-                    <span class="badge badge-warning" style="font-size: 11.5px; padding: 4px 10px;">
-                        <i class="fa-solid fa-triangle-exclamation mr-1"></i> Variance: <?= formatUSD(abs($devTotalNet - $grossRev)) ?>
-                    </span>
-                <?php endif; ?>
-            </div>
-        </div>
-        <div class="table-responsive-clean">
-            <table class="table-clean">
-                <thead>
-                    <tr>
-                        <th style="min-width: 200px;">POS Device / Station</th>
-                        <th style="min-width: 110px;">UID</th>
-                        <th class="table-num" style="min-width: 100px;">Paid Orders</th>
-                        <th class="table-num" style="min-width: 110px;">Gross Sales</th>
-                        <th class="table-num" style="min-width: 100px;">Discounts</th>
-                        <th class="table-num" style="min-width: 120px;">Net Sales</th>
-                        <th class="table-num" style="min-width: 90px;">Cash</th>
-                        <th class="table-num" style="min-width: 90px;">ABA</th>
-                        <th class="table-num" style="min-width: 90px;">KHQR</th>
-                        <th class="table-num" style="min-width: 100px;">Unpaid</th>
-                        <th class="table-num" style="min-width: 90px;">Cancelled</th>
-                        <th style="min-width: 120px;">Share (%)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($allDeviceReportRows)): ?>
-                        <tr>
-                            <td colspan="12">
-                                <div class="empty-state-box">
-                                    <div class="empty-state-icon"><i class="fa-solid fa-tablet"></i></div>
-                                    <div class="empty-state-text">No device activity recorded in this period.</div>
-                                </div>
-                            </td>
-                        </tr>
-                    <?php else: ?>
-                        <?php foreach ($allDeviceReportRows as $dr): 
-                            $sharePct = ($devTotalNet > 0) ? round(($dr['net_sales'] / $devTotalNet) * 100, 1) : 0.0;
-                            $isWeb = ($dr['id'] === 0 || $dr['device_uid'] === 'WEB');
-                        ?>
-                        <tr>
-                            <td>
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <div style="width: 32px; height: 32px; border-radius: var(--radius-md); background: <?= $isWeb ? '#0284c718' : '#16a34a18' ?>; color: <?= $isWeb ? '#0284c7' : '#16a34a' ?>; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;">
-                                        <i class="fa-solid <?= $isWeb ? 'fa-globe' : 'fa-tablet-screen-button' ?>"></i>
-                                    </div>
-                                    <div>
-                                        <div style="font-weight: 700; color: var(--text-main);">
-                                            <?= htmlspecialchars($dr['device_name']) ?>
-                                        </div>
-                                        <div class="text-xs text-muted">
-                                            <i class="fa-solid fa-location-dot mr-1"></i> <?= htmlspecialchars($dr['location']) ?>
-                                        </div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td>
-                                <span class="badge <?= $isWeb ? 'badge-info' : 'badge-slate' ?>" style="font-family: var(--font-mono); font-size: 11px;">
-                                    <?= htmlspecialchars($dr['device_uid']) ?>
-                                </span>
-                            </td>
-                            <td class="table-num">
-                                <strong><?= $dr['paid_orders_count'] ?></strong>
-                            </td>
-                            <td class="table-num text-muted">
-                                <?= formatUSD($dr['gross_sales']) ?>
-                            </td>
-                            <td class="table-num" style="<?= ($dr['total_discount'] > 0) ? 'color: #d97706; font-weight: 600;' : 'color: var(--text-muted);' ?>">
-                                <?= ($dr['total_discount'] > 0) ? ('-' . formatUSD($dr['total_discount'])) : '$0.00' ?>
-                            </td>
-                            <td class="table-num">
-                                <strong style="color: #16a34a; font-size: 14px;"><?= formatUSD($dr['net_sales']) ?></strong>
-                            </td>
-                            <td class="table-num text-muted">
-                                <?= formatUSD($dr['cash_total']) ?>
-                            </td>
-                            <td class="table-num text-muted">
-                                <?= formatUSD($dr['aba_total']) ?>
-                            </td>
-                            <td class="table-num text-muted">
-                                <?= formatUSD($dr['khqr_total']) ?>
-                            </td>
-                            <td class="table-num" style="<?= ($dr['unpaid_total'] > 0) ? 'color: #ea580c; font-weight: 600;' : 'color: var(--text-muted);' ?>">
-                                <?= formatUSD($dr['unpaid_total']) ?>
-                            </td>
-                            <td class="table-num" style="<?= ($dr['cancelled_count'] > 0) ? 'color: #dc2626; font-weight: 600;' : 'color: var(--text-muted);' ?>">
-                                <?= $dr['cancelled_count'] ?>
-                            </td>
-                            <td>
-                                <div style="display: flex; align-items: center; gap: 8px;">
-                                    <div style="flex: 1; height: 6px; background: var(--bg-subtle); border-radius: 99px; overflow: hidden; min-width: 40px;">
-                                        <div style="height: 100%; width: <?= min(100, $sharePct) ?>%; background: <?= $isWeb ? '#0284c7' : '#16a34a' ?>;"></div>
-                                    </div>
-                                    <span class="text-xs text-muted" style="width: 38px; text-align: right; font-weight: 600;"><?= $sharePct ?>%</span>
-                                </div>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                        <!-- Grand Total Row -->
-                        <tr style="background: var(--bg-subtle); font-weight: 700; border-top: 2px solid var(--border);">
-                            <td><strong><?= htmlspecialchars(__('total')) ?></strong></td>
-                            <td><span class="badge badge-slate" style="font-size: 10px;">ALL</span></td>
-                            <td class="table-num"><strong><?= $devTotalPaidOrders ?></strong></td>
-                            <td class="table-num"><strong><?= formatUSD($devTotalGross) ?></strong></td>
-                            <td class="table-num" style="color: #d97706;"><strong>-<?= formatUSD($devTotalDiscount) ?></strong></td>
-                            <td class="table-num" style="color: #16a34a; font-size: 14.5px;"><strong><?= formatUSD($devTotalNet) ?></strong></td>
-                            <td class="table-num"><strong><?= formatUSD($devTotalCash) ?></strong></td>
-                            <td class="table-num"><strong><?= formatUSD($devTotalAba) ?></strong></td>
-                            <td class="table-num"><strong><?= formatUSD($devTotalKhqr) ?></strong></td>
-                            <td class="table-num" style="color: #ea580c;"><strong><?= formatUSD($devTotalUnpaid) ?></strong></td>
-                            <td class="table-num" style="color: #dc2626;"><strong><?= $devTotalCancelled ?></strong></td>
-                            <td><strong>100.0%</strong></td>
-                        </tr>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 7. Table: Sales by Cashier (or Device x Cashier Breakdown) -->
-    <div class="report-table-card">
-        <div class="report-table-header">
-            <div>
-                <h2 class="report-table-title">
-                    <i class="fa-solid fa-user-tag" style="color: var(--primary);"></i>
-                    <?= ($selectedDevice === 'all') ? htmlspecialchars(__('sales_by_cashier')) : (htmlspecialchars(__('device_cashier_breakdown')) . ': ' . htmlspecialchars($selectedDeviceName)) ?>
-                </h2>
-                <span class="text-xs text-muted">
-                    <?= ($selectedDevice === 'all') ? 'Sales rung up per cashier/staff member across all stations' : ('Cashiers who logged orders specifically on ' . htmlspecialchars($selectedDeviceName)) ?>
-                </span>
-            </div>
-            <div class="text-xs text-muted">
-                <?= count($cashierSalesRows) ?> Cashiers on Record
-            </div>
-        </div>
-        <div class="table-responsive-clean">
-            <table class="table-clean">
-                <thead>
-                    <tr>
-                        <th style="min-width: 200px;">Cashier / Staff Member</th>
-                        <th style="min-width: 100px;">Role</th>
-                        <th class="table-num" style="min-width: 100px;">Paid Orders</th>
-                        <th class="table-num" style="min-width: 110px;">Gross Sales</th>
-                        <th class="table-num" style="min-width: 100px;">Discounts</th>
-                        <th class="table-num" style="min-width: 120px;">Net Sales</th>
-                        <th class="table-num" style="min-width: 90px;">Cash</th>
-                        <th class="table-num" style="min-width: 90px;">ABA</th>
-                        <th class="table-num" style="min-width: 90px;">KHQR</th>
-                        <th class="table-num" style="min-width: 100px;">Unpaid</th>
-                        <th class="table-num" style="min-width: 90px;">Cancelled</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($cashierSalesRows)): ?>
-                        <tr>
-                            <td colspan="11">
-                                <div class="empty-state-box">
-                                    <div class="empty-state-icon"><i class="fa-solid fa-users"></i></div>
-                                    <div class="empty-state-text">No cashier sales recorded in this period.</div>
-                                </div>
-                            </td>
-                        </tr>
-                    <?php else: ?>
-                        <?php foreach ($cashierSalesRows as $cr): ?>
-                        <tr>
-                            <td>
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <div class="stat-icon blue" style="width: 32px; height: 32px; font-size: 13px; border-radius: 50%;">
-                                        <i class="fa-solid fa-user"></i>
-                                    </div>
-                                    <strong><?= htmlspecialchars($cr['cashier_name']) ?></strong>
-                                </div>
-                            </td>
-                            <td>
-                                <span class="badge badge-slate" style="text-transform: capitalize; font-size: 11px;">
-                                    <?= htmlspecialchars($cr['cashier_role']) ?>
-                                </span>
-                            </td>
-                            <td class="table-num">
-                                <strong><?= $cr['paid_orders_count'] ?></strong>
-                            </td>
-                            <td class="table-num text-muted">
-                                <?= formatUSD($cr['gross_sales']) ?>
-                            </td>
-                            <td class="table-num" style="<?= ($cr['total_discount'] > 0) ? 'color: #d97706; font-weight: 600;' : 'color: var(--text-muted);' ?>">
-                                <?= ($cr['total_discount'] > 0) ? ('-' . formatUSD($cr['total_discount'])) : '$0.00' ?>
-                            </td>
-                            <td class="table-num">
-                                <strong style="color: #16a34a; font-size: 14px;"><?= formatUSD($cr['net_sales']) ?></strong>
-                            </td>
-                            <td class="table-num text-muted">
-                                <?= formatUSD($cr['cash_total']) ?>
-                            </td>
-                            <td class="table-num text-muted">
-                                <?= formatUSD($cr['aba_total']) ?>
-                            </td>
-                            <td class="table-num text-muted">
-                                <?= formatUSD($cr['khqr_total']) ?>
-                            </td>
-                            <td class="table-num" style="<?= ($cr['unpaid_total'] > 0) ? 'color: #ea580c; font-weight: 600;' : 'color: var(--text-muted);' ?>">
-                                <?= formatUSD($cr['unpaid_total']) ?>
-                            </td>
-                            <td class="table-num" style="<?= ($cr['cancelled_count'] > 0) ? 'color: #dc2626; font-weight: 600;' : 'color: var(--text-muted);' ?>">
-                                <?= $cr['cancelled_count'] ?>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                        <!-- Grand Total Row -->
-                        <tr style="background: var(--bg-subtle); font-weight: 700; border-top: 2px solid var(--border);">
-                            <td><strong><?= htmlspecialchars(__('total')) ?></strong></td>
-                            <td>-</td>
-                            <td class="table-num"><strong><?= $cashierTotalPaidOrders ?></strong></td>
-                            <td class="table-num"><strong><?= formatUSD($cashierTotalGross) ?></strong></td>
-                            <td class="table-num" style="color: #d97706;"><strong>-<?= formatUSD($cashierTotalDiscount) ?></strong></td>
-                            <td class="table-num" style="color: #16a34a; font-size: 14.5px;"><strong><?= formatUSD($cashierTotalNet) ?></strong></td>
-                            <td class="table-num"><strong><?= formatUSD($cashierTotalCash) ?></strong></td>
-                            <td class="table-num"><strong><?= formatUSD($cashierTotalAba) ?></strong></td>
-                            <td class="table-num"><strong><?= formatUSD($cashierTotalKhqr) ?></strong></td>
-                            <td class="table-num" style="color: #ea580c;"><strong><?= formatUSD($cashierTotalUnpaid) ?></strong></td>
-                            <td class="table-num" style="color: #dc2626;"><strong><?= $cashierTotalCancelled ?></strong></td>
-                        </tr>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 8. Table: Revenue Breakdown by Dynamic Category (Proper Names & Icons) -->
-    <div class="report-table-card">
-        <div class="report-table-header">
-            <div>
-                <h2 class="report-table-title">
-                    <i class="fa-solid fa-tags" style="color: var(--primary);"></i>
-                    Revenue Breakdown by Category
-                </h2>
-                <span class="text-xs text-muted">Aggregated across all service and product categories defined in Category Control</span>
-            </div>
-            <div class="text-xs text-muted">
-                <?= count($categoryRevenueBreakdown) ?> Categories Active
-            </div>
-        </div>
-        <div class="table-responsive-clean">
-            <table class="table-clean">
-                <thead>
-                    <tr>
-                        <th style="min-width: 240px;">Category</th>
-                        <th style="min-width: 120px;">Type</th>
-                        <th class="table-num" style="min-width: 140px;">Items Sold / Serviced</th>
-                        <th class="table-num" style="min-width: 160px;">Total Revenue</th>
-                        <th style="min-width: 180px;">Share of Gross Revenue</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($categoryRevenueBreakdown)): ?>
-                        <tr>
-                            <td colspan="5">
-                                <div class="empty-state-box">
-                                    <div class="empty-state-icon"><i class="fa-solid fa-tags"></i></div>
-                                    <div class="empty-state-text">No category sales recorded in this period.</div>
-                                </div>
-                            </td>
-                        </tr>
-                    <?php else: ?>
-                        <?php foreach ($categoryRevenueBreakdown as $cr): 
-                            $cShare = ($grossRev > 0) ? round(((float)$cr['total_revenue'] / $grossRev) * 100) : 0;
-                            $cColor = !empty($cr['color']) ? $cr['color'] : '#0284c7';
-                            $cIcon = !empty($cr['icon']) ? $cr['icon'] : 'fa-tag';
-                            $cName = ($currentLang === 'km') ? $cr['name_km'] : $cr['name_en'];
-                        ?>
-                        <tr>
-                            <td>
-                                <div style="display: flex; align-items: center; gap: 12px;">
-                                    <div style="width: 34px; height: 34px; border-radius: var(--radius-md); background: <?= htmlspecialchars($cColor) ?>18; color: <?= htmlspecialchars($cColor) ?>; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; border: 1px solid <?= htmlspecialchars($cColor) ?>35;">
-                                        <i class="fa-solid <?= htmlspecialchars($cIcon) ?>"></i>
-                                    </div>
-                                    <div>
-                                        <strong style="color: var(--text-main); font-size: 14px;"><?= htmlspecialchars($cName) ?></strong>
-                                        <div class="text-xs text-muted"><?= htmlspecialchars($cr['name_en']) ?></div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td>
-                                <span class="badge badge-slate" style="text-transform: uppercase; font-size: 11px;">
-                                    <?= htmlspecialchars($cr['type']) ?>
-                                </span>
-                            </td>
-                            <td class="table-num">
-                                <strong><?= number_format((int)$cr['item_count']) ?></strong> <?= ($cr['item_count'] === 1) ? 'item' : 'items' ?>
-                            </td>
-                            <td class="table-num">
-                                <strong style="color: var(--text-main); font-size: 14.5px;"><?= formatUSD((float)$cr['total_revenue']) ?></strong>
-                                <div class="text-xs text-muted"><?= formatKHR((int)round((float)$cr['total_revenue'] * $curRate)) ?></div>
-                            </td>
-                            <td>
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <div style="flex: 1; height: 7px; background: var(--bg-subtle); border-radius: 99px; overflow: hidden; min-width: 80px;">
-                                        <div style="height: 100%; width: <?= min(100, $cShare) ?>%; background: <?= htmlspecialchars($cColor) ?>;"></div>
-                                    </div>
-                                    <span class="text-xs text-muted" style="width: 36px; text-align: right; font-weight: 600;"><?= $cShare ?>%</span>
-                                </div>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 7. Tables Dual Grid: Service Packages & Vehicle Sizes (Side-by-Side on Desktop, Stack on Tablet/Mobile) -->
-    <div class="tables-dual-grid">
-        <!-- 7a. Wash Service Packages -->
-        <div class="report-table-card">
-            <div class="report-table-header">
-                <div>
-                    <h2 class="report-table-title" style="font-size: 15px;">
-                        <i class="fa-solid fa-shower" style="color: var(--primary);"></i> Revenue by Wash Service
-                    </h2>
-                </div>
-            </div>
-            <div class="table-responsive-clean">
-                <table class="table-clean">
-                    <thead>
-                        <tr>
-                            <th>Service Package</th>
-                            <th class="table-num">Jobs</th>
-                            <th class="table-num">Revenue</th>
-                            <th style="min-width: 120px;">Share</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (empty($servicesBreakdown)): ?>
-                            <tr>
-                                <td colspan="4">
-                                    <div class="empty-state-box">
-                                        <div class="empty-state-icon"><i class="fa-solid fa-shower"></i></div>
-                                        <div class="empty-state-text">No wash services recorded.</div>
-                                    </div>
-                                </td>
-                            </tr>
-                        <?php else: ?>
-                            <?php foreach ($servicesBreakdown as $sb): 
-                                $share = ($grossRev > 0) ? round(((float)$sb['service_revenue'] / $grossRev) * 100) : 0;
-                            ?>
-                            <tr>
-                                <td><strong><?= htmlspecialchars($sb['service_name']) ?></strong></td>
-                                <td class="table-num"><?= $sb['qty'] ?></td>
-                                <td class="table-num">
-                                    <strong><?= formatUSD((float)$sb['service_revenue']) ?></strong>
-                                </td>
-                                <td>
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <div style="flex: 1; height: 6px; background: var(--bg-subtle); border-radius: 99px; overflow: hidden;">
-                                            <div style="height: 100%; width: <?= min(100, $share) ?>%; background: var(--primary);"></div>
-                                        </div>
-                                        <span class="text-xs text-muted" style="width: 32px; text-align: right;"><?= $share ?>%</span>
-                                    </div>
-                                </td>
-                            </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- 7b. Income by Vehicle Size -->
-        <div class="report-table-card">
-            <div class="report-table-header">
-                <div>
-                    <h2 class="report-table-title" style="font-size: 15px;">
-                        <i class="fa-solid fa-car-side" style="color: var(--primary);"></i> Revenue by Vehicle Size
-                    </h2>
-                </div>
-            </div>
-            <div class="table-responsive-clean">
-                <table class="table-clean">
-                    <thead>
-                        <tr>
-                            <th>Vehicle Size</th>
-                            <th class="table-num">Vehicles</th>
-                            <th class="table-num">Revenue</th>
-                            <th style="min-width: 120px;">Share</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (empty($vehicleBreakdown)): ?>
-                            <tr>
-                                <td colspan="4">
-                                    <div class="empty-state-box">
-                                        <div class="empty-state-icon"><i class="fa-solid fa-car"></i></div>
-                                        <div class="empty-state-text">No vehicle records available.</div>
-                                    </div>
-                                </td>
-                            </tr>
-                        <?php else: ?>
-                            <?php foreach ($vehicleBreakdown as $vb): 
-                                $share = ($grossRev > 0) ? round(((float)$vb['v_revenue'] / $grossRev) * 100) : 0;
-                            ?>
-                            <tr>
-                                <td><?= vehicleTypeBadge($vb['vehicle_type']) ?></td>
-                                <td class="table-num"><?= $vb['count'] ?></td>
-                                <td class="table-num">
-                                    <strong><?= formatUSD((float)$vb['v_revenue']) ?></strong>
-                                </td>
-                                <td>
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <div style="flex: 1; height: 6px; background: var(--bg-subtle); border-radius: 99px; overflow: hidden;">
-                                            <div style="height: 100%; width: <?= min(100, $share) ?>%; background: #16a34a;"></div>
-                                        </div>
-                                        <span class="text-xs text-muted" style="width: 32px; text-align: right;"><?= $share ?>%</span>
-                                    </div>
-                                </td>
-                            </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <!-- 8. Table: Basic Maintenance & Minor Repair Services -->
-    <div class="report-table-card">
-        <div class="report-table-header">
-            <div>
-                <h2 class="report-table-title">
-                    <i class="fa-solid fa-screwdriver-wrench" style="color: #ea580c;"></i>
-                    Basic Maintenance &amp; Minor Repair Labor
-                </h2>
-                <span class="text-xs text-muted">Mechanical inspection, tire changes, oil servicing labor, and repairs</span>
-            </div>
-            <div class="text-xs">
-                Total Repair Labor: <strong style="color: #ea580c; font-size: 14px;"><?= formatUSD($repairRevenue) ?></strong>
-            </div>
-        </div>
-        <div class="table-responsive-clean">
-            <table class="table-clean">
-                <thead>
-                    <tr>
-                        <th style="min-width: 260px;">Repair Service / Labor</th>
-                        <th class="table-num" style="min-width: 140px;">Jobs Performed</th>
-                        <th class="table-num" style="min-width: 160px;">Labor Revenue</th>
-                        <th style="min-width: 180px;">Share of Repairs</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($repairBreakdown)): ?>
-                        <tr>
-                            <td colspan="4">
-                                <div class="empty-state-box">
-                                    <div class="empty-state-icon"><i class="fa-solid fa-wrench"></i></div>
-                                    <div class="empty-state-text">No minor repair jobs completed in this period.</div>
-                                </div>
-                            </td>
-                        </tr>
-                    <?php else: ?>
-                        <?php foreach ($repairBreakdown as $rb): 
-                            $rShare = ($repairRevenue > 0) ? round(((float)$rb['service_revenue'] / $repairRevenue) * 100) : 0;
-                        ?>
-                        <tr>
-                            <td>
-                                <strong><i class="fa-solid fa-wrench mr-1" style="color: #ea580c;"></i> <?= htmlspecialchars($rb['service_name']) ?></strong>
-                            </td>
-                            <td class="table-num">
-                                <strong><?= $rb['qty'] ?></strong> <?= ($rb['qty'] === 1) ? 'job' : 'jobs' ?>
-                            </td>
-                            <td class="table-num">
-                                <strong style="color: var(--text-main);"><?= formatUSD((float)$rb['service_revenue']) ?></strong>
-                                <div class="text-xs text-muted"><?= formatKHR((int)round((float)$rb['service_revenue'] * $curRate)) ?></div>
-                            </td>
-                            <td>
-                                <div style="display: flex; align-items: center; gap: 8px;">
-                                    <div style="flex: 1; height: 6px; background: var(--bg-subtle); border-radius: 99px; overflow: hidden; min-width: 60px;">
-                                        <div style="height: 100%; width: <?= min(100, $rShare) ?>%; background: #ea580c;"></div>
-                                    </div>
-                                    <span class="text-xs text-muted" style="width: 34px; text-align: right;"><?= $rShare ?>%</span>
-                                </div>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 9. Table: Spare Parts & Car Care Products Sales Breakdown -->
-    <div class="report-table-card">
-        <div class="report-table-header">
-            <div>
-                <h2 class="report-table-title">
-                    <i class="fa-solid fa-box-open" style="color: #9333ea;"></i>
-                    Spare Parts &amp; Car Care Product Sales
-                </h2>
-                <span class="text-xs text-muted">Stock turnover, acquisition cost (COGS), gross revenue, and gross profit</span>
-            </div>
-            <div style="display: flex; gap: 16px; font-size: 13px; flex-wrap: wrap;">
-                <span>Revenue: <strong style="color: #9333ea;"><?= formatUSD($productRevenue) ?></strong></span>
-                <?php if ($canViewProfit): ?>
-                <span>COGS: <strong><?= formatUSD($productCogs) ?></strong></span>
-                <span>Gross Profit: <strong style="color: #16a34a;"><?= formatUSD($productProfit) ?></strong></span>
-                <?php endif; ?>
-            </div>
-        </div>
-        <div class="table-responsive-clean">
-            <table class="table-clean">
-                <thead>
-                    <tr>
-                        <th style="min-width: 220px;">Product / Part</th>
-                        <th style="min-width: 160px;">Category</th>
-                        <th style="min-width: 120px;">Brand</th>
-                        <th class="table-num" style="min-width: 100px;">Units Sold</th>
-                        <th class="table-num" style="min-width: 140px;">Sales Revenue</th>
-                        <?php if ($canViewProfit): ?>
-                        <th class="table-num" style="min-width: 120px;">COGS Cost</th>
-                        <th class="table-num" style="min-width: 140px;">Gross Profit</th>
-                        <th style="min-width: 130px;">Margin</th>
-                        <?php endif; ?>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($topProducts)): ?>
-                        <tr>
-                            <td colspan="<?= $canViewProfit ? 8 : 5 ?>">
-                                <div class="empty-state-box">
-                                    <div class="empty-state-icon"><i class="fa-solid fa-oil-can"></i></div>
-                                    <div class="empty-state-text">No engine oil or car care product sales recorded in this period.</div>
-                                </div>
-                            </td>
-                        </tr>
-                    <?php else: ?>
-                        <?php foreach ($topProducts as $tp): 
-                            $sales = (float)$tp['total_sales'];
-                            $cost = (float)$tp['total_cost'];
-                            $profit = (float)$tp['gross_profit'];
-                            $marginP = ($sales > 0) ? round(($profit / $sales) * 100) : 0;
-                            $catLabel = ($currentLang === 'km') ? $tp['category_name_km'] : $tp['category_name_en'];
-                            $catColor = !empty($tp['category_color']) ? $tp['category_color'] : '#64748b';
-                            $catIcon = !empty($tp['category_icon']) ? $tp['category_icon'] : 'fa-box-open';
-                        ?>
-                        <tr>
-                            <td><strong><?= htmlspecialchars($tp['name']) ?></strong></td>
-                            <td>
-                                <span class="badge" style="background: <?= htmlspecialchars($catColor) ?>18; color: <?= htmlspecialchars($catColor) ?>; border: 1px solid <?= htmlspecialchars($catColor) ?>35; font-size: 11px;">
-                                    <i class="fa-solid <?= htmlspecialchars($catIcon) ?> mr-1"></i>
-                                    <?= htmlspecialchars($catLabel) ?>
-                                </span>
-                            </td>
-                            <td><?= htmlspecialchars($tp['brand']) ?></td>
-                            <td class="table-num"><strong><?= (int)$tp['total_qty'] ?></strong></td>
-                            <td class="table-num"><strong><?= formatUSD($sales) ?></strong></td>
-                            <?php if ($canViewProfit): ?>
-                            <td class="table-num text-muted"><?= formatUSD($cost) ?></td>
-                            <td class="table-num" style="color: #16a34a; font-weight: 700;"><?= formatUSD($profit) ?></td>
-                            <td>
-                                <div style="display: flex; align-items: center; gap: 8px;">
-                                    <div style="flex: 1; height: 6px; background: var(--bg-subtle); border-radius: 99px; overflow: hidden; min-width: 40px;">
-                                        <div style="height: 100%; width: <?= max(0, min(100, $marginP)) ?>%; background: #0284c7;"></div>
-                                    </div>
-                                    <span class="text-xs text-muted" style="width: 32px; text-align: right;"><?= $marginP ?>%</span>
-                                </div>
-                            </td>
-                            <?php endif; ?>
-                        </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 10. Table: Washer Production & Net Contribution (Strictly role = 'washer') -->
-    <div class="report-table-card">
-        <div class="report-table-header">
-            <div>
-                <h2 class="report-table-title">
-                    <i class="fa-solid fa-users-gear" style="color: var(--primary);"></i>
-                    Washer Production
-                </h2>
-                <span class="text-xs text-muted">Individual crew production, jobs cleaned, and revenue handled (washers only)</span>
-            </div>
-            <div class="text-xs text-muted">
-                <?= count($washerBreakdown) ?> Washers on Record
-            </div>
-        </div>
-        <div class="table-responsive-clean">
-            <table class="table-clean">
-                <thead>
-                    <tr>
-                        <th style="min-width: 220px;">Washer Name</th>
-                        <th class="table-num" style="min-width: 140px;">Jobs Cleaned</th>
-                        <th class="table-num" style="min-width: 160px;">Revenue Handled</th>
-                        <th style="min-width: 160px;">Efficiency Share</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($washerBreakdown)): ?>
-                        <tr>
-                            <td colspan="4">
-                                <div class="empty-state-box">
-                                    <div class="empty-state-icon"><i class="fa-solid fa-user-group"></i></div>
-                                    <div class="empty-state-text">No washer production records found for this period.</div>
-                                </div>
-                            </td>
-                        </tr>
-                    <?php else: ?>
-                        <?php foreach ($washerBreakdown as $wb): 
-                            $revH = (float)$wb['revenue_handled'];
-                            $eff = ($grossRev > 0) ? round(($revH / $grossRev) * 100) : 0;
-                        ?>
-                        <tr>
-                            <td>
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <div class="stat-icon purple" style="width: 32px; height: 32px; font-size: 14px; border-radius: 50%;">
-                                        <i class="fa-solid fa-user"></i>
-                                    </div>
-                                    <strong><?= htmlspecialchars($wb['full_name']) ?></strong>
-                                </div>
-                            </td>
-                            <td class="table-num">
-                                <strong><?= $wb['jobs_count'] ?></strong> <?= ($wb['jobs_count'] === 1) ? 'vehicle' : 'vehicles' ?>
-                            </td>
-                            <td class="table-num">
-                                <strong><?= formatUSD($revH) ?></strong>
-                                <div class="text-xs text-muted"><?= formatKHR((int)round($revH * $curRate)) ?></div>
-                            </td>
-                            <td>
-                                <div style="display: flex; align-items: center; gap: 8px;">
-                                    <div style="flex: 1; height: 6px; background: var(--bg-subtle); border-radius: 99px; overflow: hidden; min-width: 60px;">
-                                        <div style="height: 100%; width: <?= min(100, $eff) ?>%; background: #0284c7;"></div>
-                                    </div>
-                                    <span class="text-xs text-muted" style="width: 34px; text-align: right;"><?= $eff ?>%</span>
-                                </div>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Vehicle Waiting & Washing Time Report -->
-    <div class="card" style="margin-top: 24px;">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div>
-                <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
-                    <i class="fa-solid fa-stopwatch" style="color: var(--primary);"></i>
-                    Vehicle Waiting &amp; Washing Durations
-                </h3>
-                <p class="text-xs text-muted" style="margin-top: 2px;">
-                    Tracks arrival-to-start waiting time, wash/service duration in bay, and total turnaround time per vehicle.
-                </p>
-            </div>
-            <div style="display: flex; gap: 10px;">
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Avg Wait:</span> <strong><?= $avgWaitMins ?> mins</strong>
-                </div>
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Avg Service:</span> <strong><?= $avgWashMins ?> mins</strong>
-                </div>
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Avg Total:</span> <strong style="color: var(--primary);"><?= $avgTotalMins ?> mins</strong>
-                </div>
-            </div>
-        </div>
-
-        <div style="overflow-x: auto;">
-            <table class="table-clean">
-                <thead>
-                    <tr>
-                        <th style="min-width: 140px;">Vehicle Plate</th>
-                        <th style="min-width: 120px;">Customer</th>
-                        <th style="min-width: 160px;">Service</th>
-                        <th style="min-width: 120px;">Bay Used</th>
-                        <th style="min-width: 110px;">Arrived</th>
-                        <th style="min-width: 110px;">Started</th>
-                        <th style="min-width: 110px;">Finished</th>
-                        <th style="min-width: 110px;" class="table-num">Waiting Time</th>
-                        <th style="min-width: 110px;" class="table-num">Washing Time</th>
-                        <th style="min-width: 110px;" class="table-num">Total Time</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($serviceTimes)): ?>
-                        <tr>
-                            <td colspan="10" style="text-align: center; color: var(--text-muted); padding: 24px;">
-                                No vehicle service duration records found for this period.
-                            </td>
-                        </tr>
-                    <?php else: ?>
-                        <?php foreach ($serviceTimes as $st): ?>
-                            <tr>
-                                <td>
-                                    <div style="display: flex; align-items: center; gap: 6px;">
-                                        <span style="font-family: var(--font-mono); font-weight: 800; background: var(--bg-subtle); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border);">
-                                            <?= htmlspecialchars($st['plate_number']) ?>
-                                        </span>
-                                        <?= vehicleTypeBadge($st['vehicle_type']) ?>
-                                    </div>
-                                    <div class="text-xs text-muted" style="margin-top: 2px;">#<?= htmlspecialchars($st['order_number']) ?></div>
-                                </td>
-                                <td>
-                                    <strong><?= htmlspecialchars($st['customer_name'] ?? 'Guest') ?></strong>
-                                </td>
-                                <td style="font-size: 13px;">
-                                    <?= htmlspecialchars($st['service_names'] ?: 'Car Wash') ?>
-                                </td>
-                                <td>
-                                    <?php if (!empty($st['bay_name'])): ?>
-                                        <span class="badge badge-primary"><i class="fa-solid fa-warehouse mr-1"></i> <?= htmlspecialchars($st['bay_name']) ?></span>
-                                    <?php else: ?>
-                                        <span class="text-xs text-muted">-</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="text-xs text-muted" style="font-family: var(--font-mono);">
-                                    <?= !empty($st['arrived_at']) ? date('h:i A', strtotime($st['arrived_at'])) : date('h:i A', strtotime($st['created_at'])) ?>
-                                </td>
-                                <td class="text-xs text-muted" style="font-family: var(--font-mono);">
-                                    <?= !empty($st['started_at']) ? date('h:i A', strtotime($st['started_at'])) : '-' ?>
-                                </td>
-                                <td class="text-xs text-muted" style="font-family: var(--font-mono);">
-                                    <?= !empty($st['finished_at']) ? date('h:i A', strtotime($st['finished_at'])) : (!empty($st['paid_at']) ? date('h:i A', strtotime($st['paid_at'])) : '-') ?>
-                                </td>
-                                <td class="table-num">
-                                    <?php if ($st['wait_minutes'] !== null): ?>
-                                        <strong style="color: var(--warning);"><?= $st['wait_minutes'] ?>m</strong>
-                                    <?php else: ?>
-                                        <span class="text-xs text-muted">-</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="table-num">
-                                    <?php if ($st['wash_minutes'] !== null): ?>
-                                        <strong style="color: var(--info);"><?= $st['wash_minutes'] ?>m</strong>
-                                    <?php else: ?>
-                                        <span class="text-xs text-muted">-</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="table-num">
-                                    <?php if ($st['total_minutes'] !== null): ?>
-                                        <strong style="color: var(--success);"><?= $st['total_minutes'] ?>m</strong>
-                                    <?php else: ?>
-                                        <span class="text-xs text-muted">-</span>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 1. BAY UTILIZATION REPORT -->
-    <div class="card" style="margin-top: 24px;">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div>
-                <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
-                    <i class="fa-solid fa-warehouse" style="color: var(--primary);"></i>
-                    Bay Utilization Report
-                </h3>
-                <p class="text-xs text-muted" style="margin-top: 2px;">
-                    Measures busy minutes vs available capacity across shop bays (<?= $bayReport['daily_open_hours'] ?> operating hrs/day).
-                </p>
-            </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Shop Utilization:</span> <strong style="color: var(--primary); font-size: 14px;"><?= $bayReport['overall_utilization_percent'] ?>%</strong>
-                </div>
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Total Busy:</span> <strong><?= $bayReport['total_busy_minutes'] ?> mins</strong>
-                </div>
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Total Capacity:</span> <strong><?= $bayReport['total_available_minutes'] ?> mins</strong>
-                </div>
-                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=bay_utilization" class="btn btn-secondary btn-sm" title="Download spreadsheet">
-                    <i class="fa-solid fa-file-csv mr-1"></i> CSV
-                </a>
-            </div>
-        </div>
-
-        <div style="overflow-x: auto;">
-            <table class="table-clean">
-                <thead>
-                    <tr>
-                        <th style="min-width: 80px;">Bay #</th>
-                        <th style="min-width: 150px;">Bay Name</th>
-                        <th style="min-width: 120px;">Skill Tag</th>
-                        <th style="min-width: 100px;" class="table-num">Cars Handled</th>
-                        <th style="min-width: 110px;" class="table-num">Busy Time</th>
-                        <th style="min-width: 110px;" class="table-num">Available Time</th>
-                        <th style="min-width: 140px;">Utilization %</th>
-                        <th style="min-width: 100px;" class="table-num">Idle Time</th>
-                        <th style="min-width: 100px;" class="table-num">Idle %</th>
-                        <th style="min-width: 120px;" class="table-num">Revenue (USD)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($bayReport['bays'])): ?>
-                        <tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 24px;">No bays configured.</td></tr>
-                    <?php else: ?>
-                        <?php foreach ($bayReport['bays'] as $b): ?>
-                            <tr>
-                                <td><span class="badge badge-slate" style="font-family: var(--font-mono); font-weight: 700;">Bay <?= $b['bay_number'] ?></span></td>
-                                <td>
-                                    <strong><?= htmlspecialchars($b['name_en']) ?></strong>
-                                    <div class="text-xs text-muted"><?= htmlspecialchars($b['name_km']) ?></div>
-                                </td>
-                                <td>
-                                    <span class="badge badge-info" style="font-size: 10px; text-transform: capitalize;">
-                                        <?= htmlspecialchars(str_replace('_', ' ', $b['skill_tag'])) ?>
-                                    </span>
-                                </td>
-                                <td class="table-num" style="font-weight: 700;"><?= $b['orders_count'] ?></td>
-                                <td class="table-num"><?= $b['busy_minutes'] ?>m</td>
-                                <td class="table-num text-muted"><?= $b['available_minutes'] ?>m</td>
-                                <td>
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <div style="flex: 1; height: 8px; background: var(--bg-subtle); border-radius: 99px; overflow: hidden; min-width: 60px;">
-                                            <div style="height: 100%; width: <?= min(100, $b['utilization_percent']) ?>%; background: <?= $b['utilization_percent'] > 75 ? '#10b981' : ($b['utilization_percent'] < 30 ? '#f59e0b' : 'var(--primary)') ?>;"></div>
-                                        </div>
-                                        <span style="font-size: 12px; font-weight: 700; font-family: var(--font-mono); width: 44px; text-align: right;">
-                                            <?= $b['utilization_percent'] ?>%
-                                        </span>
-                                    </div>
-                                </td>
-                                <td class="table-num text-muted"><?= $b['idle_minutes'] ?>m</td>
-                                <td class="table-num" style="color: #94a3b8;"><?= $b['idle_percent'] ?>%</td>
-                                <td class="table-num" style="font-weight: 700; color: #16a34a;">
-                                    <?= formatUSD((float)$b['total_usd']) ?>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 2. TECHNICIAN & WASHER EFFICIENCY REPORT -->
-    <div class="card" style="margin-top: 24px;">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div>
-                <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
-                    <i class="fa-solid fa-bolt" style="color: #9333ea;"></i>
-                    Technician &amp; Washer Efficiency Report
-                </h3>
-                <p class="text-xs text-muted" style="margin-top: 2px;">
-                    Rolling 7-day ratio of Standard catalog duration vs Actual duration (Standard / Actual). Higher % represents faster execution.
-                </p>
-            </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Overall Efficiency:</span> <strong style="color: #9333ea; font-size: 14px;"><?= $techReport['overall_efficiency_percent'] ?>%</strong>
-                </div>
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Standard Time:</span> <strong><?= $techReport['total_standard_hours'] ?>h</strong>
-                </div>
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Actual Time:</span> <strong><?= $techReport['total_actual_hours'] ?>h</strong>
-                </div>
-                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=tech_efficiency" class="btn btn-secondary btn-sm" title="Download spreadsheet">
-                    <i class="fa-solid fa-file-csv mr-1"></i> CSV
-                </a>
-            </div>
-        </div>
-
-        <div style="overflow-x: auto;">
-            <table class="table-clean">
-                <thead>
-                    <tr>
-                        <th style="min-width: 160px;">Staff Member</th>
-                        <th style="min-width: 120px;">Role</th>
-                        <th style="min-width: 100px;" class="table-num">Completed Jobs</th>
-                        <th style="min-width: 120px;" class="table-num">Standard Time</th>
-                        <th style="min-width: 120px;" class="table-num">Actual Time</th>
-                        <th style="min-width: 140px;">Efficiency %</th>
-                        <th style="min-width: 110px;" class="table-num">Speed Factor</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($techReport['staff'])): ?>
-                        <tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 24px;">No completed staff tasks found in the rolling 7-day window.</td></tr>
-                    <?php else: ?>
-                        <?php foreach ($techReport['staff'] as $st): 
-                            $eff = $st['efficiency_percent'];
-                            $badgeColor = $eff >= 105 ? 'badge-success' : ($eff < 90 ? 'badge-warning' : 'badge-info');
-                        ?>
-                            <tr>
-                                <td>
-                                    <strong><?= htmlspecialchars($st['staff_name']) ?></strong>
-                                    <div class="text-xs text-muted">@<?= htmlspecialchars($st['username'] ?? '') ?></div>
-                                </td>
-                                <td>
-                                    <span class="badge badge-slate" style="font-size: 10px; text-transform: capitalize;"><?= htmlspecialchars($st['staff_role']) ?></span>
-                                </td>
-                                <td class="table-num" style="font-weight: 700;"><?= $st['completed_jobs'] ?></td>
-                                <td class="table-num text-muted"><?= $st['standard_minutes'] ?>m</td>
-                                <td class="table-num" style="font-weight: 600;"><?= $st['actual_minutes'] ?>m</td>
-                                <td>
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <div style="flex: 1; height: 8px; background: var(--bg-subtle); border-radius: 99px; overflow: hidden; min-width: 60px;">
-                                            <div style="height: 100%; width: <?= min(100, $eff) ?>%; background: #9333ea;"></div>
-                                        </div>
-                                        <span class="badge <?= $badgeColor ?>" style="font-family: var(--font-mono); font-size: 11px;">
-                                            <?= $eff ?>%
-                                        </span>
-                                    </div>
-                                </td>
-                                <td class="table-num" style="font-family: var(--font-mono); font-weight: 700;">
-                                    <?= $st['factor'] ?>x
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 3. BOTTLENECK & IDLE TIME PATTERN REPORT -->
-    <div class="card" style="margin-top: 24px;">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div>
-                <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
-                    <i class="fa-solid fa-chart-simple" style="color: #f59e0b;"></i>
-                    Bottleneck &amp; Idle Time Pattern Report
-                </h3>
-                <p class="text-xs text-muted" style="margin-top: 2px;">
-                    Analyzes vehicle volume and wait times by hour of the day and day of the week to reveal bottlenecks and idle bays.
-                </p>
-            </div>
-            <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=bottlenecks" class="btn btn-secondary btn-sm" title="Download spreadsheet">
-                <i class="fa-solid fa-file-csv mr-1"></i> CSV
-            </a>
-        </div>
-
-        <!-- Pattern Insights Alert Cards -->
-        <?php if (!empty($patternReport['insights'])): ?>
-            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-                <?php foreach ($patternReport['insights'] as $ins): ?>
-                    <div style="display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; border-radius: var(--radius-md); background: var(--bg-subtle); border-left: 4px solid <?= $ins['color'] ?>;">
-                        <i class="fa-solid <?= $ins['icon'] ?>" style="color: <?= $ins['color'] ?>; font-size: 16px; margin-top: 2px;"></i>
-                        <div>
-                            <strong style="color: var(--text-main); font-size: 13.5px;"><?= htmlspecialchars($ins['title']) ?></strong>
-                            <div class="text-xs text-muted" style="margin-top: 2px; line-height: 1.5;"><?= htmlspecialchars($ins['text']) ?></div>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
-
-        <!-- Hourly & Day Matrix Table -->
-        <div style="overflow-x: auto;">
-            <table class="table-clean">
-                <thead>
-                    <tr>
-                        <th style="min-width: 140px;">Day of Week</th>
-                        <th style="min-width: 140px;">Time Window</th>
-                        <th style="min-width: 100px;" class="table-num">Vehicle Volume</th>
-                        <th style="min-width: 120px;" class="table-num">Avg Customer Wait</th>
-                        <th style="min-width: 120px;" class="table-num">Avg Service Duration</th>
-                        <th style="min-width: 120px;">Queue Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($patternReport['matrix'])): ?>
-                        <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 24px;">No hourly pattern data found for this period.</td></tr>
-                    <?php else: ?>
-                        <?php foreach ($patternReport['matrix'] as $pm): 
-                            $wait = (float)$pm['avg_wait_mins'];
-                            $statusBadge = $wait > 20 ? 'badge-danger' : ($wait > 10 ? 'badge-warning' : 'badge-success');
-                            $statusLabel = $wait > 20 ? 'Bottleneck' : ($wait > 10 ? 'Moderate' : 'Smooth Flow');
-                        ?>
-                            <tr>
-                                <td><strong><?= htmlspecialchars($pm['day_name']) ?></strong></td>
-                                <td style="font-family: var(--font-mono); font-size: 12.5px;">
-                                    <?= sprintf('%02d:00 - %02d:00', $pm['hour_of_day'], $pm['hour_of_day'] + 1) ?>
-                                </td>
-                                <td class="table-num" style="font-weight: 700;"><?= $pm['volume'] ?> cars</td>
-                                <td class="table-num" style="font-weight: 700; color: <?= $wait > 15 ? 'var(--danger)' : 'var(--text-main)' ?>;">
-                                    <?= $wait ?>m
-                                </td>
-                                <td class="table-num text-muted"><?= $pm['avg_service_mins'] ?>m</td>
-                                <td>
-                                    <span class="badge <?= $statusBadge ?>" style="font-size: 10px;">
-                                        <?= $statusLabel ?>
-                                    </span>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 4. STAFF TIMECARDS & LABOR HOURS LOG -->
-    <div class="card" style="margin-top: 24px;">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div>
-                <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
-                    <i class="fa-solid fa-clock" style="color: #10b981;"></i>
-                    Staff Timecards &amp; Labor Hours Log
-                </h3>
-                <p class="text-xs text-muted" style="margin-top: 2px;">
-                    Records staff clock-in and clock-out hours. Managers can correct mistakes with a mandatory audit reason.
-                </p>
-            </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Total Labor Hours:</span> <strong style="color: #10b981; font-size: 14px;"><?= number_format($cphReport['labor_hours'], 2) ?>h</strong>
-                </div>
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Cars / Labor Hr:</span> <strong style="font-size: 14px;"><?= number_format($cphReport['cars_per_labor_hour'], 2) ?></strong>
-                </div>
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Target:</span> <strong><?= number_format($cphReport['target'], 1) ?>/hr</strong>
-                </div>
-                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=timecards" class="btn btn-secondary btn-sm" title="Download spreadsheet">
-                    <i class="fa-solid fa-file-csv mr-1"></i> CSV
-                </a>
-            </div>
-        </div>
-
-        <div style="overflow-x: auto;">
-            <table class="table-clean">
-                <thead>
-                    <tr>
-                        <th style="min-width: 120px;">Timecard UID</th>
-                        <th style="min-width: 140px;">Staff Member</th>
-                        <th style="min-width: 110px;">Role</th>
-                        <th style="min-width: 140px;">Clock In</th>
-                        <th style="min-width: 140px;">Clock Out</th>
-                        <th style="min-width: 100px;" class="table-num">Hours Worked</th>
-                        <th style="min-width: 100px;">Status</th>
-                        <th style="min-width: 140px;">Notes / Correction</th>
-                        <th style="min-width: 90px; text-align: center;">Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($timecardList)): ?>
-                        <tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 24px;">No staff timecards recorded for this date range.</td></tr>
-                    <?php else: ?>
-                        <?php foreach ($timecardList as $tc): 
-                            $statusBadge = ($tc['status'] === 'active') ? 'badge-primary' : (($tc['status'] === 'corrected') ? 'badge-warning' : 'badge-success');
-                        ?>
-                            <tr>
-                                <td>
-                                    <span style="font-family: var(--font-mono); font-weight: 700; font-size: 12px;"><?= htmlspecialchars($tc['timecard_uid']) ?></span>
-                                </td>
-                                <td>
-                                    <strong><?= htmlspecialchars($tc['staff_name']) ?></strong>
-                                </td>
-                                <td>
-                                    <span class="badge badge-slate" style="font-size: 10px; text-transform: capitalize;"><?= htmlspecialchars($tc['staff_role']) ?></span>
-                                </td>
-                                <td style="font-family: var(--font-mono); font-size: 12px;" class="text-muted">
-                                    <?= date('d M, h:i A', strtotime($tc['clock_in'])) ?>
-                                </td>
-                                <td style="font-family: var(--font-mono); font-size: 12px;" class="text-muted">
-                                    <?= $tc['clock_out'] ? date('d M, h:i A', strtotime($tc['clock_out'])) : '<span class="badge badge-info" style="font-size: 10px;">Active</span>' ?>
-                                </td>
-                                <td class="table-num" style="font-family: var(--font-mono); font-weight: 800; font-size: 14px; color: #10b981;">
-                                    <?= $tc['total_hours'] !== null ? number_format((float)$tc['total_hours'], 2) . 'h' : '-' ?>
-                                </td>
-                                <td>
-                                    <span class="badge <?= $statusBadge ?>" style="font-size: 10px; text-transform: capitalize;">
-                                        <?= htmlspecialchars($tc['status']) ?>
-                                    </span>
-                                </td>
-                                <td style="font-size: 12px;">
-                                    <?php if (!empty($tc['latest_correction_reason'])): ?>
-                                        <div style="color: #b45309; font-weight: 600;">
-                                            <i class="fa-solid fa-pen-to-square mr-1"></i> Corrected: <?= htmlspecialchars($tc['latest_correction_reason']) ?>
-                                        </div>
-                                        <div class="text-xs text-muted">By <?= htmlspecialchars($tc['latest_corrected_by'] ?? 'Manager') ?></div>
-                                    <?php elseif (!empty($tc['notes'])): ?>
-                                        <span class="text-muted"><?= htmlspecialchars($tc['notes']) ?></span>
-                                    <?php else: ?>
-                                        <span class="text-muted">-</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td style="text-align: center;">
-                                    <button type="button" class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 3px 8px;" onclick="openTimecardCorrectionModal(<?= (int)$tc['id'] ?>, '<?= htmlspecialchars($tc['timecard_uid'], ENT_QUOTES) ?>', '<?= htmlspecialchars($tc['staff_name'], ENT_QUOTES) ?>', '<?= date('Y-m-d\TH:i', strtotime($tc['clock_in'])) ?>', '<?= $tc['clock_out'] ? date('Y-m-d\TH:i', strtotime($tc['clock_out'])) : date('Y-m-d\TH:i') ?>')" title="Correct Timecard (Manager)">
-                                        <i class="fa-solid fa-pen-to-square mr-1"></i> Correct
-                                    </button>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 5. UPSELL PERFORMANCE & CASHIER CONVERSION REPORT -->
-    <?php
-    require_once dirname(__DIR__, 2) . '/core/MembershipManager.php';
-    $upsellReport = MembershipManager::getUpsellReport($pdo, $startDate, $endDate);
-    ?>
-    <div class="card" style="margin-top: 24px;">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div>
-                <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
-                    <i class="fa-solid fa-arrow-trend-up" style="color: #6366f1;"></i>
-                    Upsell Performance &amp; Cashier Conversion
-                </h3>
-                <p class="text-xs text-muted" style="margin-top: 2px;">
-                    Tracks how many targeted upsell offers (SUV upgrade, synthetic oil) were presented, accepted, or declined by each cashier.
-                </p>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: center;">
-                <div style="background: var(--bg-subtle); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px;">
-                    <span class="text-muted">Offers Shown:</span> <strong><?= $upsellReport['total_shown'] ?></strong>
-                </div>
-                <div style="background: #ecfdf5; border: 1px solid #a7f3d0; padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px; color: #065f46;">
-                    <span>Accepted:</span> <strong><?= $upsellReport['total_accepted'] ?></strong>
-                </div>
-                <div style="background: #fff1f2; border: 1px solid #fecdd3; padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px; color: #9f1239;">
-                    <span>Declined:</span> <strong><?= $upsellReport['total_declined'] ?></strong>
-                </div>
-                <div style="background: #eef2ff; border: 1px solid #c7d2fe; padding: 6px 14px; border-radius: var(--radius-sm); font-size: 13px; color: #4338ca;">
-                    <span>Conversion Rate:</span> <strong style="font-size: 15px;"><?= $upsellReport['conversion_rate'] ?>%</strong>
-                </div>
-            </div>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px;">
-            <!-- By Cashier -->
-            <div style="border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden;">
-                <div style="padding: 10px 14px; background: var(--bg-subtle); font-weight: 700; font-size: 13px; border-bottom: 1px solid var(--border);">
-                    <i class="fa-solid fa-user-tag mr-1 text-primary"></i> Conversion Breakdown by Cashier
-                </div>
-                <table class="table-clean" style="margin: 0;">
-                    <thead>
-                        <tr>
-                            <th>Cashier Name</th>
-                            <th class="table-num">Shown</th>
-                            <th class="table-num">Accepted</th>
-                            <th class="table-num">Declined</th>
-                            <th class="table-num">Win Rate %</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (empty($upsellReport['by_cashier'])): ?>
-                            <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 16px;">No cashier upsell logs recorded for this period.</td></tr>
-                        <?php else: ?>
-                            <?php foreach ($upsellReport['by_cashier'] as $bc): ?>
-                                <tr>
-                                    <td><strong><?= htmlspecialchars($bc['cashier_name']) ?></strong></td>
-                                    <td class="table-num"><?= $bc['total_offers'] ?></td>
-                                    <td class="table-num" style="color: var(--success); font-weight: 700;"><?= $bc['accepted_count'] ?></td>
-                                    <td class="table-num text-muted"><?= $bc['declined_count'] ?></td>
-                                    <td class="table-num">
-                                        <span class="badge <?= $bc['conversion_rate'] >= 40 ? 'badge-success' : ($bc['conversion_rate'] >= 20 ? 'badge-primary' : 'badge-slate') ?>" style="font-size: 11px;">
-                                            <?= $bc['conversion_rate'] ?>%
-                                        </span>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- By Rule -->
-            <div style="border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden;">
-                <div style="padding: 10px 14px; background: var(--bg-subtle); font-weight: 700; font-size: 13px; border-bottom: 1px solid var(--border);">
-                    <i class="fa-solid fa-bullseye mr-1" style="color: #6366f1;"></i> Conversion by Upsell Campaign Rule
-                </div>
-                <table class="table-clean" style="margin: 0;">
-                    <thead>
-                        <tr>
-                            <th>Campaign Rule</th>
-                            <th class="table-num">Shown</th>
-                            <th class="table-num">Accepted</th>
-                            <th class="table-num">Declined</th>
-                            <th class="table-num">Success %</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (empty($upsellReport['by_rule'])): ?>
-                            <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 16px;">No rule logs recorded for this period.</td></tr>
-                        <?php else: ?>
-                            <?php foreach ($upsellReport['by_rule'] as $br): ?>
-                                <tr>
-                                    <td><strong><?= htmlspecialchars($br['rule_name']) ?></strong></td>
-                                    <td class="table-num"><?= $br['total_offers'] ?></td>
-                                    <td class="table-num" style="color: var(--success); font-weight: 700;"><?= $br['accepted_count'] ?></td>
-                                    <td class="table-num text-muted"><?= $br['declined_count'] ?></td>
-                                    <td class="table-num">
-                                        <span class="badge <?= $br['conversion_rate'] >= 40 ? 'badge-success' : ($br['conversion_rate'] >= 20 ? 'badge-primary' : 'badge-slate') ?>" style="font-size: 11px;">
-                                            <?= $br['conversion_rate'] ?>%
-                                        </span>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <!-- 6. CANCELLED ORDERS & LOST REVENUE REPORT (Owner & Manager Only) -->
-    <?php if ($canViewCancelReport): ?>
-    <div class="card" id="cancellations_report" style="margin-top: 24px;">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-            <div>
-                <h3 style="font-size: 16px; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
-                    <i class="fa-solid fa-ban" style="color: #dc2626;"></i>
-                    <?= htmlspecialchars(__('cancel_report_title', 'Cancelled Orders & Lost Revenue')) ?>
-                </h3>
-                <p class="text-xs text-muted" style="margin-top: 2px;">
-                    Audit log of all voided orders, lost revenue breakdown by reason, and staff authorizations.
-                </p>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                <div style="background: #fef2f2; border: 1px solid #fecaca; padding: 6px 14px; border-radius: var(--radius-sm); font-size: 12px; color: #991b1b;">
-                    <span>Total Cancellations:</span> <strong style="font-size: 14px; font-weight: 800;"><?= $totalCancelledCount ?></strong>
-                </div>
-                <div style="background: #fff7ed; border: 1px solid #fed7aa; padding: 6px 14px; border-radius: var(--radius-sm); font-size: 12px; color: #c2410c;">
-                    <span>Lost Revenue:</span> <strong style="font-size: 14px; font-weight: 800;"><?= formatUSD($totalLostRevenueUsd) ?></strong>
-                    <span class="text-xs" style="color: #ea580c;">(<?= formatKHR($totalLostRevenueKhr) ?>)</span>
-                </div>
-                <?php if (Auth::can('reports.export')): ?>
-                <a href="?view=reports&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&device=<?= urlencode($selectedDevice) ?>&export=cancellations" class="btn btn-secondary btn-sm" title="Download cancellation spreadsheet (CSV)">
-                    <i class="fa-solid fa-file-csv mr-1" style="color: #dc2626;"></i> <?= htmlspecialchars(__('export_cancellations_csv', 'CSV Export')) ?>
-                </a>
-                <?php endif; ?>
-            </div>
-        </div>
-
-        <div style="padding: 16px;">
-            <!-- Breakdown by Reason Table & Visual Distribution -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
-                <!-- Table -->
-                <div style="border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden;">
-                    <div style="padding: 10px 14px; background: var(--bg-subtle); font-weight: 700; font-size: 13px; border-bottom: 1px solid var(--border);">
-                        <i class="fa-solid fa-chart-pie mr-1" style="color: #dc2626;"></i> Breakdown by Reason
-                    </div>
-                    <table class="table-clean" style="margin: 0;">
-                        <thead>
-                            <tr>
-                                <th>Reason Category</th>
-                                <th class="table-num">Count</th>
-                                <th class="table-num">% of Voids</th>
-                                <th class="table-num">Lost Revenue</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if (empty($cancelledByReason)): ?>
-                                <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 16px;">No cancellations recorded in this period.</td></tr>
-                            <?php else: ?>
-                                <?php foreach ($cancelledByReason as $rGrp): 
-                                    $pct = ($totalCancelledCount > 0) ? round(($rGrp['count'] / $totalCancelledCount) * 100, 1) : 0;
-                                ?>
-                                    <tr>
-                                        <td>
-                                            <?php if ($rGrp['key'] === 'other_old'): ?>
-                                                <span class="badge badge-slate" style="font-size: 11px;"><?= htmlspecialchars($rGrp['label']) ?></span>
-                                            <?php elseif ($rGrp['key'] === 'other'): ?>
-                                                <span class="badge badge-amber" style="font-size: 11px;"><?= htmlspecialchars($rGrp['label']) ?></span>
-                                            <?php else: ?>
-                                                <span class="badge badge-danger" style="font-size: 11px;"><?= htmlspecialchars($rGrp['label']) ?></span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td class="table-num" style="font-weight: 700;"><?= $rGrp['count'] ?></td>
-                                        <td class="table-num"><?= $pct ?>%</td>
-                                        <td class="table-num" style="font-weight: 700; color: #dc2626;">
-                                            <?= formatUSD($rGrp['lost_usd']) ?>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- Distribution Bars -->
-                <div style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; background: var(--bg-subtle); display: flex; flex-direction: column; justify-content: center; gap: 12px;">
-                    <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">
-                        <i class="fa-solid fa-chart-bar mr-1" style="color: #ea580c;"></i> Reason Distribution (% of Volume)
-                    </div>
-                    <?php if (empty($cancelledByReason)): ?>
-                        <div class="text-xs text-muted" style="text-align: center; padding: 20px;">No cancellation records for distribution.</div>
-                    <?php else: ?>
-                        <?php foreach ($cancelledByReason as $rGrp): 
-                            $pct = ($totalCancelledCount > 0) ? round(($rGrp['count'] / $totalCancelledCount) * 100, 1) : 0;
-                            $barColor = ($rGrp['key'] === 'other_old') ? '#64748b' : (($rGrp['key'] === 'other') ? '#ea580c' : '#dc2626');
-                        ?>
-                            <div>
-                                <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
-                                    <span style="font-weight: 600;"><?= htmlspecialchars($rGrp['label']) ?></span>
-                                    <span><strong><?= $rGrp['count'] ?></strong> (<?= $pct ?>%)</span>
-                                </div>
-                                <div style="height: 8px; background: var(--border); border-radius: 99px; overflow: hidden;">
-                                    <div style="height: 100%; width: <?= max(2, min(100, $pct)) ?>%; background: <?= $barColor ?>;"></div>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </div>
-            </div>
-
-            <!-- Detailed Cancelled Orders Table -->
-            <div style="overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md);">
-                <table class="table-clean">
-                    <thead>
-                        <tr>
-                            <th style="min-width: 140px;">Order #</th>
-                            <th style="min-width: 130px;">Date &amp; Time</th>
-                            <th style="min-width: 130px;">Vehicle Plate</th>
-                            <th style="min-width: 130px;">Customer</th>
-                            <th style="min-width: 120px;" class="table-num">Lost Revenue</th>
-                            <th style="min-width: 160px;">Reason Category</th>
-                            <th style="min-width: 200px;">Reason Details / Note</th>
-                            <th style="min-width: 160px;">Cancelled By</th>
-                            <th style="min-width: 140px;">POS Device</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (empty($allCancelledOrders)): ?>
-                            <tr>
-                                <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 32px;">
-                                    <i class="fa-solid fa-circle-check" style="color: #16a34a; font-size: 24px; margin-bottom: 8px; display: block;"></i>
-                                    No orders were cancelled during this period.
-                                </td>
-                            </tr>
-                        <?php else: ?>
-                            <?php foreach ($allCancelledOrders as $cord): 
-                                $cTime = $cord['cancelled_at'] ?: $cord['created_at'];
-                                $canceller = $cord['canceller_name'] ? "{$cord['canceller_name']} (@{$cord['canceller_username']})" : 'Staff';
-                                if (!empty($cord['approver_name']) && $cord['approver_name'] !== $cord['canceller_name']) {
-                                    $canceller .= "<div class='text-xs text-muted'>Appr: {$cord['approver_name']}</div>";
-                                }
-                                $deviceText = $cord['device_name'] ? "{$cord['device_name']}" : 'Back Office Web';
-                            ?>
-                                <tr>
-                                    <td>
-                                        <strong style="font-family: var(--font-mono); color: var(--text-main);">#<?= htmlspecialchars($cord['order_number']) ?></strong>
-                                    </td>
-                                    <td class="text-xs text-muted" style="font-family: var(--font-mono);">
-                                        <?= date('d M Y, h:i A', strtotime($cTime)) ?>
-                                    </td>
-                                    <td>
-                                        <span style="font-family: var(--font-mono); font-weight: 700; background: var(--bg-subtle); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border);">
-                                            <?= htmlspecialchars($cord['plate_number'] ?: 'N/A') ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <?= htmlspecialchars($cord['customer_name'] ?: 'Guest Customer') ?>
-                                    </td>
-                                    <td class="table-num">
-                                        <strong style="color: #dc2626;"><?= formatUSD((float)($cord['total_usd'] ?? 0)) ?></strong>
-                                        <div class="text-xs text-muted"><?= formatKHR((int)($cord['total_khr'] ?? 0)) ?></div>
-                                    </td>
-                                    <td>
-                                        <?php if ($cord['report_cat_key'] === 'other_old'): ?>
-                                            <span class="badge badge-slate" style="font-size: 11px;"><?= htmlspecialchars($cord['report_cat_label']) ?></span>
-                                        <?php elseif ($cord['report_cat_key'] === 'other'): ?>
-                                            <span class="badge badge-amber" style="font-size: 11px;"><?= htmlspecialchars($cord['report_cat_label']) ?></span>
-                                        <?php else: ?>
-                                            <span class="badge badge-danger" style="font-size: 11px;"><?= htmlspecialchars($cord['report_cat_label']) ?></span>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td style="font-size: 12.5px; line-height: 1.4;">
-                                        <?= htmlspecialchars($cord['cancel_reason'] ?: '-') ?>
-                                    </td>
-                                    <td style="font-size: 12.5px;">
-                                        <?= $canceller ?>
-                                    </td>
-                                    <td style="font-size: 12px;" class="text-muted">
-                                        <i class="fa-solid fa-tablet-screen-button mr-1"></i> <?= htmlspecialchars($deviceText) ?>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-    <?php endif; ?>
-
-    <!-- 7. CASH MOVEMENTS & DRAWER ACTIVITY BANNER (Owner & Manager Only) -->
-    <?php if (in_array(Auth::getRole(), ['owner', 'manager'], true)): ?>
-    <div class="card" style="margin-top: 24px; background: linear-gradient(to right, var(--bg-card), var(--bg-subtle));">
-        <div style="padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
-            <div style="display: flex; align-items: center; gap: 14px;">
-                <div style="width: 48px; height: 48px; border-radius: var(--radius-md); background: #ffedd5; color: #ea580c; display: flex; align-items: center; justify-content: center; font-size: 22px;">
-                    <i class="fa-solid fa-money-bill-transfer"></i>
-                </div>
-                <div>
-                    <h3 style="margin: 0; font-size: 17px; font-weight: 800; color: var(--text-main);">
-                        <?= htmlspecialchars(__('cash_movements_title', 'Cash Movements & Drawer Activity Report')) ?>
-                    </h3>
-                    <p style="margin: 3px 0 0 0; font-size: 13px; color: var(--text-muted);">
-                        <?= htmlspecialchars(__('cash_movements_desc', 'Audit trail of all cash in, cash out and no-sale drawer openings across shifts and registers.')) ?>
-                    </p>
-                </div>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                <a href="?view=cash_movements&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&device=<?= urlencode($selectedDevice) ?>" class="btn btn-secondary">
-                    <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> View Cash Movements
-                </a>
-                <?php if (Auth::can('reports.export')): ?>
-                <a href="?view=cash_movements&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&device=<?= urlencode($selectedDevice) ?>&export=csv" class="btn btn-primary" style="background: #ea580c; border-color: #ea580c;">
-                    <i class="fa-solid fa-file-csv mr-1"></i> Export (CSV)
-                </a>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-
-    <!-- 8. CASHIER SESSIONS & SHIFT AUDITS BANNER (Owner & Manager Only) -->
-    <div class="card" style="margin-top: 16px; background: linear-gradient(to right, var(--bg-card), var(--bg-subtle));">
-        <div style="padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
-            <div style="display: flex; align-items: center; gap: 14px;">
-                <div style="width: 48px; height: 48px; border-radius: var(--radius-md); background: #dbeafe; color: #2563eb; display: flex; align-items: center; justify-content: center; font-size: 22px;">
-                    <i class="fa-solid fa-user-clock"></i>
-                </div>
-                <div>
-                    <h3 style="margin: 0; font-size: 17px; font-weight: 800; color: var(--text-main);">
-                        <?= htmlspecialchars(__('cashier_sessions_title', 'Cashier Sessions & Shift Audits')) ?>
-                    </h3>
-                    <p style="margin: 3px 0 0 0; font-size: 13px; color: var(--text-muted);">
-                        <?= htmlspecialchars(__('cashier_sessions_desc', 'Audit cashier shifts, opening floats, counted cash, over/short balances, shortages, and review flags.')) ?>
-                    </p>
-                </div>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                <a href="?view=cashier_sessions&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>" class="btn btn-secondary">
-                    <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> View Cashier Sessions
-                </a>
-                <?php if (Auth::can('reports.export')): ?>
-                <a href="?view=cashier_sessions&period=<?= urlencode($period) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>&export=csv" class="btn btn-primary" style="background: #2563eb; border-color: #2563eb;">
-                    <i class="fa-solid fa-file-csv mr-1"></i> Export (CSV)
-                </a>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-    <?php endif; ?>
-
-    <!-- Manager Timecard Correction Modal Dialog -->
-    <div id="correctionModal" style="display: none; position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px); align-items: center; justify-content: center;">
-        <div style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); width: 100%; max-width: 480px; box-shadow: var(--shadow-lg); overflow: hidden; margin: 16px;">
-            <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: var(--bg-subtle);">
-                <div style="font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px;">
-                    <i class="fa-solid fa-pen-to-square text-primary"></i>
-                    <span>Manager Correction: Staff Timecard</span>
-                </div>
-                <button type="button" onclick="closeTimecardCorrectionModal()" style="background: none; border: none; font-size: 18px; cursor: pointer; color: var(--text-muted);">&times;</button>
-            </div>
-            <div style="padding: 20px;">
-                <div style="margin-bottom: 16px; padding: 12px; background: var(--bg-subtle); border-radius: var(--radius-md);">
-                    <div>Staff Member: <strong id="corStaffName">-</strong></div>
-                    <div class="text-xs text-muted" style="margin-top: 2px;">UID: <span id="corTimecardUid" style="font-family: var(--font-mono); font-weight: 700;">-</span></div>
-                </div>
-
-                <form id="corForm" onsubmit="submitTimecardCorrection(event)">
-                    <input type="hidden" id="corTimecardId" name="timecard_id" value="">
-
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
-                        <div>
-                            <label class="form-label" style="font-size: 12px;">Clock In Time</label>
-                            <input type="datetime-local" id="corClockIn" name="clock_in" class="form-control form-control-sm" required>
-                        </div>
-                        <div>
-                            <label class="form-label" style="font-size: 12px;">Clock Out Time</label>
-                            <input type="datetime-local" id="corClockOut" name="clock_out" class="form-control form-control-sm" required>
-                        </div>
-                    </div>
-
-                    <div style="margin-bottom: 16px;">
-                        <label class="form-label" style="font-size: 12px;">Reason for Correction <span class="text-danger">* (Mandatory)</span></label>
-                        <textarea id="corReason" name="reason" class="form-control form-control-sm" rows="3" placeholder="e.g. Staff forgot to clock out before power outage; actual departure verified by supervisor..." required></textarea>
-                        <div class="text-xs text-muted" style="margin-top: 4px;">
-                            This reason is permanently logged in the audit ledger and visible to the Owner.
-                        </div>
-                    </div>
-
-                    <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                        <button type="button" class="btn btn-secondary" onclick="closeTimecardCorrectionModal()">Cancel</button>
-                        <button type="submit" id="corSubmitBtn" class="btn btn-primary" style="font-weight: 700;">
-                            <i class="fa-solid fa-check mr-1"></i> Save Correction
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <script>
-    function openTimecardCorrectionModal(id, uid, staffName, clockIn, clockOut) {
-        document.getElementById('corTimecardId').value = id;
-        document.getElementById('corTimecardUid').textContent = uid;
-        document.getElementById('corStaffName').textContent = staffName;
-        document.getElementById('corClockIn').value = clockIn;
-        document.getElementById('corClockOut').value = clockOut;
-        document.getElementById('corReason').value = '';
-        var m = document.getElementById('correctionModal');
-        if (m) m.style.display = 'flex';
-    }
-
-    function closeTimecardCorrectionModal() {
-        var m = document.getElementById('correctionModal');
-        if (m) m.style.display = 'none';
-    }
-
-    function submitTimecardCorrection(e) {
-        e.preventDefault();
-        var btn = document.getElementById('corSubmitBtn');
-        var reason = document.getElementById('corReason').value.trim();
-        if (!reason) {
-            alert('A reason is required to correct staff timecards.');
-            return;
-        }
-
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Saving...';
-
-        var formData = new FormData(document.getElementById('corForm'));
-        formData.append('csrf_token', '<?= csrf_token() ?>');
-
-        fetch('<?= APP_URL ?>/index.php?action=correct_timecard', {
-            method: 'POST',
-            body: formData
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(res) {
-            btn.disabled = false;
-            if (res.success) {
-                alert('Timecard corrected successfully! Logged to audit ledger.');
-                window.location.reload();
-            } else {
-                alert(res.message || 'Correction failed.');
-            }
-        })
-        .catch(function(err) {
-            btn.disabled = false;
-            alert('Error: ' + err.message);
-        });
-    }
-    </script>
+    <?php require __DIR__ . '/reports/financial-summary.php'; ?>
+    <?php require __DIR__ . '/reports/service-revenue.php'; ?>
+    <?php require __DIR__ . '/reports/product-sales.php'; ?>
+    <?php require __DIR__ . '/reports/cashier-shift-audit.php'; ?>
 </div>
 
 <script>
+function handleReportPeriodChange(select) {
+    const customRange = document.getElementById('customReportRange');
+    const applyButton = select.form.querySelector('button[type="submit"]');
+    if (select.value === 'custom') {
+        customRange.style.display = 'inline-flex';
+        if (applyButton) applyButton.style.display = 'none';
+        return;
+    }
+    customRange.style.display = 'none';
+    select.form.submit();
+}
+
 function toggleReportsActions(e) {
     if (e) e.stopPropagation();
     const dropdown = document.getElementById('reportsActionsDropdown');

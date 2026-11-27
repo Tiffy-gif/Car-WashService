@@ -279,6 +279,93 @@ class PerformanceAnalytics {
     }
 
     /**
+     * Staff efficiency from completed assigned work tasks in a selected date range.
+     * Uses task records so technicians and washers are both represented.
+     */
+    public static function getStaffEfficiencyForPeriod(PDO $pdo, string $startDate, string $endDate): array {
+        $sql = "
+            SELECT u.id AS staff_id, u.full_name AS staff_name, u.username,
+                   u.role AS staff_role, ot.id AS task_id, ot.task_type,
+                   ot.started_at, ot.completed_at, ot.base_duration_minutes,
+                   ot.estimated_duration_minutes, ot.actual_duration_minutes
+            FROM order_tasks ot
+            JOIN users u ON u.id = ot.assigned_user_id
+            WHERE ot.status = 'completed'
+              AND ot.completed_at IS NOT NULL
+              AND u.role IN ('washer', 'mechanic', 'technical')
+              AND DATE(ot.completed_at) >= ? AND DATE(ot.completed_at) <= ?
+              AND ot.task_type <> 'qc'
+            ORDER BY u.id, ot.completed_at
+        ";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$startDate, $endDate]);
+
+        $staff = [];
+        $totalStandard = 0.0;
+        $totalActual = 0.0;
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $task) {
+            $id = (int)$task['staff_id'];
+            if (!isset($staff[$id])) {
+                $staff[$id] = [
+                    'staff_id' => $id,
+                    'staff_name' => $task['staff_name'],
+                    'username' => $task['username'],
+                    'staff_role' => $task['staff_role'],
+                    'completed_jobs' => 0,
+                    'standard_minutes' => 0.0,
+                    'actual_minutes' => 0.0,
+                ];
+            }
+
+            $standard = (int)($task['estimated_duration_minutes'] ?? 0);
+            if ($standard <= 0) $standard = (int)($task['base_duration_minutes'] ?? 0);
+            if ($standard <= 0) {
+                $standard = match ((string)$task['task_type']) {
+                    'oil_change' => 20,
+                    'detailing' => 45,
+                    default => 15,
+                };
+            }
+
+            $actual = (int)($task['actual_duration_minutes'] ?? 0);
+            if ($actual <= 0 && !empty($task['started_at'])) {
+                $started = strtotime($task['started_at']);
+                $completed = strtotime($task['completed_at']);
+                if ($started !== false && $completed !== false && $completed > $started) {
+                    $actual = (int)round(($completed - $started) / 60);
+                }
+            }
+            if ($actual <= 0) $actual = $standard;
+
+            $staff[$id]['completed_jobs']++;
+            $staff[$id]['standard_minutes'] += $standard;
+            $staff[$id]['actual_minutes'] += $actual;
+            $totalStandard += $standard;
+            $totalActual += $actual;
+        }
+
+        foreach ($staff as &$row) {
+            $std = (float)$row['standard_minutes'];
+            $act = (float)$row['actual_minutes'];
+            $row['standard_minutes'] = round($std, 1);
+            $row['actual_minutes'] = round($act, 1);
+            $row['efficiency_percent'] = $act > 0 ? round(($std / $act) * 100, 1) : 100.0;
+            $row['factor'] = $std > 0 ? round($act / $std, 2) : 1.0;
+        }
+        unset($row);
+
+        usort($staff, static fn(array $a, array $b): int => $b['completed_jobs'] <=> $a['completed_jobs']);
+        return [
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'overall_efficiency_percent' => $totalActual > 0 ? round(($totalStandard / $totalActual) * 100, 1) : 100.0,
+            'total_standard_hours' => round($totalStandard / 60.0, 1),
+            'total_actual_hours' => round($totalActual / 60.0, 1),
+            'staff' => array_values($staff),
+        ];
+    }
+
+    /**
      * Report 3: Bottleneck and Idle Time Patterns
      * Analyzes patterns by hour of day (08:00 - 18:00) and day of week (Mon - Sun).
      * Example insight: "Bay 3 is idle 40 percent on Tuesday mornings"

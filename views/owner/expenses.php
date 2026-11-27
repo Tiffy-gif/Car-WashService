@@ -47,7 +47,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         } else {
             $existingExp = null;
             if ($expId) {
-                $chk = $pdo->prepare("SELECT id, category, category_id, description, amount_usd, expense_date, recorded_by FROM expenses WHERE id = ?");
+                $chk = $pdo->prepare("SELECT id, category, category_id, description, amount_usd, expense_date, recorded_by FROM expenses WHERE id = ? AND (is_active IS NULL OR is_active = 1)");
                 $chk->execute([$expId]);
                 $existingExp = $chk->fetch(PDO::FETCH_ASSOC);
                 if (!$existingExp) {
@@ -76,7 +76,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                 // Resolve category_id and category slug
                 $categoryError = false;
                 if ($categoryId) {
-                    $catLookup = $pdo->prepare("SELECT id, code, name_en FROM categories WHERE id = ? AND type = 'expense'");
+                    $catLookup = $pdo->prepare("SELECT id, code, name_en FROM categories WHERE id = ? AND type = 'expense' AND is_active = 1");
                     $catLookup->execute([$categoryId]);
                     if ($cRow = $catLookup->fetch()) {
                         $category = $cRow['code'];
@@ -86,7 +86,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                         $categoryError = true;
                     }
                 } elseif ($category !== '') {
-                    $catLookup = $pdo->prepare("SELECT id, code, name_en FROM categories WHERE type = 'expense' AND (code = ? OR name_en = ?)");
+                    $catLookup = $pdo->prepare("SELECT id, code, name_en FROM categories WHERE type = 'expense' AND is_active = 1 AND (code = ? OR name_en = ?)");
                     $catLookup->execute([$category, $category]);
                     if ($cRow = $catLookup->fetch()) {
                         $categoryId = (int)$cRow['id'];
@@ -99,12 +99,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
                 }
 
                 if (!$categoryError && !$categoryId && empty($category)) {
-                    $catLookup = $pdo->query("SELECT id, code FROM categories WHERE type = 'expense' ORDER BY sort_order ASC LIMIT 1");
+                    $catLookup = $pdo->query("SELECT id, code FROM categories WHERE type = 'expense' AND is_active = 1 ORDER BY sort_order ASC LIMIT 1");
                     if ($cRow = $catLookup->fetch()) {
                         $categoryId = (int)$cRow['id'];
                         $category = $cRow['code'];
                     } else {
-                        $category = 'Water';
+                        $message = 'No active expense category is available. Add or activate an expense category before recording an expense.';
+                        $messageType = 'danger';
+                        $categoryError = true;
                     }
                 }
 
@@ -137,7 +139,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !isset($csrfError)) {
         } else {
             $expId = (int)($_POST['expense_id'] ?? 0);
             if ($expId > 0) {
-                $chk = $pdo->prepare("SELECT id, amount_usd, expense_date, recorded_by FROM expenses WHERE id = ?");
+                $chk = $pdo->prepare("SELECT id, amount_usd, expense_date, recorded_by FROM expenses WHERE id = ? AND (is_active IS NULL OR is_active = 1)");
                 $chk->execute([$expId]);
                 $existingExp = $chk->fetch(PDO::FETCH_ASSOC);
                 if (!$existingExp) {
@@ -172,28 +174,33 @@ if (!$canViewProfit) {
         SELECT e.*, u.full_name as recorder_name 
         FROM expenses e 
         LEFT JOIN users u ON e.recorded_by = u.id 
-        WHERE e.expense_date = CURDATE()
+        WHERE e.expense_date = ?
           AND e.recorded_by = ?
           AND (e.is_active IS NULL OR e.is_active = 1)
         ORDER BY e.id DESC
     ");
-    $expStmt->execute([$currentUserId]);
+    $expStmt->execute([$todayStr, $currentUserId]);
     $expenses = $expStmt->fetchAll();
     $totalMonthUsd = 0.00;
     $todayUsd = 0.00;
     $catBreakdown = [];
 } else {
     // Filter month/year for owners / profit viewers
-    $selectedMonth = $_GET['month'] ?? date('Y-m');
+    $selectedMonth = (string)($_GET['month'] ?? date('Y-m'));
+    if (!preg_match('/^\\d{4}-(0[1-9]|1[0-2])$/', $selectedMonth)) {
+        $selectedMonth = date('Y-m');
+    }
+    $monthStart = $selectedMonth . '-01';
+    $monthEnd = date('Y-m-d', strtotime($monthStart . ' +1 month'));
     $expStmt = $pdo->prepare("
         SELECT e.*, u.full_name as recorder_name 
         FROM expenses e 
         LEFT JOIN users u ON e.recorded_by = u.id 
-        WHERE DATE_FORMAT(e.expense_date, '%Y-%m') = ?
+        WHERE e.expense_date >= ? AND e.expense_date < ?
           AND (e.is_active IS NULL OR e.is_active = 1)
         ORDER BY e.expense_date DESC, e.id DESC
     ");
-    $expStmt->execute([$selectedMonth]);
+    $expStmt->execute([$monthStart, $monthEnd]);
     $expenses = $expStmt->fetchAll();
 
     // Month summary stats
@@ -206,7 +213,8 @@ if (!$canViewProfit) {
     }
 
     // Today expenses
-    $todayStmt = $pdo->query("SELECT COALESCE(SUM(amount_usd), 0) FROM expenses WHERE expense_date = CURDATE() AND (is_active IS NULL OR is_active = 1)");
+    $todayStmt = $pdo->prepare("SELECT COALESCE(SUM(amount_usd), 0) FROM expenses WHERE expense_date = ? AND (is_active IS NULL OR is_active = 1)");
+    $todayStmt->execute([$todayStr]);
     $todayUsd = (float)$todayStmt->fetchColumn();
 }
 

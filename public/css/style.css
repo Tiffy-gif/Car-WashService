@@ -89,9 +89,9 @@
   --bg-subtle: #f1f5f9;
   --bg-card: #ffffff;
   
-  --primary: #0284c7;        /* Clean Sky/Azure Blue */
-  --primary-hover: #0369a1;
-  --primary-light: #e0f2fe;
+  --primary: #ff762d;        /* POS warm orange accent */
+  --primary-hover: #ea580c;
+  --primary-light: #fff7ed;
   
   --text-main: #0f172a;      /* Deep Slate */
   --text-muted: #64748b;     /* Slate Muted */
@@ -99,7 +99,7 @@
   --text-inverse: #ffffff;
 
   --border: #e2e8f0;
-  --border-focus: #38bdf8;
+  --border-focus: #fdba74;
   
   --success: #16a34a;
   --success-bg: #dcfce7;
@@ -133,9 +133,9 @@
   --bg-subtle: #1e293b;
   --bg-card: #131d31;
 
-  --primary: #38bdf8;
-  --primary-hover: #0ea5e9;
-  --primary-light: rgba(56, 189, 248, 0.15);
+  --primary: #fb923c;
+  --primary-hover: #ff762d;
+  --primary-light: rgba(255, 118, 45, 0.15);
 
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
@@ -143,7 +143,7 @@
   --text-inverse: #0b1120;
 
   --border: #243048;
-  --border-focus: #38bdf8;
+  --border-focus: #fb923c;
 
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
@@ -628,7 +628,7 @@ html.sidebar-collapsed .sidebar .user-avatar-wrap > div:last-child {
 .brand-icon {
   width: 44px;
   height: 44px;
-  background: linear-gradient(135deg, #0284c7, #38bdf8);
+  background: linear-gradient(135deg, #ff762d, #fb923c);
   color: #fff;
   border-radius: var(--radius-md);
   display: flex;
